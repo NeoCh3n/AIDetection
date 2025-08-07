@@ -1,0 +1,346 @@
+id,name,type,enabled,origin
+100002,BB:DeviceDefinition: Devices to Monitor for High Event Rates,EVENT,True,SYSTEM
+100004,BB:CategoryDefinition: Successful Database Connections,EVENT,True,SYSTEM
+100005,BB:CategoryDefinition: Authentication Success,EVENT,True,SYSTEM
+100007,BB:HostDefinition: Servers,COMMON,True,SYSTEM
+100008,BB:HostDefinition: Database Servers,COMMON,True,SYSTEM
+100009,BB:PortDefinition: Database Ports,COMMON,True,SYSTEM
+100010,BB:HostDefinition: DHCP Servers,COMMON,True,SYSTEM
+100011,BB:PortDefinition: DHCP Ports,COMMON,True,SYSTEM
+100012,BB:HostDefinition: DNS Servers,COMMON,True,SYSTEM
+100013,BB:PortDefinition: DNS Ports,COMMON,True,SYSTEM
+100014,BB:HostDefinition: FTP Servers,COMMON,True,SYSTEM
+100015,BB:PortDefinition: FTP Ports,COMMON,True,SYSTEM
+100016,BB:HostDefinition: LDAP Servers,COMMON,True,SYSTEM
+100017,BB:PortDefinition: LDAP Ports,COMMON,True,SYSTEM
+100018,BB:HostDefinition: Mail Servers,COMMON,True,SYSTEM
+100019,BB:PortDefinition: Mail Ports,COMMON,True,SYSTEM
+100020,BB:HostDefinition: Network Management Servers,COMMON,True,SYSTEM
+100021,BB:HostDefinition: Proxy Servers,COMMON,True,SYSTEM
+100022,BB:HostDefinition: RPC Servers,COMMON,True,SYSTEM
+100023,BB:PortDefinition: RPC Ports,COMMON,True,SYSTEM
+100024,BB:HostDefinition: SNMP Sender or Receiver,COMMON,True,SYSTEM
+100025,BB:PortDefinition: SNMP Ports,COMMON,True,SYSTEM
+100026,BB:HostDefinition: SSH Servers,COMMON,True,SYSTEM
+100027,BB:PortDefinition: SSH Ports,COMMON,True,SYSTEM
+100028,BB:HostDefinition: Virus Definition and Other Update Servers,COMMON,True,SYSTEM
+100029,BB:HostDefinition: Web Servers,COMMON,True,SYSTEM
+100030,BB:PortDefinition: Web Ports,COMMON,True,SYSTEM
+100031,BB:HostDefinition: Windows Servers,COMMON,True,SYSTEM
+100032,BB:PortDefinition: Windows Ports,COMMON,True,SYSTEM
+100033,BB:ProtocolDefinition: Windows Protocols,COMMON,True,SYSTEM
+100034,BB:HostReference: Database Servers,COMMON,True,SYSTEM
+100035,BB:HostReference: DHCP Servers,COMMON,True,SYSTEM
+100036,BB:HostReference: DNS Servers,COMMON,True,SYSTEM
+100037,BB:HostReference: FTP Servers,COMMON,True,SYSTEM
+100038,BB:HostReference: LDAP Servers,COMMON,True,SYSTEM
+100039,BB:HostReference: Mail Servers,COMMON,True,SYSTEM
+100040,BB:HostReference: Proxy Servers,COMMON,True,SYSTEM
+100041,BB:HostReference: SSH Servers,COMMON,True,SYSTEM
+100042,BB:HostReference: Web Servers,COMMON,True,SYSTEM
+100043,BB:HostReference: Windows Servers,COMMON,True,SYSTEM
+100058,BB:CategoryDefinition: Authentication to Disabled Account,EVENT,True,SYSTEM
+100060,BB:CategoryDefinition: Authentication to Expired Account,EVENT,True,SYSTEM
+100063,BB:CategoryDefinition: Authentication Failures,EVENT,True,SYSTEM
+100073,BB:CategoryDefinition: DDoS Attack Events,EVENT,True,SYSTEM
+100075,BB:CategoryDefinition: High Magnitude Events,EVENT,True,SYSTEM
+100080,BB:CategoryDefinition: Network DoS Attack,EVENT,True,SYSTEM
+100083,BB:HostDefinition: Host with Port Open,COMMON,True,SYSTEM
+100087,BB:Database: System Action Deny,EVENT,True,SYSTEM
+100088,BB:Database: User Addition or Change,EVENT,True,SYSTEM
+100091,BB:Database: System Action Allow,EVENT,True,SYSTEM
+100097,BB:BehaviorDefinition: Compromise Activities,EVENT,True,SYSTEM
+100098,BB:BehaviorDefinition: Post Compromise Activities,EVENT,True,SYSTEM
+100099,BB:CategoryDefinition: Authentication User or Group Added or Changed,EVENT,True,SYSTEM
+100101,BB:NetworkDefinition: Honeypot like Addresses,COMMON,True,SYSTEM
+100103,BB:CategoryDefinition: Firewall or ACL Accept,EVENT,True,SYSTEM
+100104,BB:CategoryDefinition: Firewall or ACL Denies,EVENT,True,SYSTEM
+100105,BB:CategoryDefinition: Any Flow,FLOW,True,SYSTEM
+100107,BB:ReconDetected: Basic Recon Rules,COMMON,True,SYSTEM
+100118,BB:CategoryDefinition: Exploits Backdoors and Trojans,EVENT,True,SYSTEM
+100119,BB:CategoryDefinition: Post Exploit Account Activity,EVENT,True,SYSTEM
+100126,BB:FalsePositive: All Default False Positive BBs,COMMON,True,SYSTEM
+100127,BB:FalsePositive: Database Server False Positive Categories,COMMON,True,SYSTEM
+100128,BB:FalsePositive: Database Server False Positive Events,EVENT,True,SYSTEM
+100129,BB:FalsePositive: Device and Specific Event,EVENT,True,SYSTEM
+100130,BB:FalsePositive: DHCP Server False Positive Categories,COMMON,True,SYSTEM
+100131,BB:CategoryDefinition: Recon Events,COMMON,True,SYSTEM
+100132,BB:CategoryDefinition: Recon Event Categories,EVENT,True,SYSTEM
+100133,BB:CategoryDefinition: Recon Flows,FLOW,True,SYSTEM
+100134,BB:Threats: Scanning: Empty Responsive Flows High,FLOW,True,SYSTEM
+100135,BB:Threats: Scanning: Empty Responsive Flows Low,FLOW,True,SYSTEM
+100136,BB:Threats: Scanning: Empty Responsive Flows Medium,FLOW,True,SYSTEM
+100137,BB:Threats: Scanning: ICMP Scan High,FLOW,True,SYSTEM
+100138,BB:Threats: Scanning: ICMP Scan Low,FLOW,True,SYSTEM
+100139,BB:Threats: Scanning: ICMP Scan Medium,FLOW,True,SYSTEM
+100140,BB:Threats: Scanning: Potential Scan,FLOW,True,SYSTEM
+100141,BB:Threats: Scanning: Scan High,FLOW,True,SYSTEM
+100142,BB:Threats: Scanning: Scan Low,FLOW,True,SYSTEM
+100143,BB:Threats: Scanning: Scan Medium,FLOW,True,SYSTEM
+100144,BB:Threats: Port Scans: Host Scans,FLOW,True,SYSTEM
+100145,BB:Threats: Port Scans: UDP Port Scan,FLOW,True,SYSTEM
+100146,BB:CategoryDefinition: Suspicious Events,COMMON,True,SYSTEM
+100147,BB:CategoryDefinition: Suspicious Flows,FLOW,True,SYSTEM
+100148,BB:Flowshape: Inbound Only,FLOW,True,SYSTEM
+100149,BB:Flowshape: Outbound Only,FLOW,True,SYSTEM
+100150,BB:Threats: Suspicious IP Protocol Usage: Illegal TCP Flag Combination,FLOW,True,SYSTEM
+100151,BB:Threats: Suspicious IP Protocol Usage: Large ICMP Packets,FLOW,True,SYSTEM
+100152,BB:Threats: Suspicious IP Protocol Usage: Suspicious ICMP Type Code,FLOW,True,SYSTEM
+100153,BB:Threats: Suspicious IP Protocol Usage: TCP or UDP Port 0,FLOW,True,SYSTEM
+100154,BB:Threats: Suspicious IP Protocol Usage: Zero Payload Bidirectional Flows,FLOW,True,SYSTEM
+100155,BB:Threats: Suspicious IP Protocol Usage:Unidirectional TCP Flows,FLOW,True,SYSTEM
+100156,BB:CategoryDefinition: Unidirectional Flow,FLOW,True,SYSTEM
+100157,BB:CategoryDefinition: Unidirectional Flow DST,FLOW,True,SYSTEM
+100158,BB:CategoryDefinition: Unidirectional Flow SRC,FLOW,True,SYSTEM
+100159,BB:Threats: Suspicious IP Protocol Usage: Large DNS Packets,FLOW,True,SYSTEM
+100160,BB:Threats: Suspicious IP Protocol Usage: Long Duration Outbound Flow,FLOW,True,SYSTEM
+100161,BB:Threats: Suspicious IP Protocol Usage: Unidirectional ICMP Flows,FLOW,True,SYSTEM
+100162,BB:Threats: Suspicious IP Protocol Usage: Unidirectional ICMP Replys,FLOW,True,SYSTEM
+100163,BB:Threats: Suspicious IP Protocol Usage:Unidirectional UDP and Misc Flows,FLOW,True,SYSTEM
+100164,BB:CategoryDefinition: Suspicious Event Categories,EVENT,True,SYSTEM
+100165,BB:FalsePositive: DHCP Server False Positive Events,EVENT,True,SYSTEM
+100166,BB:FalsePositive: DNS Server False Positive Categories,EVENT,True,SYSTEM
+100167,BB:FalsePositive: DNS Server False Positive Events,EVENT,True,SYSTEM
+100168,BB:FalsePositive: FTP Server False Positive Categories,COMMON,True,SYSTEM
+100169,BB:FalsePositive: FTP Server False Positive Events,EVENT,True,SYSTEM
+100170,BB:FalsePositive: Global False Positive Events,EVENT,True,SYSTEM
+100171,BB:FalsePositive: Local Source to Local Destination False Positives,EVENT,True,SYSTEM
+100172,BB:FalsePositive: Local Source to Remote Destination False Positives,EVENT,True,SYSTEM
+100173,BB:FalsePositive: LDAP Server False Positive Categories,COMMON,True,SYSTEM
+100174,BB:FalsePositive: LDAP Server False Positive Events,EVENT,True,SYSTEM
+100175,BB:FalsePositive: Mail Server False Positive Categories,COMMON,True,SYSTEM
+100176,BB:FalsePositive: Mail Server False Positive Events,EVENT,True,SYSTEM
+100177,BB:FalsePositive: Network Management Server Recon,EVENT,True,SYSTEM
+100178,BB:FalsePositive: Proxy Server False Positive Categories,COMMON,True,SYSTEM
+100179,BB:FalsePositive: Proxy Server False Positive Events,EVENT,True,SYSTEM
+100180,BB:FalsePositive: Remote Source to Local Destination False Positives,EVENT,True,SYSTEM
+100181,BB:FalsePositive: RPC Server False Positive Categories,COMMON,True,SYSTEM
+100182,BB:FalsePositive: RPC Server False Positive Events,EVENT,True,SYSTEM
+100183,BB:FalsePositive: SNMP Sender or Receiver False Positive Categories,EVENT,True,SYSTEM
+100184,BB:FalsePositive: SNMP Sender or Receiver False Positive Events,EVENT,True,SYSTEM
+100185,BB:FalsePositive: Source IP and Specific Event,EVENT,True,SYSTEM
+100186,BB:FalsePositive: SSH Server False Positive Categories,COMMON,True,SYSTEM
+100187,BB:FalsePositive: SSH Server False Positive Events,EVENT,True,SYSTEM
+100188,BB:FalsePositive: Web Server False Positive Categories,COMMON,True,SYSTEM
+100189,BB:FalsePositive: Web Server False Positive Events,EVENT,True,SYSTEM
+100190,BB:FalsePositive: Windows Server False Positive Categories Local,COMMON,True,SYSTEM
+100191,BB:FalsePositive: Windows Server False Positive Events,EVENT,True,SYSTEM
+100192,User-BB-FalsePositive: User Defined False Positives Tunings,COMMON,True,SYSTEM
+100193,BB:FalsePositive: Virus Definition Update Categories,EVENT,True,SYSTEM
+100194,BB:FalsePositive: Syslog Sender False Positive Categories,COMMON,True,SYSTEM
+100195,BB:HostDefinition: Syslog Servers and Senders,COMMON,True,SYSTEM
+100196,BB:PortDefinition: Syslog Ports,COMMON,True,SYSTEM
+100197,BB:FalsePositive: Syslog Sender False Positive Events,EVENT,True,SYSTEM
+100198,User:BB:FalsePositives: User Defined Server Type 1 False Positive Categories,EVENT,True,SYSTEM
+100199,User:BB:HostDefinition: Server Type 1 - User Defined,EVENT,True,SYSTEM
+100200,User:BB:FalsePositives: User Defined Server Type 1 False Positive Events,EVENT,True,SYSTEM
+100201,User:BB:FalsePositives: User Defined Server Type 2 False Positive Categories,EVENT,True,SYSTEM
+100202,User:BB:HostDefinition: Server Type 2 - User Defined,EVENT,True,SYSTEM
+100203,User:BB:FalsePositives: User Defined Server Type 2 False Positive Events,EVENT,True,SYSTEM
+100204,User:BB:FalsePositives: User Defined Server Type 3 False Positive Categories,EVENT,True,SYSTEM
+100205,User:BB:HostDefinition: Server Type 3 - User Defined,EVENT,True,SYSTEM
+100206,User:BB:FalsePositives: User Defined Server Type 3 False Positive Events,EVENT,True,SYSTEM
+100207,BB:FalsePositive: Broadcast Address False Positive Categories,COMMON,True,SYSTEM
+100208,BB:NetworkDefinition: Broadcast Address Space,COMMON,True,SYSTEM
+100209,BB:FalsePositive: Firewall Deny False Postive Events,EVENT,True,SYSTEM
+100210,BB:FalsePositive: Large Volume Local FW Events,EVENT,True,SYSTEM
+100211,BB:FalsePositive: Windows AD Source Authentication Events,EVENT,True,SYSTEM
+100212,BB:FalsePositive: Reversed Flows,FLOW,True,SYSTEM
+100213,BB:HostDefinition: VA Scanner Source IP,COMMON,True,SYSTEM
+100214,BB:NetworkDefinition: NAT Address Range,COMMON,True,SYSTEM
+100231,BB:CategoryDefinition: Key Loggers,EVENT,True,SYSTEM
+100237,BB:Policy Violation: Compliance Policy Violation: Clear Text Application Usage,FLOW,True,SYSTEM
+100238,BB:CategoryDefinition: Successful Communication,FLOW,True,SYSTEM
+100242,BB:CategoryDefinition: IRC Detected Based on Application,FLOW,True,SYSTEM
+100243,BB:CategoryDefinition: IRC Detected Based on Event Category,EVENT,True,SYSTEM
+100244,BB:CategoryDefinition: IRC Detection Based on Firewall Events,EVENT,True,SYSTEM
+100245,BB:PortDefinition: IRC Ports,COMMON,True,SYSTEM
+100257,BB:DeviceDefinition: FW / Router / Switch,EVENT,True,SYSTEM
+100258,BB:DeviceDefinition: IDS / IPS,EVENT,True,SYSTEM
+100259,BB:DeviceDefinition: VPN,EVENT,True,SYSTEM
+100263,BB:DeviceDefinition: Proxy,EVENT,True,SYSTEM
+100264,BB:DeviceDefinition: Cloud,EVENT,True,SYSTEM
+100265,BB:DeviceDefinition: Operating System,EVENT,True,SYSTEM
+100266,BB:DeviceDefinition: DLP Devices,EVENT,True,SYSTEM
+100267,BB:DeviceDefinition: Mail,EVENT,True,SYSTEM
+100273,BB:CategoryDefinition: Logout Events,EVENT,True,SYSTEM
+100274,BB:CategoryDefinition: SIEM User and Role Modifications,EVENT,True,SYSTEM
+100276,BB:CategoryDefinition: System Configuration,EVENT,True,SYSTEM
+100277,BB:NetworkDefinition: Darknet Addresses,COMMON,True,SYSTEM
+100278,BB:NetworkDefinition: DMZ Addresses,COMMON,True,SYSTEM
+100279,BB:NetworkDefinition: Server Networks,COMMON,True,SYSTEM
+100280,BB:CategoryDefinition: System Errors and Failures,EVENT,True,SYSTEM
+100281,BB:DeviceDefinition: Database,EVENT,True,SYSTEM
+100282,BB:CategoryDefinition: Application or Service Installed or Modified,EVENT,True,SYSTEM
+100283,BB:CategoryDefinition: Post DMZ Jump,COMMON,True,SYSTEM
+100284,BB:CategoryDefinition: Pre DMZ Jump,COMMON,True,SYSTEM
+100285,BB:CategoryDefinition: Pre Reverse DMZ Jump,COMMON,True,SYSTEM
+100286,BB:CategoryDefinition: Reverse DMZ Jump,COMMON,True,SYSTEM
+100287,BB:CategoryDefinition: Service DoS,EVENT,True,SYSTEM
+100288,BB:HostDefinition: Consultant Assets,COMMON,True,SYSTEM
+100289,BB:HostDefinition: DMZ Assets,COMMON,True,SYSTEM
+100290,BB:HostDefinition: Local Assets,COMMON,True,SYSTEM
+100291,BB:HostDefinition: MailServer Assets,COMMON,True,SYSTEM
+100292,BB:HostDefinition: Protected Assets,COMMON,True,SYSTEM
+100293,BB:HostDefinition: Regulatory Assets,COMMON,True,SYSTEM
+100294,BB:HostDefinition: Remote Assets,COMMON,True,SYSTEM
+100295,BB:HostDefinition: VoIP PBX Server,COMMON,True,SYSTEM
+100296,BB:HostDefinition: VPN Assets,COMMON,True,SYSTEM
+100297,BB:PortDefinition: Authorized L2R Ports,COMMON,True,SYSTEM
+100298,BB:PortDefinition: Common Worm Ports,COMMON,True,SYSTEM
+100299,BB:PortDefinition: Game Server Ports,COMMON,True,SYSTEM
+100300,BB:PortDefinition: IM Ports,COMMON,True,SYSTEM
+100301,BB:PortDefinition: P2P Ports,COMMON,True,SYSTEM
+100302,BB:PortDefinition: Proxy Ports,COMMON,True,SYSTEM
+100303,BB:CategoryDefinition: Privileged Escalations,EVENT,True,SYSTEM
+100304,BB:CategoryDefinition: Privileged Escalation Failed,EVENT,True,SYSTEM
+100305,BB:CategoryDefinition: Mail Policy Violation,EVENT,True,SYSTEM
+100325,BB:CategoryDefinition: Malicious Attacks,EVENT,True,SYSTEM
+100326,BB:CategoryDefinition: Windows Compliance Events,EVENT,True,SYSTEM
+100327,BB:CategoryDefinition: Auditing Changed,EVENT,True,SYSTEM
+100328,BB:DeviceDefinition: AV/AM,EVENT,True,SYSTEM
+100332,BB:ComplianceDefinition: HIPAA Servers,COMMON,True,SYSTEM
+100333,BB:ComplianceDefinition: PCI DSS Servers,COMMON,True,SYSTEM
+100334,BB:ComplianceDefinition: GLBA Servers,COMMON,True,SYSTEM
+100335,BB:ComplianceDefinition: SOX Servers,COMMON,True,SYSTEM
+100337,BB:CategoryDefinition: Medium Magnitude Events,EVENT,True,SYSTEM
+100339,BB:DeviceDefinition: Consumer Grade Routers,EVENT,True,SYSTEM
+100340,BB:Suspicious: Remote: Unidirectional UDP or Misc Flows,FLOW,True,SYSTEM
+100341,BB:Suspicious: Local: Unidirectional UDP or Misc Flows,FLOW,True,SYSTEM
+100342,BB:Mobile Worker Policy Violation Events,EVENT,True,SYSTEM
+100343,BB:External Contractor Failed Events,EVENT,True,SYSTEM
+100344,BB:Teleworker Failed Events,EVENT,True,SYSTEM
+100345,BB:External Contractor Policy Violation Events,EVENT,True,SYSTEM
+100346,BB:Failed Events,EVENT,True,SYSTEM
+100347,BB:Mobile Worker Failed Events,EVENT,True,SYSTEM
+100348,BB:Teleworker Policy Violation Events,EVENT,True,SYSTEM
+100349,BB:IT Admin Events,EVENT,True,SYSTEM
+100350,BB:NetworkDefinition: Trusted Destination Network Segment,COMMON,True,SYSTEM
+100351,BB:NetworkDefinition: Trusted Source Network Segment,COMMON,True,SYSTEM
+100352,BB:CategoryDefinition: Superuser Accounts,EVENT,True,SYSTEM
+100356,BB:BehaviorDefinition: Service Binary Path Set or Update,EVENT,True,SYSTEM
+100366,BB:CategoryDefinition: Processes Allowed to Access lsass,EVENT,True,SYSTEM
+100369,BB:BehaviorDefinition: Remote Thread Creation False-Positives,EVENT,True,SYSTEM
+100386,BB:BehaviorDefinition: Critical Security Tool Process Information,EVENT,True,SYSTEM
+100393,BB:Host Definition: Exe File type Created,EVENT,True,USER
+100395,BB:Host Definition: Sysmon detected Network Connection,EVENT,True,USER
+100398,BB: Host Definition: potential Mimikatz DLL Loaded-1,EVENT,True,USER
+100399,BB: Host Definition: potential Mimikatz DLL Loaded-2,EVENT,True,USER
+100400,BB: Host Definition: potential Mimikatz DLL Loaded-3,EVENT,True,USER
+100411,BB: Detected a downloaded Powershell Script,EVENT,True,SYSTEM
+100412,BB: Detected a downloaded Powershell Script with EncodedCommand,EVENT,True,SYSTEM
+100418,BB:CategoryDefinition: Network Connection,EVENT,True,SYSTEM
+100420,BB: CreateRemoteThread Detected,EVENT,True,SYSTEM
+100425,BB:CategoryDefinition: Pipe Creation,EVENT,True,SYSTEM
+100429,BB: An Administrative share Has Been Accessed,EVENT,True,SYSTEM
+100433,BB:BehaviorDefinition: PsExec Process Observed,EVENT,True,SYSTEM
+100448,BB:CategoryDefinition: Programming Environment,EVENT,True,SYSTEM
+100453,BB: Detected a Scheduled Task based on Process Creation Event Part 1,EVENT,True,SYSTEM
+100454,BB:CategoryDefinition: Scheduled Task Creation by a Process,EVENT,True,SYSTEM
+100455,BB:CategoryDefinition: Scheduled Task Creation,EVENT,True,SYSTEM
+100465,BB:CategoryDefinition: Worm Events,EVENT,True,SYSTEM
+100471,BB:CategoryDefinition: Firewall or ACL Accept Event for a FW/Router/Switch Device,EVENT,True,SYSTEM
+100481,BB:Threats: DoS: Potential Multihost Attack,FLOW,True,SYSTEM
+100486,BB:Policy Violation: IRC IM Policy Violation: IM Communications,FLOW,True,SYSTEM
+100488,BB:Policy Violation: IRC IM Policy Violation: IRC Connection to Internet,FLOW,True,SYSTEM
+100494,BB:Policy Violation: Mail Policy Violation: Outbound Mail Sender,FLOW,True,SYSTEM
+100497,BB:Policy Violation: Application Policy Violation: NNTP to Internet,FLOW,True,SYSTEM
+100523,BB: potential netlogon 135 flow,FLOW,True,USER
+100524,BB: Potential Netlogon High Port Traffic,FLOW,True,USER
+100529,BB:BehaviorDefinition: Repeated Nslookup Usage,EVENT,True,SYSTEM
+100533,BB:BehaviorDefinition: PowerShell File Upload Activity,EVENT,True,SYSTEM
+100536,BB:BehaviorDefinition: Cobalt Strike Process Address,EVENT,True,SYSTEM
+100537,BB:BehaviorDefinition: Cobalt Strike Port Usage,FLOW,True,SYSTEM
+100538,BB:BehaviorDefinition: Cobalt Strike Outbound Traffic,FLOW,True,SYSTEM
+100539,BB:BehaviorDefinition: Cobalt Strike Inbound Traffic,FLOW,True,SYSTEM
+100544,BB:BehaviorDefinition: Hostname or Network Discovery,EVENT,True,SYSTEM
+100547,BB:BehaviorDefinition: Directory Discovery (Windows),EVENT,True,SYSTEM
+100559,BB:BehaviorDefinition: Directory Discovery (Unix),EVENT,True,SYSTEM
+100560,BB:BehaviorDefinition: Multiple File Deletions on Endpoint System,EVENT,True,SYSTEM
+100562,BB:CategoryDefinition: Files with Sensitive Permissions,EVENT,True,SYSTEM
+100563,BB:BehaviorDefinition: Download Utilities in Events,EVENT,True,SYSTEM
+100564,BB:BehaviorDefinition: Password Policy Discovery (Windows),EVENT,True,SYSTEM
+100565,BB:BehaviorDefinition: Admin Privileges Added (Unix),EVENT,True,SYSTEM
+100566,BB:BehaviorDefinition: Admin Privileges Added (Windows),EVENT,True,SYSTEM
+100567,BB:BehaviorDefinition: Admin Privileges Removed (Windows),EVENT,True,SYSTEM
+100568,BB:BehaviorDefinition: Group or Account Discovery,EVENT,True,SYSTEM
+100569,BB:BehaviorDefinition: Hidden File or Folder Created,EVENT,True,SYSTEM
+100570,BB:BehaviorDefinition: Password Policy Discovery (Unix),EVENT,True,SYSTEM
+100571,BB:BehaviorDefinition: Run as Superuser or Another User (Unix),EVENT,True,SYSTEM
+100572,BB:BehaviorDefinition: Run as Superuser or Another User (Windows),EVENT,True,SYSTEM
+100573,BB:BehaviorDefinition: User Account Added (Unix),EVENT,True,SYSTEM
+100574,BB:BehaviorDefinition: User Account Added (Windows),EVENT,True,SYSTEM
+100575,BB:BehaviorDefinition: User Account Deleted (Unix),EVENT,True,SYSTEM
+100576,BB:BehaviorDefinition: User Account Deleted (Windows),EVENT,True,SYSTEM
+100577,BB:CategoryDefinition: File Permission Changed,EVENT,True,SYSTEM
+100578,BB:BehaviorDefinition: PowerShell File Download Activity,EVENT,True,SYSTEM
+100584,BB:BehaviorDefinition: Process Killed,EVENT,True,SYSTEM
+100588,BB:BehaviorDefinition: Component Object Model Hijacking,EVENT,True,SYSTEM
+100589,BB:BehaviorDefinition: Component Object Model Hijacking Rules,EVENT,True,SYSTEM
+100595,BB:CategoryDefinition: File Decode by a Utility,EVENT,True,SYSTEM
+100597,BB:BehaviorDefinition: Suspicious Endpoint Activities,EVENT,True,SYSTEM
+100599,BB:BehaviorDefinition: File Creation and Deletion,EVENT,True,SYSTEM
+100601,BB:BehaviorDefinition: Regular Endpoint Administration,EVENT,True,SYSTEM
+100607,BB:Host Definition: Process Create from cmd.exe and explorer.exe,EVENT,True,USER
+100609,BB: CreateRemoteThread Detected,EVENT,True,OVERRIDE
+100612,BB:Host Definition: Process Create from Archive Software or Office Software,EVENT,True,USER
+100616,BB:Host Definition: Sysmon_Long_DNS_Query,EVENT,True,USER
+100620,BB:Host Definition: lsass.exe to access powershell.exe (potential cred dump),EVENT,True,USER
+100623,BB:Host Definition: Sysmon_A process access lsass.exe,EVENT,True,USER
+100625,BB:Host Definition: whoami.exe Detected,EVENT,True,USER
+100627,BB:Host Definition: wmic.exe Detected,EVENT,True,USER
+100628,BB:Host Definition: ipconfig.exe Detected,EVENT,True,USER
+100629,BB:Host Definition: hostname.exe Detected,EVENT,True,USER
+100630,BB:Host Definition: net.exe Detected,EVENT,True,USER
+100631,BB:Host Definition: certutil.exe Detected,EVENT,True,USER
+100632,BB:Host Definition: winrm or winrs Detected,EVENT,True,USER
+100634,BB:Host Definition: Powershell is detected in End Point,EVENT,True,USER
+100637,BB:Host Definition: the PipeName Shown a Potential Use Cobalt Strike_18_Connect,EVENT,True,USER
+100640,BB:Host Definition: the PipeName Shown a Potential Cobalt Strike Injection_17_Create,EVENT,True,USER
+100643,BB:Host Definition: Potential KeyLogger Log File Created,EVENT,True,USER
+100644,BB:Host Definition: Potential KeyLogger EXE is Running,EVENT,True,USER
+100645,BB:Host Definition: PowerShell KeyLogger ps1 is Running,EVENT,True,USER
+100649,BB:BehaviorDefinition: User Agent Changed via Curl,EVENT,True,SYSTEM
+100650,BB:BehaviorDefinition: VNC Activity from a Remote Host,FLOW,True,SYSTEM
+100651,BB:BehaviorDefinition: User Agent Changed via Powershell,EVENT,True,SYSTEM
+100652,BB:BehaviorDefinition: Remote Desktop Access from a Remote Host,FLOW,True,SYSTEM
+100654,BB:BehaviorDefinition: Rogue Named Pipe Impersonation,EVENT,True,SYSTEM
+100656,BB:BehaviorDefinition: Windows Firewall Stopped,EVENT,True,SYSTEM
+100658,BB:BehaviorDefinition: Cloud Firewall Modified or Stopped,EVENT,True,SYSTEM
+100659,BB:BehaviorDefinition: Mailbox Permission Added,EVENT,True,SYSTEM
+100661,BB:BehaviorDefinition: Cloud Account Discovery,EVENT,True,SYSTEM
+100667,BB:BehaviorDefinition: Invalid Password at Login,EVENT,True,SYSTEM
+100668,BB:BehaviorDefinition: Invalid Password during Kerberos Pre-Authentication,EVENT,True,SYSTEM
+100674,BB:BehaviorDefinition: Programming Environment Started with a Privileged Account,EVENT,True,SYSTEM
+100678,BB:BehaviorDefinition: Suspicious Remote Logon with Explicit Credentials,EVENT,True,SYSTEM
+100679,BB:BehaviorDefinition: User Added to Local Administrators,EVENT,True,SYSTEM
+100680,BB:BehaviorDefinition: Account Tampering - Suspicious Failed Logon Reasons,EVENT,True,SYSTEM
+100681,BB:BehaviorDefinition: Potential Cobalt Strike Traffic,FLOW,True,SYSTEM
+100683,BB:BehaviorDefinition: Critical File Modification,EVENT,True,SYSTEM
+100685,BB:BehaviorDefinition: Communication with a Potential Hostile Host (X-force Categorization),EVENT,True,SYSTEM
+100686,BB:BehaviorDefinition: Communication with a Potential Hostile Host (Reference Sets),EVENT,True,SYSTEM
+100687,BB:BehaviorDefinition: Communication with a Potential Hostile IP Address (X-force Categorization),EVENT,True,SYSTEM
+100688,BB:BehaviorDefinition: Communication with a Potential Hostile IP Address (Reference Sets),EVENT,True,SYSTEM
+100690,BB:BehaviorDefinition: Malware as a Service Path IOC,EVENT,True,SYSTEM
+100699,BB:BehaviorDefinition: Image Loaded from Mock System Directory,EVENT,True,SYSTEM
+100700,BB:BehaviorDefinition: UAC Bypass - DLL Hijacking (Non-System Directory),EVENT,True,SYSTEM
+100701,BB:BehaviorDefinition: UAC Bypass - Mock System Directory (Process),EVENT,True,SYSTEM
+100702,BB:CategoryDefinition: Elevated Process (Windows),EVENT,True,SYSTEM
+100703,BB:BehaviorDefinition: UAC Bypass - DLL Hijacking (System Directory),EVENT,True,SYSTEM
+100704,BB:BehaviorDefinition: Unsigned DLL Loaded from System Directory,EVENT,True,SYSTEM
+100705,BB:BehaviorDefinition: UAC Bypass - IE Add-On Installer,EVENT,True,SYSTEM
+100706,BB:BehaviorDefinition: UAC Bypass - Elevated COM Object,EVENT,True,SYSTEM
+100707,BB:BehaviorDefinition: UAC Bypass - Mock System Directory (Image),EVENT,True,SYSTEM
+100709,BB:CategoryDefinition: UAC Bypass Registry Key,EVENT,True,SYSTEM
+100712,BB:BehaviorDefinition: New File Created in Temporary Directory,EVENT,True,SYSTEM
+100713,BB:BehaviorDefinition: Excessive File Modifications,EVENT,True,SYSTEM
+100714,BB:BehaviorDefinition: New Registry Added to HKLM/HKCU (Windows),EVENT,True,SYSTEM
+100716,BB:BehaviorDefinition: Shortcut (lnk) File Executing a Critical Process (1),EVENT,True,SYSTEM
+100717,BB:BehaviorDefinition: Critical Process Created,EVENT,True,SYSTEM
+100718,BB:BehaviorDefinition: Critical Process Created by Shortcut (lnk) File,EVENT,True,SYSTEM
+100719,BB:BehaviorDefinition: Shortcut (lnk) File Executing a Critical Process (2),EVENT,True,SYSTEM
+100727,BB:BehaviorDefinition: Email Account Discovery from Powershell,EVENT,True,SYSTEM
+100733,BB:BehaviorDefinition: Create Process with Token,EVENT,True,SYSTEM
+100734,BB:BehaviorDefinition: Suspicious Changing of User Agent,EVENT,True,SYSTEM
+100738,BB:BehaviorDefinition: Suspicious Outbound SMTP Connections,EVENT,True,SYSTEM
+100739,BB:BehaviorDefinition: Potential Initial Access Tasks,EVENT,True,SYSTEM

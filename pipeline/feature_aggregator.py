@@ -1,0 +1,298 @@
+"""
+Feature Aggregator Module - 30-minute window aggregation for ransomware detection
+
+This module aggregates individual rule triggers into 30-minute time windows,
+creating the feature vectors needed for the Random Forest classifier.
+It handles both training and detection modes with consistent aggregation logic.
+"""
+
+import pandas as pd
+import numpy as np
+import os
+from typing import Dict, Any, List, Optional, Tuple
+import logging
+from shared_utils.time_utils import get_window_id, get_window_start_end
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30) -> pd.DataFrame:
+    """
+    Aggregate individual rule triggers into 30-minute time windows.
+    
+    This function takes raw event data and aggregates it into time windows
+    suitable for machine learning features. Each row represents a 30-minute
+    window for a specific hostname.
+    
+    Args:
+        df: DataFrame with columns: hostname, rule_id, timestamp, count, source_label
+        window_size_minutes: Size of time windows in minutes (default: 30)
+        
+    Returns:
+        DataFrame with aggregated features per window:
+        - window_id: Unique identifier for the 30-minute window
+        - hostname: Host identifier
+        - aggregated_rules: Dictionary mapping rule_id -> total_count
+        - total_events: Total number of events in this window
+        - unique_rules: Number of unique rules triggered
+        - source_label: Original data source ('normal' or 'attack')
+        - window_start: Start time of the window
+        - window_end: End time of the window
+    """
+    if df.empty:
+        logger.warning("Empty DataFrame provided to aggregator")
+        return pd.DataFrame()
+    
+    # Validate required columns
+    required_columns = ['hostname', 'rule_id', 'timestamp', 'count', 'source_label']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {missing_columns}")
+    
+    logger.info(f"Aggregating {len(df)} events into {window_size_minutes}-minute windows...")
+    
+    # Ensure timestamp column is datetime type
+    if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Generate window IDs for each event
+    df['window_id'] = df['timestamp'].apply(
+        lambda ts: get_window_id(ts, window_size_minutes)
+    )
+    
+    # Group by window_id and hostname for aggregation
+    grouped = df.groupby(['window_id', 'hostname', 'source_label'])
+    
+    # Aggregate rule counts into dictionaries
+    aggregated_data = []
+    
+    for (window_id, hostname, source_label), group in grouped:
+        # Build rule count dictionary
+        rule_counts = group.groupby('rule_id')['count'].sum().to_dict()
+        
+        # Convert rule_id keys to strings for JSON compatibility
+        rule_counts_str = {str(k): int(v) for k, v in rule_counts.items()}
+        
+        # Calculate additional metrics
+        total_events = group['count'].sum()
+        unique_rules = len(rule_counts)
+        
+        # Get window boundaries
+        first_timestamp = group['timestamp'].min()
+        window_start, window_end = get_window_start_end(first_timestamp, window_size_minutes)
+        
+        aggregated_data.append({
+            'window_id': window_id,
+            'hostname': hostname,
+            'aggregated_rules': rule_counts_str,
+            'total_events': int(total_events),
+            'unique_rules': int(unique_rules),
+            'source_label': source_label,
+            'window_start': window_start,
+            'window_end': window_end
+        })
+    
+    # Create DataFrame from aggregated data
+    result_df = pd.DataFrame(aggregated_data)
+    
+    if not result_df.empty:
+        logger.info(f"Created {len(result_df)} aggregated windows")
+        logger.info(f"Average events per window: {result_df['total_events'].mean():.2f}")
+        logger.info(f"Average unique rules per window: {result_df['unique_rules'].mean():.2f}")
+    
+    return result_df
+
+
+def validate_aggregated_data(df: pd.DataFrame) -> bool:
+    """
+    Validate the aggregated data meets requirements.
+    
+    Args:
+        df: Aggregated DataFrame to validate
+        
+    Returns:
+        True if data is valid, False otherwise
+    """
+    if df.empty:
+        logger.error("Aggregated data is empty")
+        return False
+    
+    required_columns = [
+        'window_id', 'hostname', 'aggregated_rules', 
+        'total_events', 'unique_rules', 'source_label'
+    ]
+    
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        logger.error(f"Missing required columns: {missing_columns}")
+        return False
+    
+    # Validate data types and values
+    if not all(isinstance(rules, dict) for rules in df['aggregated_rules']):
+        logger.error("aggregated_rules column contains non-dictionary values")
+        return False
+    
+    if not all(isinstance(total, (int, np.integer)) for total in df['total_events']):
+        logger.error("total_events column contains non-integer values")
+        return False
+    
+    if not all(isinstance(unique, (int, np.integer)) for unique in df['unique_rules']):
+        logger.error("unique_rules column contains non-integer values")
+        return False
+    
+    if not all(label in ['normal', 'attack'] for label in df['source_label']):
+        logger.error("source_label column contains invalid values")
+        return False
+    
+    logger.info("Aggregated data validation passed")
+    return True
+
+
+def get_window_statistics(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Calculate statistics about the aggregated windows.
+    
+    Args:
+        df: Aggregated DataFrame
+        
+    Returns:
+        Dictionary with statistics about the aggregation
+    """
+    if df.empty:
+        return {}
+    
+    stats = {
+        'total_windows': len(df),
+        'unique_hosts': df['hostname'].nunique(),
+        'normal_windows': len(df[df['source_label'] == 'normal']),
+        'attack_windows': len(df[df['source_label'] == 'attack']),
+        'avg_events_per_window': float(df['total_events'].mean()),
+        'avg_unique_rules_per_window': float(df['unique_rules'].mean()),
+        'avg_rules_per_window': float(df['aggregated_rules'].apply(len).mean()),
+        'min_events': int(df['total_events'].min()),
+        'max_events': int(df['total_events'].max()),
+        'min_unique_rules': int(df['unique_rules'].min()),
+        'max_unique_rules': int(df['unique_rules'].max())
+    }
+    
+    # Calculate rule frequency distribution
+    all_rules = []
+    for rules_dict in df['aggregated_rules']:
+        all_rules.extend([int(rule_id) for rule_id in rules_dict.keys()])
+    
+    if all_rules:
+        rule_counts = pd.Series(all_rules).value_counts()
+        stats['most_common_rules'] = rule_counts.head(10).to_dict()
+        stats['total_unique_rules'] = len(rule_counts)
+    
+    return stats
+
+
+def save_aggregated_data(df: pd.DataFrame, output_path: str) -> None:
+    """
+    Save aggregated data to CSV file.
+    
+    Args:
+        df: Aggregated DataFrame to save
+        output_path: Path to save the file
+    """
+    if df.empty:
+        logger.warning("No data to save")
+        return
+    
+    # Convert aggregated_rules to JSON string for CSV storage
+    df_to_save = df.copy()
+    df_to_save['aggregated_rules'] = df_to_save['aggregated_rules'].apply(
+        lambda x: str(x) if isinstance(x, dict) else str(x)
+    )
+    
+    # Ensure datetime columns are properly formatted
+    for col in ['window_start', 'window_end']:
+        if col in df_to_save.columns:
+            df_to_save[col] = df_to_save[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    df_to_save.to_csv(output_path, index=False)
+    logger.info(f"Saved {len(df)} aggregated windows to {output_path}")
+
+
+def load_aggregated_data(input_path: str) -> pd.DataFrame:
+    """
+    Load aggregated data from CSV file.
+    
+    Args:
+        input_path: Path to the CSV file
+        
+    Returns:
+        DataFrame with aggregated data
+    """
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"File not found: {input_path}")
+    
+    df = pd.read_csv(input_path)
+    
+    # Convert aggregated_rules back to dictionary
+    import ast
+    df['aggregated_rules'] = df['aggregated_rules'].apply(
+        lambda x: ast.literal_eval(x) if isinstance(x, str) else x
+    )
+    
+    # Convert datetime columns
+    for col in ['window_start', 'window_end']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col])
+    
+    logger.info(f"Loaded {len(df)} aggregated windows from {input_path}")
+    return df
+
+
+if __name__ == "__main__":
+    # Test the aggregator with sample data
+    import os
+    
+    # Create sample test data
+    test_data = [
+        {'hostname': 'DESKTOP-01', 'rule_id': 100001, 'timestamp': '2025-07-29 09:15:00', 'count': 5, 'source_label': 'normal'},
+        {'hostname': 'DESKTOP-01', 'rule_id': 100002, 'timestamp': '2025-07-29 09:20:00', 'count': 3, 'source_label': 'normal'},
+        {'hostname': 'DESKTOP-01', 'rule_id': 100001, 'timestamp': '2025-07-29 09:25:00', 'count': 2, 'source_label': 'normal'},
+        {'hostname': 'DESKTOP-01', 'rule_id': 100003, 'timestamp': '2025-07-29 09:35:00', 'count': 8, 'source_label': 'attack'},
+        {'hostname': 'DESKTOP-02', 'rule_id': 100001, 'timestamp': '2025-07-29 09:15:00', 'count': 1, 'source_label': 'normal'},
+    ]
+    
+    test_df = pd.DataFrame(test_data)
+    test_df['timestamp'] = pd.to_datetime(test_df['timestamp'])
+    
+    # Run aggregation
+    aggregated = aggregate_to_windows(test_df)
+    
+    if not aggregated.empty:
+        print("\n" + "="*60)
+        print("FEATURE AGGREGATOR TEST RESULTS")
+        print("="*60)
+        print(f"Input events: {len(test_df)}")
+        print(f"Output windows: {len(aggregated)}")
+        print(f"Unique hosts: {aggregated['hostname'].nunique()}")
+        print(f"Data sources: {dict(aggregated['source_label'].value_counts())}")
+        
+        print("\nAggregated windows:")
+        print(aggregated[['window_id', 'hostname', 'total_events', 'unique_rules', 'source_label']])
+        
+        # Show detailed rule counts for first window
+        if len(aggregated) > 0:
+            first_window = aggregated.iloc[0]
+            print(f"\nRule counts for window {first_window['window_id']}:")
+            print(first_window['aggregated_rules'])
+        
+        # Calculate and display statistics
+        stats = get_window_statistics(aggregated)
+        print(f"\nWindow statistics:")
+        for key, value in stats.items():
+            if key != 'most_common_rules':
+                print(f"  {key}: {value}")
+        
+        # Save test data
+        test_output = os.path.join(os.path.dirname(__file__), '../tests/test_aggregated_data.csv')
+        os.makedirs(os.path.dirname(test_output), exist_ok=True)
+        save_aggregated_data(aggregated, test_output)
+        print(f"\nTest data saved to: {test_output}")

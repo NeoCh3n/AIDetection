@@ -1,0 +1,18 @@
+{
+  "mongodb": {
+    "host": "localhost",
+    "port": 27017,
+    "db_name": "qradar_ml",
+    "connection_string": "mongodb://localhost:27017/"
+  },
+  "timeframes": {
+    "storage_bucket": "15min",
+    "testing_window": "30min",
+    "timezone": "local"
+  },
+  "collections": {
+    "rule_triggers": "qradar_rule_triggers",
+    "ml_features": "ml_features",
+    "anomaly_results": "anomaly_results"
+  }
+}
