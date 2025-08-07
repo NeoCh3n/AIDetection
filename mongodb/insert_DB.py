@@ -1,5 +1,6 @@
-import get_DB
 import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'system'))
 import run_log
 from datetime import datetime, timedelta
 import json
@@ -8,10 +9,16 @@ import numpy as np
 from typing import Dict, List, Any, Tuple, Generator
 import delete_DB  # # Import delete module for data lifecycle management
 
-#### MongoDB configuration for QRadar rule trigger ML pipeline (offline deployment)
+#### MongoDB configuration for detection-only mode
 CONNECTION_STRING_default = "mongodb://localhost:27017/"  # # Local MongoDB connection for offline use
-NAME_DB_default = "qradar_ml"  # # Database for QRadar rule trigger ML pipeline
-COLLECTION_default = "qradar_rule_triggers_ml"  # # Collection for 15-minute rule trigger buckets
+NAME_DB_default = "qradar_detection"  # # Database for detection pipeline
+COLLECTION_default = "qradar_events"  # # Collection for real AQL data
+
+# Import get_DB with path fix
+import importlib.util
+spec = importlib.util.spec_from_file_location("get_DB", os.path.join(os.path.dirname(__file__), 'get_DB.py'))
+get_DB = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(get_DB)
 
 #### Data processing constants
 MAX_BSON_SIZE = 16 * 1024 * 1024  # # 16MB MongoDB document limit
@@ -72,12 +79,10 @@ class QRadarDataProcessor:
             run_log.run_log("ERROR", f"# # Failed to create indexes: {str(e)}")
             return False
 
-    def parse_qradar_search_result(self, result_data: Dict[str, Any], 
-                                  work_hours_start: int = 10, work_hours_end: int = 18) -> List[Dict[str, Any]]:
+    def parse_qradar_search_result(self, result_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        # # Parse QRadar search results into ML-ready format
-        # # Groups events into 15-minute buckets during work hours (10:00-18:00)
-        # # Handles production scale: 6000+ hosts, 200+ rules, 1+ month data
+        # # Parse QRadar search results into detection-ready format
+        # # Uses real AQL schema from result.json with 30-minute windows
         """
         documents = []
         
@@ -87,81 +92,42 @@ class QRadarDataProcessor:
             
         run_log.run_log("INFO", f"# # Processing {len(result_data['events'])} QRadar events")
         
-        # # Group events by hostname and 15-minute time buckets
-        host_time_buckets = {}
-        
+        # Parse events in 30-minute windows for detection
         for event in result_data['events']:
             try:
-                # # Extract event details
-                rule_id = str(event.get('Custom Rule', ''))
-                hostname = str(event.get('sysmon_hostname (custom) (Unique Count)', 'unknown_host'))
+                # Extract real AQL data fields
+                rule_id = int(event.get('Custom Rule', 0))
                 count = int(event.get('Count', 0))
                 
-                # # Parse event timestamp
-                event_time_str = event.get('Start Time', '')
+                # Parse timestamp from "Jul 24, 2025, 2:29:57 PM" format
+                event_time_str = event.get('Log Source Time (Minimum)', '')
                 if event_time_str:
-                    event_time = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M:%S")
+                    # Handle "Jul 24, 2025, 2:29:57 PM" format
+                    from dateutil import parser
+                    event_time = parser.parse(event_time_str)
                 else:
                     continue  # Skip events without timestamp
                 
-                # # Filter to work hours only
-                if not (work_hours_start <= event_time.hour < work_hours_end):
-                    continue
+                # Create 30-minute window aligned to detection pipeline
+                window_minute = (event_time.minute // 30) * 30
+                window_start = event_time.replace(minute=window_minute, second=0, microsecond=0)
                 
-                # # Create 15-minute time bucket
-                bucket_minute = (event_time.minute // 15) * 15
-                time_bucket = event_time.replace(minute=bucket_minute, second=0, microsecond=0)
+                # Create document for detection pipeline
+                doc = {
+                    'rule_id': rule_id,
+                    'timestamp': window_start,
+                    'count': count,
+                    'hostname': event.get('sysmon_hostname (custom) (Unique Count)', None),  # Real AQL has null
+                    'source': 'qradar_aql',
+                    'window_id': f"window_{window_start.isoformat()}"
+                }
+                documents.append(doc)
                 
-                # # Create bucket key
-                bucket_key = (hostname, time_bucket)
-                
-                if bucket_key not in host_time_buckets:
-                    host_time_buckets[bucket_key] = {
-                        'hostname': hostname,
-                        'time_bucket': time_bucket,
-                        'date': time_bucket.strftime("%Y-%m-%d"),
-                        'work_hour': time_bucket.hour,
-                        'bucket_index': (time_bucket.hour - work_hours_start) * 4 + (time_bucket.minute // 15),
-                        'rule_triggers': {},
-                        'total_triggers': 0,
-                        'unique_rules': 0,
-                        'source': 'qradar_search'
-                    }
-                
-                # # Aggregate rule triggers
-                if rule_id and count > 0:
-                    if rule_id in host_time_buckets[bucket_key]['rule_triggers']:
-                        host_time_buckets[bucket_key]['rule_triggers'][rule_id] += count
-                    else:
-                        host_time_buckets[bucket_key]['rule_triggers'][rule_id] = count
-                    
-                    host_time_buckets[bucket_key]['total_triggers'] += count
-                    host_time_buckets[bucket_key]['unique_rules'] = len(host_time_buckets[bucket_key]['rule_triggers'])
-                    
             except Exception as e:
                 run_log.run_log("WARNING", f"# # Failed to parse event: {str(e)}")
                 continue
         
-        # # Convert to documents
-        for (hostname, time_bucket), bucket_data in host_time_buckets.items():
-            if bucket_data['total_triggers'] > 0:  # Only store buckets with activity
-                doc = {
-                    '_id': f"{time_bucket.isoformat()}_{hostname}",
-                    'hostname': hostname,
-                    'time_bucket': time_bucket,
-                    'date': bucket_data['date'],
-                    'work_hour': bucket_data['work_hour'],
-                    'bucket_index': bucket_data['bucket_index'],
-                    'rule_triggers': bucket_data['rule_triggers'],
-                    'total_triggers': bucket_data['total_triggers'],
-                    'unique_rules': bucket_data['unique_rules'],
-                    'source': bucket_data['source'],
-                    'collection_date': datetime.now().strftime("%Y-%m-%d"),
-                    'data_type': 'training'  # Default, will be updated based on time split
-                }
-                documents.append(doc)
-        
-        run_log.run_log("INFO", f"# # Created {len(documents)} time bucket documents")
+        run_log.run_log("INFO", f"# # Created {len(documents)} AQL-style documents")
         return documents
     
     def split_data_by_time(self, start_date: str, end_date: str, 

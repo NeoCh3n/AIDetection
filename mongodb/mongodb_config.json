@@ -5,14 +5,39 @@
     "db_name": "qradar_ml",
     "connection_string": "mongodb://localhost:27017/"
   },
-  "timeframes": {
-    "storage_bucket": "15min",
-    "testing_window": "30min",
-    "timezone": "local"
+  "pipeline": {
+    "mode": "detection_only",
+    "window_size": "30min",
+    "timezone": "local",
+    "retention_days": 7
   },
   "collections": {
-    "rule_triggers": "qradar_rule_triggers",
-    "ml_features": "ml_features",
-    "anomaly_results": "anomaly_results"
+    "qradar_events": "qradar_events",
+    "detection_results": "detection_results"
+  },
+  "data_schema": {
+    "qradar_events": {
+      "rule_id": "integer",
+      "timestamp": "datetime",
+      "count": "integer",
+      "hostname": "null",
+      "source": "string"
+    }
+  },
+  "rule_mapping": {
+    "total_rules": 10,
+    "rule_ids": [
+      100227,
+      100221,
+      100277,
+      100272,
+      100216,
+      100101,
+      100215,
+      100223,
+      100217,
+      100271
+    ],
+    "source": "result.json"
   }
 }

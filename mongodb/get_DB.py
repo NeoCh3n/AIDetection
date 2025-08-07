@@ -1,4 +1,7 @@
 from pymongo import MongoClient
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'system'))
 import run_log
 
 #### MongoDB configuration for QRadar rule trigger ML pipeline (offline deployment)

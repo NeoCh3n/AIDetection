@@ -68,12 +68,12 @@ class MongoDBOfflineSetup:
         mongod_found = False
         for path in mongodb_paths:
             if os.path.exists(path):
-                print(f"✅ mongod found at: {path}")
+                print(f"mongod found at: {path}")
                 mongod_found = True
                 break
         
         if not mongod_found:
-            print("❌ mongod not found in standard locations")
+            print("mongod not found in standard locations")
             return False
         
         # Check if MongoDB is running using platform-specific methods
@@ -88,7 +88,7 @@ class MongoDBOfflineSetup:
                     result = subprocess.run(['pgrep', '-f', 'mongod'], 
                                           capture_output=True, text=True)
                     if result.returncode == 0:
-                        print("✅ MongoDB is running")
+                        print("MongoDB is running")
                         return True
                 except FileNotFoundError:
                     pass
@@ -98,7 +98,7 @@ class MongoDBOfflineSetup:
                     result = subprocess.run(['lsof', '-i', f':{self.port}'], 
                                           capture_output=True, text=True)
                     if 'mongod' in result.stdout:
-                        print("✅ MongoDB is running on port", self.port)
+                        print("MongoDB is running on port", self.port)
                         return True
                 except FileNotFoundError:
                     pass
@@ -110,7 +110,7 @@ class MongoDBOfflineSetup:
                     result = subprocess.run(['systemctl', 'is-active', 'mongod'], 
                                           capture_output=True, text=True)
                     if result.stdout.strip() == "active":
-                        print("✅ MongoDB service is active")
+                        print("MongoDB service is active")
                         return True
                 except FileNotFoundError:
                     pass
@@ -120,7 +120,7 @@ class MongoDBOfflineSetup:
                     result = subprocess.run(['service', 'mongod', 'status'], 
                                           capture_output=True, text=True)
                     if "running" in result.stdout.lower():
-                        print("✅ MongoDB service is running")
+                        print("MongoDB service is running")
                         return True
                 except FileNotFoundError:
                     pass
@@ -129,7 +129,7 @@ class MongoDBOfflineSetup:
                 try:
                     result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
                     if 'mongod' in result.stdout:
-                        print("✅ MongoDB process found")
+                        print("MongoDB process found")
                         return True
                 except FileNotFoundError:
                     pass
@@ -138,27 +138,27 @@ class MongoDBOfflineSetup:
                 try:
                     result = subprocess.run(['netstat', '-tlnp'], capture_output=True, text=True)
                     if f':{self.port}' in result.stdout and 'mongod' in result.stdout:
-                        print("✅ MongoDB is listening on port", self.port)
+                        print("MongoDB is listening on port", self.port)
                         return True
                 except FileNotFoundError:
                     pass
         
         except Exception as e:
-            print(f"⚠️  Error checking MongoDB status: {e}")
+            print(f"Error checking MongoDB status: {e}")
         
         # Final check - try connecting
         try:
             client = MongoClient(self.connection_string, serverSelectionTimeoutMS=2000)
             client.admin.command('ping')
-            print("✅ MongoDB is accessible")
+            print("MongoDB is accessible")
             return True
         except (ConnectionFailure, ServerSelectionTimeoutError):
-            print("❌ MongoDB is not accessible")
+            print("MongoDB is not accessible")
             return False
     
     def start_mongodb(self):
         """Attempt to start MongoDB locally - platform-specific"""
-        print("🚀 Starting MongoDB...")
+        print("Starting MongoDB...")
         
         # Platform-specific installation checks
         if self.platform == "Darwin":  # macOS
@@ -166,7 +166,7 @@ class MongoDBOfflineSetup:
         elif self.platform == "Linux":
             return self._start_mongodb_linux()
         else:
-            print(f"❌ Unsupported platform: {self.platform}")
+            print(f"Unsupported platform: {self.platform}")
             return False
             
     def _start_mongodb_macos(self):
@@ -176,9 +176,9 @@ class MongoDBOfflineSetup:
         # Check if mongod is available via Homebrew
         try:
             subprocess.run(['mongod', '--version'], capture_output=True, check=True)
-            print("✅ mongod found via Homebrew")
+            print("mongod found via Homebrew")
         except (FileNotFoundError, subprocess.CalledProcessError):
-            print("❌ mongod not found")
+            print("mongod not found")
             print("Please install MongoDB:")
             print("  brew tap mongodb/brew")
             print("  brew install mongodb-community")
@@ -193,9 +193,9 @@ class MongoDBOfflineSetup:
         # RHEL 7.9 specific MongoDB installation check
         try:
             subprocess.run(['mongod', '--version'], capture_output=True, check=True)
-            print("✅ mongod found")
+            print("mongod found")
         except (FileNotFoundError, subprocess.CalledProcessError):
-            print("❌ mongod not found")
+            print("mongod not found")
             print("For RHEL 7.9, install MongoDB:")
             print("  1. Create /etc/yum.repos.d/mongodb-org-4.4.repo")
             print("  2. sudo yum install mongodb-org")
@@ -214,7 +214,7 @@ class MongoDBOfflineSetup:
             
             # Check if already running
             if self._check_mongodb_running():
-                print("✅ MongoDB is already running")
+                print("MongoDB is already running")
                 return True
             
             # Platform-specific startup commands
@@ -224,7 +224,7 @@ class MongoDBOfflineSetup:
                     result = subprocess.run(['sudo', 'systemctl', 'start', 'mongod'], 
                                           capture_output=True, text=True)
                     if result.returncode == 0:
-                        print("✅ MongoDB started via systemctl")
+                        print("MongoDB started via systemctl")
                         return True
                 except FileNotFoundError:
                     pass
@@ -234,7 +234,7 @@ class MongoDBOfflineSetup:
                     result = subprocess.run(['sudo', 'service', 'mongod', 'start'], 
                                           capture_output=True, text=True)
                     if result.returncode == 0:
-                        print("✅ MongoDB started via service")
+                        print("MongoDB started via service")
                         return True
                 except FileNotFoundError:
                     pass
@@ -250,19 +250,19 @@ class MongoDBOfflineSetup:
             
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                print("✅ MongoDB started successfully")
+                print("MongoDB started successfully")
                 return True
             else:
-                print("❌ Failed to start MongoDB:", result.stderr)
+                print("Failed to start MongoDB:", result.stderr)
                 return False
                 
         except Exception as e:
-            print(f"❌ Error starting MongoDB: {e}")
+            print(f"Error starting MongoDB: {e}")
             return False
     
     def connect_to_mongodb(self):
         """Connect to MongoDB with retry logic"""
-        print("🔗 Connecting to MongoDB...")
+        print("Connecting to MongoDB...")
         
         max_retries = 5
         retry_delay = 2
@@ -277,49 +277,36 @@ class MongoDBOfflineSetup:
                 # Test connection
                 self.client.admin.command('ping')
                 self.db = self.client[self.db_name]
-                print("✅ Connected to MongoDB")
+                print("Connected to MongoDB")
                 return True
             except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-                print(f"⚠️  Connection attempt {attempt + 1} failed: {e}")
+                print(f"Connection attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     print(f"⏳ Retrying in {retry_delay} seconds...")
                     import time
                     time.sleep(retry_delay)
                 else:
-                    print("❌ Failed to connect to MongoDB")
+                    print("Failed to connect to MongoDB")
                     return False
     
     def setup_collections(self):
-        """Setup collections for unified data processing pipeline as per CLAUDE.md"""
-        print("📊 Setting up collections for unified pipeline...")
+        """Setup collections for detection-only mode with real AQL schema"""
+        print("Setting up collections for detection-only pipeline...")
         
-        # Collections aligned with CLAUDE.md pipeline structure
+        # Collections for detection mode only (no training data)
         collections = {
             'qradar_events': [
                 IndexModel([("timestamp", 1)]),
-                IndexModel([("hostname", 1)]),
                 IndexModel([("rule_id", 1)]),
-                IndexModel([("hostname", 1), ("timestamp", 1)]),
-                IndexModel([("timestamp", -1)]),
-            ],
-            'time_windows': [
-                IndexModel([("window_id", 1)]),
-                IndexModel([("hostname", 1)]),
-                IndexModel([("start_time", 1)]),
-                IndexModel([("end_time", 1)]),
-                IndexModel([("hostname", 1), ("window_id", 1)]),
-            ],
-            'training_data': [
-                IndexModel([("window_id", 1)]),
-                IndexModel([("hostname", 1)]),
-                IndexModel([("is_attack", 1)]),
-                IndexModel([("timestamp", 1)]),
+                IndexModel([("timestamp", 1), ("rule_id", 1)]),
+                IndexModel([("timestamp", -1)]),  # For 7-day cleanup
             ],
             'detection_results': [
                 IndexModel([("timestamp", -1)]),
                 IndexModel([("hostname", 1)]),
                 IndexModel([("prediction", 1)]),
                 IndexModel([("confidence", -1)]),
+                IndexModel([("timestamp", -1), ("hostname", 1)]),
             ]
         }
         
@@ -332,127 +319,103 @@ class MongoDBOfflineSetup:
             # Create new indexes
             if indexes:
                 collection.create_indexes(indexes)
-                print(f"✅ Created indexes for {collection_name}")
+                print(f"Created indexes for {collection_name}")
             else:
-                print(f"✅ Verified {collection_name} exists")
+                print(f"Verified {collection_name} exists")
     
     def insert_sample_data(self):
-        """Insert sample data aligned with CLAUDE.md pipeline structure"""
-        print("📥 Inserting sample data for unified pipeline...")
+        """Insert sample data using real AQL schema from result.json"""
+        print("Inserting sample data with real AQL schema...")
         
-        # Sample rule IDs from QRadar (aligned with training data)
-        sample_rule_ids = [100001, 100005, 100010, 100015, 100020, 100025, 100030, 100035, 100040, 100045]
+        # Real rule IDs from result.json
+        real_rule_ids = [100227, 100221, 100277, 100272, 100216, 100101, 100215, 100223, 100217, 100271]
+        real_counts = [184518, 184518, 184195, 184195, 184130, 184130, 323, 65, 65, 22]
         
         base_time = datetime.now().replace(minute=0, second=0, microsecond=0)
         
-        # 1. Insert raw qradar_events (for detection mode)
-        print("   Inserting qradar_events...")
+        # 1. Insert real AQL-style qradar_events (detection mode)
+        print("   Inserting qradar_events with real AQL schema...")
         events = []
-        for i in range(100):
-            timestamp = base_time - timedelta(minutes=i*30)
-            event = {
-                'hostname': f'DESKTOP-{np.random.randint(10, 99)}-EDR',
-                'rule_id': np.random.choice(sample_rule_ids),
-                'timestamp': timestamp,
-                'count': np.random.poisson(5) + 1,
-                'source': 'qradar'
-            }
-            events.append(event)
+        
+        # Generate realistic timeline with 30-minute windows
+        for window_idx in range(48):  # 24 hours worth
+            window_start = base_time - timedelta(hours=window_idx)
+            
+            # Add events for each rule in this window
+            for rule_idx, (rule_id, count) in enumerate(zip(real_rule_ids, real_counts)):
+                # Add some realistic variation to counts
+                variation = np.random.uniform(0.8, 1.2)
+                adjusted_count = int(count * variation)
+                
+                event = {
+                    'rule_id': int(rule_id),
+                    'timestamp': window_start,
+                    'count': int(adjusted_count),
+                    'hostname': None,  # Real AQL data has null hostname
+                    'source': 'qradar_aql',
+                    'window_id': f"window_{window_idx}"
+                }
+                events.append(event)
         
         if events:
             collection = self.db['qradar_events']
             result = collection.insert_many(events)
-            print(f"   ✅ Inserted {len(result.inserted_ids)} qradar_events")
+            print(f"   Inserted {len(result.inserted_ids)} qradar_events")
         
-        # 2. Insert time_windows (for training mode)
-        print("   Inserting time_windows...")
-        windows = []
-        for i in range(20):
-            start_time = base_time - timedelta(hours=i)
-            end_time = start_time + timedelta(minutes=30)
-            window = {
-                'window_id': f"window_{i}",
-                'hostname': f'DESKTOP-{np.random.randint(10, 99)}-EDR',
-                'start_time': start_time,
-                'end_time': end_time,
-                'rule_counts': {str(np.random.choice(sample_rule_ids)): np.random.poisson(3) + 1 
-                               for _ in range(np.random.randint(3, 8))},
-                'total_events': np.random.poisson(50) + 10
-            }
-            windows.append(window)
-        
-        if windows:
-            collection = self.db['time_windows']
-            result = collection.insert_many(windows)
-            print(f"   ✅ Inserted {len(result.inserted_ids)} time_windows")
-        
-        # 3. Insert training_data (labeled data for ML)
-        print("   Inserting training_data...")
-        training_docs = []
-        for i in range(50):
-            start_time = base_time - timedelta(hours=i*2)
-            is_attack = i % 5 == 0  # 20% attack samples
-            doc = {
-                'window_id': f"training_{i}",
-                'hostname': f'DESKTOP-{np.random.randint(10, 99)}-EDR',
-                'timestamp': start_time,
-                'feature_vector': [np.random.poisson(2) if not is_attack else np.random.poisson(10) 
-                                  for _ in range(10)],  # Simplified 10-rule vector
-                'is_attack': int(is_attack),
-                'label': 'attack' if is_attack else 'normal'
-            }
-            training_docs.append(doc)
-        
-        if training_docs:
-            collection = self.db['training_data']
-            result = collection.insert_many(training_docs)
-            print(f"   ✅ Inserted {len(result.inserted_ids)} training samples")
-        
-        # 4. Insert detection_results (model predictions)
+        # 2. Insert detection_results with realistic predictions
         print("   Inserting detection_results...")
         results = []
-        for i in range(25):
-            timestamp = base_time - timedelta(hours=i)
-            prediction = np.random.choice([0, 1], p=[0.85, 0.15])  # 15% anomaly rate
+        
+        for window_idx in range(48):
+            timestamp = base_time - timedelta(hours=window_idx)
+            
+            # Simulate realistic detection rates (low false positive rate)
+            is_anomaly = np.random.choice([0, 1], p=[0.95, 0.05])
+            
             result = {
                 'timestamp': timestamp,
-                'hostname': f'DESKTOP-{np.random.randint(10, 99)}-EDR',
-                'prediction': prediction,
-                'confidence': np.random.uniform(0.7, 0.99),
-                'window_id': f"result_{i}",
-                'model_version': 'ransomware_detector_v1.0'
+                'hostname': f'WINDOW-{window_idx:03d}',  # Synthetic hostname for window
+                'prediction': int(is_anomaly),
+                'confidence': float(np.random.uniform(0.85, 0.99) if is_anomaly else np.random.uniform(0.70, 0.85)),
+                'window_id': f"window_{window_idx}",
+                'model_version': 'ransomware_detector_v1.0',
+                'rule_count': int(len(real_rule_ids)),
+                'total_events': int(sum(real_counts))
             }
             results.append(result)
         
         if results:
             collection = self.db['detection_results']
             result = collection.insert_many(results)
-            print(f"   ✅ Inserted {len(result.inserted_ids)} detection results")
+            print(f"   Inserted {len(result.inserted_ids)} detection results")
         
     def verify_setup(self):
         """Verify the setup is working correctly"""
-        print("✅ Verifying setup...")
+        print("Verifying setup...")
         
         # Check collections
         collections = self.db.list_collection_names()
-        print(f"📋 Available collections: {collections}")
+        print(f"Available collections: {collections}")
         
         # Check sample data
         collection = self.db['qradar_rule_triggers']
         count = collection.count_documents({})
-        print(f"📊 Sample data count: {count}")
+        print(f"Sample data count: {count}")
         
         if count > 0:
             # Show first document
             doc = collection.find_one()
-            print(f"📄 Sample document: {doc['_id']}")
+            print(f"Sample document: {doc['_id']}")
             print(f"   Rules triggered: {doc['unique_rules']}")
             print(f"   Total events: {doc['total_triggers']}")
         
         return True
     
     def create_config_file(self):
-        """Create configuration file aligned with CLAUDE.md unified pipeline"""
+        """Create configuration file for detection-only mode with real rule count"""
+        # Count actual rules from result.json
+        real_rule_ids = [100227, 100221, 100277, 100272, 100216, 100101, 100215, 100223, 100217, 100271]
+        
         config = {
             "mongodb": {
                 "host": self.host,
@@ -461,36 +424,28 @@ class MongoDBOfflineSetup:
                 "connection_string": self.connection_string
             },
             "pipeline": {
+                "mode": "detection_only",
                 "window_size": "30min",
-                "timezone": "local"
+                "timezone": "local",
+                "retention_days": 7
             },
             "collections": {
                 "qradar_events": "qradar_events",
-                "time_windows": "time_windows",
-                "training_data": "training_data",
                 "detection_results": "detection_results"
             },
             "data_schema": {
                 "qradar_events": {
-                    "hostname": "string",
                     "rule_id": "integer",
                     "timestamp": "datetime",
-                    "count": "integer"
-                },
-                "time_windows": {
-                    "window_id": "string",
-                    "hostname": "string",
-                    "start_time": "datetime",
-                    "end_time": "datetime",
-                    "rule_counts": "dict"
-                },
-                "training_data": {
-                    "window_id": "string",
-                    "hostname": "string",
-                    "feature_vector": "list",
-                    "is_attack": "integer",
-                    "timestamp": "datetime"
+                    "count": "integer",
+                    "hostname": "null",
+                    "source": "string"
                 }
+            },
+            "rule_mapping": {
+                "total_rules": len(real_rule_ids),
+                "rule_ids": real_rule_ids,
+                "source": "result.json"
             }
         }
         
@@ -498,11 +453,11 @@ class MongoDBOfflineSetup:
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=2, default=str)
         
-        print(f"✅ Configuration saved to {config_path}")
+        print(f"Configuration saved to {config_path}")
     
     def run_setup(self):
         """Run the complete setup process"""
-        print("🚀 MongoDB Offline Setup Starting...")
+        print("MongoDB Offline Setup Starting...")
         print("=" * 50)
         print(f"   Target Platform: {self.platform}")
         if self.distro:
@@ -510,7 +465,7 @@ class MongoDBOfflineSetup:
         
         # Check MongoDB
         if not self.check_mongodb_installation():
-            print("\n📋 Setup Instructions:")
+            print("\nSetup Instructions:")
             if self.platform == "Darwin":
                 print("1. Install MongoDB on macOS:")
                 print("   brew tap mongodb/brew")
@@ -554,10 +509,10 @@ class MongoDBOfflineSetup:
         self.create_config_file()
         
         print("\n" + "=" * 50)
-        print("✅ MongoDB Offline Setup Complete!")
-        print(f"🎯 Database: {self.db_name}")
-        print(f"🔗 Connection: {self.connection_string}")
-        print("📝 Next steps:")
+        print("MongoDB Offline Setup Complete!")
+        print(f"Database: {self.db_name}")
+        print(f"Connection: {self.connection_string}")
+        print("Next steps:")
         print("   - Use data_loader.py with mode='detect' for MongoDB data loading")
         print("   - Run pipeline/data_loader.py to test data ingestion")
         print("   - Use shared_utils/config.py for configuration management")
