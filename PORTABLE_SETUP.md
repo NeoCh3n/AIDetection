@@ -63,6 +63,32 @@ The system is now fully portable. Just copy the entire folder to any computer an
 4. Run `python create_rule_mapping.py` to create mapping
 5. Use as normal
 
+## Configuration via Environment Variables
+
+You can configure connections without editing code by setting these environment variables in your shell or CI:
+
+- QRADAR_ADDRESS: Syslog/QRadar address (default: 192.168.153.123)
+- QRADAR_API_TOKEN: API token used in API requests (mask this; do not commit)
+- SYSLOG_ADDRESS: Destination syslog address for run_log/syslog (default: 192.168.153.123)
+- SYSLOG_PORT: Destination syslog port (default: 514)
+- SYSLOG_HEADER_BASE: Base name for syslog headers (default: AIR)
+- SYSLOG_HEADER_ML: Syslog header for ML events (default: AIR-RF)
+- SYSLOG_HEADER_LOG: Syslog header for log events (default: AIR-RF)
+
+Example (zsh):
+
+```bash
+export QRADAR_ADDRESS="https://your-qradar"
+export QRADAR_API_TOKEN="<token>"
+export SYSLOG_ADDRESS="<qradar-syslog-ip>"
+export SYSLOG_PORT=514
+export SYSLOG_HEADER_BASE="AIR"
+export SYSLOG_HEADER_ML="AIR-RF"
+export SYSLOG_HEADER_LOG="AIR-RF"
+```
+
+Note: When running `python system/config.py` directly, the token will be masked in the output.
+
 ## Manual Rule File Import
 
 If you have rule files from another source, just place them in the `Qradar_rule/` folder as CSV files with columns: `id`, `name`, `type`, `enabled`, `origin`

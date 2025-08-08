@@ -3,9 +3,10 @@ import os
 #### change parameters here
 
 #### Qradar configuration
-Qradar_address_default = "192.168.153.123"
-
-Qradar_token_default = "677f60e2-3d58-4275-a1f0-c13d1975fdbe"
+# Prefer environment variables; fall back to sensible defaults.
+# Never commit real tokens into source control.
+Qradar_address_default = os.getenv("QRADAR_ADDRESS", "192.168.153.123")
+Qradar_token_default = os.getenv("QRADAR_API_TOKEN", "REPLACE_WITH_TOKEN")
 
 request_header_default = {
     'SEC': Qradar_token_default,
@@ -53,22 +54,32 @@ analyze_duration_default = 30
 # Maximum record count
 maximum_record_count_default = 800000
 
-model_path_default = os.path.join("Model", "svm_NetworkConnection_4D")
-svm_model_path_default = os.path.join("Model", "svm_NetworkConnection_4D")
-logreg_model_path_default = os.path.join("Model", "logreg_NetworkConnection_4D")
-rf_model_path_default = os.path.join("Model", "rf_NetworkConnection_4D")
-voting_model_path_default = os.path.join("Model", "voting_NetworkConnection_4D")
+# Use lowercase 'model' directory to match repository layout
+model_path_default = os.path.join("model", "svm_NetworkConnection_4D")
+svm_model_path_default = os.path.join("model", "svm_NetworkConnection_4D")
+logreg_model_path_default = os.path.join("model", "logreg_NetworkConnection_4D")
+rf_model_path_default = os.path.join("model", "rf_NetworkConnection_4D")
+voting_model_path_default = os.path.join("model", "voting_NetworkConnection_4D")
 
 log_dir_path_default = os.path.join("running_log/")
 
-log_destination_address_default = "192.168.153.123"
-log_destination_port_default = 514
+log_destination_address_default = os.getenv("SYSLOG_ADDRESS", "192.168.153.123")
+log_destination_port_default = int(os.getenv("SYSLOG_PORT", "514"))
+
+# Syslog header configuration (project name: AIR; default tag: AIR-RF)
+SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AIR")
+SYSLOG_HEADER_ML = os.getenv("SYSLOG_HEADER_ML", f"{SYSLOG_HEADER_BASE}-RF")
+SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-RF")
 
 #### NEVER change the below!
 # run the default to check the parameter
 if __name__ == "__main__":
     print("Qradar_address_default:", Qradar_address_default)
-    print("Qradar_token_default:", Qradar_token_default)
+    # Mask token output for safety
+    masked_token = (
+        ("****" + Qradar_token_default[-4:]) if Qradar_token_default and Qradar_token_default != "REPLACE_WITH_TOKEN" else "(unset)"
+    )
+    print("Qradar_token_default:", masked_token)
     print("request_header_default:", request_header_default)
     print("MONGODB_CONNECTION_STRING:", MONGODB_CONNECTION_STRING)
     print("MONGODB_DB_NAME:", MONGODB_DB_NAME)
@@ -85,3 +96,6 @@ if __name__ == "__main__":
     print("log_dir_path_default:", log_dir_path_default)
     print("log_destination_address_default:", log_destination_address_default)
     print("log_destination_port_default:", log_destination_port_default)
+    print("SYSLOG_HEADER_BASE:", SYSLOG_HEADER_BASE)
+    print("SYSLOG_HEADER_ML:", SYSLOG_HEADER_ML)
+    print("SYSLOG_HEADER_LOG:", SYSLOG_HEADER_LOG)
