@@ -12,7 +12,7 @@ import delete_DB  # # Import delete module for data lifecycle management
 #### MongoDB configuration for detection-only mode
 CONNECTION_STRING_default = "mongodb://localhost:27017/"  # # Local MongoDB connection for offline use
 NAME_DB_default = "qradar_detection"  # # Database for detection pipeline
-COLLECTION_default = "qradar_detection_windows"  # # Collection for 30-min detection windows
+COLLECTION_default = "qradar_sliding_windows"  # Collection for 30-min detection windows (unified)
 
 # Import get_DB with path fix
 import importlib.util

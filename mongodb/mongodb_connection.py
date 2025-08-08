@@ -99,11 +99,13 @@ class MongoDBConnectionManager:
         try:
             # Detection windows collection indexes
             indexes = [
-                ([("window_start", -1), ("window_end", -1)], "window_time_idx"),
-                ([("query_time", -1)], "query_time_idx"),
-                ([("host_triggers", 1)], "host_triggers_idx"),
-                ([("total_triggers", -1)], "total_triggers_idx"),
-                ([("window_start", 1), ("window_end", 1)], "window_range_idx")
+                ([('window_start', -1), ('window_end', -1)], "window_time_idx"),
+                ([('query_time', -1)], "query_time_idx"),
+                ([('window_sequence', 1)], "window_sequence_idx"),
+                ([('metadata.query_id', 1)], "query_id_idx"),
+                ([('host_triggers', 1)], "host_triggers_idx"),
+                ([('total_triggers', -1)], "total_triggers_idx"),
+                ([('window_start', 1), ('window_end', 1)], "window_range_idx")
             ]
             
             for index_spec, index_name in indexes:
@@ -232,14 +234,6 @@ class MongoDBConnectionManager:
                 return []
         
         try:
-            # Ensure timezone consistency
-            if start_time.tzinfo is None:
-                from pytz import UTC
-                start_time = UTC.localize(start_time)
-            if end_time.tzinfo is None:
-                from pytz import UTC
-                end_time = UTC.localize(end_time)
-            
             query = {
                 'window_start': {'$gte': start_time},
                 'window_end': {'$lte': end_time}
@@ -247,7 +241,6 @@ class MongoDBConnectionManager:
             
             windows = list(self.detection_windows_collection.find(query).sort('window_start', 1))
             return windows
-            
         except Exception as e:
             run_log.run_log("ERROR", f"Failed to retrieve detection windows: {e}")
             return []
@@ -341,7 +334,7 @@ class MongoDBConnectionManager:
                 "total_host_triggers": host_stats[0]["total_host_triggers"] if host_stats else 0,
                 "window_range": time_range[0] if time_range else {},
                 "unique_rules": len(rule_stats[0]["unique_rules"]) if rule_stats else 0,
-                "total_rule_triggers": rule_stats[0]["total_rule_triggers"]) if rule_stats else 0
+                "total_rule_triggers": rule_stats[0]["total_rule_triggers"] if rule_stats else 0
             }
             
             return summary

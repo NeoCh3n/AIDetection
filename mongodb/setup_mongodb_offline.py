@@ -298,9 +298,11 @@ class MongoDBOfflineSetup:
         
         # Collections for detection-only mode with new schema
         collections = {
-            'qradar_detection_windows': [
+            'qradar_sliding_windows': [
                 IndexModel([("window_start", -1), ("window_end", -1)]),
                 IndexModel([("query_time", -1)]),
+                IndexModel([("window_sequence", 1)]),
+                IndexModel([("metadata.query_id", 1)]),
                 IndexModel([("host_triggers", 1)]),
                 IndexModel([("total_triggers", -1)]),
                 IndexModel([("window_start", 1), ("window_end", 1)]),
@@ -351,21 +353,23 @@ class MongoDBOfflineSetup:
         
         base_time = datetime.now().replace(minute=0, second=0, microsecond=0)
         
-        # Generate 30-minute detection windows
-        detection_windows = []
+        # Simulate 15-minute queries upserting 30-minute window documents
+        # Align base time to nearest 15-minute mark
+        base_time = datetime.now().replace(minute=(datetime.now().minute // 15) * 15, second=0, microsecond=0)
+        collection = self.db['qradar_sliding_windows']
+        unique_ids = set()
         
-        for window_idx in range(48):  # 24 hours worth of 30-min windows
-            event_time = base_time - timedelta(minutes=30 * window_idx)
-            
-            # Use time_utils to get proper window boundaries
-            window_start, window_end = get_window_start_end(event_time)
-            window_id = get_window_id(event_time)
+        for query_idx in range(96):  # 24h * (60/15)
+            query_time_anchor = base_time - timedelta(minutes=15 * query_idx)
+            # Window aligns to 30-min boundaries using time_utils
+            window_start, window_end = get_window_start_end(query_time_anchor)
+            window_id = get_window_id(query_time_anchor)
+            unique_ids.add(window_id)
             
             # Create feature vector with realistic variation
             feature_vector = {}
             rule_counts = {}
             total_triggers = 0
-            
             for rule_id, base_count in zip(real_rule_ids, real_counts):
                 variation = np.random.uniform(0.8, 1.2)
                 count = int(base_count * variation)
@@ -378,34 +382,38 @@ class MongoDBOfflineSetup:
             host_triggers = {
                 "192.168.153.166": {
                     "total_triggers": int(total_triggers * 0.3),
-                    "rules": {str(rule_id): int(count * 0.3) 
-                             for rule_id, count in zip(real_rule_ids[:5], real_counts[:5])}
+                    "rules": {str(rule_id): int(count * 0.3) for rule_id, count in zip(real_rule_ids[:5], real_counts[:5])}
                 },
                 "DESKTOP-64-EDR": {
                     "total_triggers": int(total_triggers * 0.7),
-                    "rules": {str(rule_id): int(count * 0.7) 
-                             for rule_id, count in zip(real_rule_ids, real_counts)}
+                    "rules": {str(rule_id): int(count * 0.7) for rule_id, count in zip(real_rule_ids, real_counts)}
                 }
             }
             
+            window_sequence = (window_start.hour * 60 + window_start.minute) // 15 + 1
             detection_window = {
                 "_id": window_id,
                 "window_start": window_start,
                 "window_end": window_end,
-                "query_time": datetime.now(),
+                "query_time": window_end + timedelta(seconds=15),
+                "window_sequence": window_sequence,
                 "feature_vector": feature_vector,
                 "rule_counts": rule_counts,
                 "host_triggers": host_triggers,
                 "total_triggers": total_triggers,
-                "total_rules_triggered": len(real_rule_ids)
+                "total_rules_triggered": len(real_rule_ids),
+                "metadata": {
+                    "query_id": f"q{(window_end + timedelta(seconds=15)).strftime('%Y%m%d_%H%M%S')}",
+                    "source": "qradar_aql",
+                    "data_type": "detection",
+                    "overlap_previous": True
+                }
             }
             
-            detection_windows.append(detection_window)
+            # Upsert per window_id (overwrite latest state for the 30-min window)
+            collection.replace_one({'_id': window_id}, detection_window, upsert=True)
         
-        if detection_windows:
-            collection = self.db['qradar_detection_windows']
-            result = collection.insert_many(detection_windows)
-            print(f"Inserted {len(result.inserted_ids)} detection windows")
+        print(f"Upserted sliding windows for {len(unique_ids)} unique 30-min windows")
         
         # Insert detection results
         detection_results = []
@@ -441,16 +449,17 @@ class MongoDBOfflineSetup:
         print(f"Available collections: {collections}")
         
         # Check sample data
-        collection = self.db['qradar_rule_triggers']
+        collection = self.db['qradar_sliding_windows']
         count = collection.count_documents({})
-        print(f"Sample data count: {count}")
+        print(f"Detection windows: {count}")
         
         if count > 0:
             # Show first document
             doc = collection.find_one()
-            print(f"Sample document: {doc['_id']}")
-            print(f"   Rules triggered: {doc['unique_rules']}")
-            print(f"   Total events: {doc['total_triggers']}")
+            print(f"Sample window_id: {doc.get('_id')}")
+            print(f"   Time window: {doc.get('window_start')} -> {doc.get('window_end')}")
+            print(f"   Total triggers: {doc.get('total_triggers')}")
+            print(f"   Window sequence: {doc.get('window_sequence')}")
         
         return True
     
@@ -483,7 +492,7 @@ class MongoDBOfflineSetup:
                 "retention_days": 7
             },
             "collections": {
-                "detection_windows": "qradar_detection_windows",
+                "detection_windows": "qradar_sliding_windows",
                 "detection_results": "detection_results"
             },
             "data_schema": {
@@ -575,7 +584,7 @@ class MongoDBOfflineSetup:
         print("\n" + "=" * 50)
         print("Updated MongoDB Detection Setup Complete!")
         print(f"Database: {self.db_name}")
-        print(f"Collection: qradar_detection_windows")
+        print(f"Collection: qradar_sliding_windows")
         print(f"Mode: Detection-only with 30-min sliding windows")
         print(f"Timezone: HKT (Asia/Hong_Kong)")
         print("Next steps:")

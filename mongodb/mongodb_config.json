@@ -13,7 +13,7 @@
     "retention_days": 7
   },
   "collections": {
-    "detection_windows": "qradar_detection_windows",
+  "detection_windows": "qradar_sliding_windows",
     "detection_results": "detection_results"
   },
   "data_schema": {
