@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-MongoDB Offline Setup and Initialization Script
+Updated MongoDB Offline Setup and Initialization Script
 Compatible with RHEL 7.9 and macOS ARM
 
-This script sets up MongoDB for offline deployment with:
-1. Cross-platform MongoDB installation check (RHEL 7.9 / macOS ARM)
-2. Database initialization with proper collections
-3. Index creation for optimal performance
-4. Sample data insertion for testing
-5. Configuration for offline use
+This updated script integrates with:
+1. Unified MongoDB connection utility (mongodb_connection.py)
+2. time_utils.py for consistent timestamp processing
+3. Detection-only pipeline architecture
+4. 30-minute sliding windows with 15-minute queries
 """
 
 import subprocess
@@ -18,6 +17,10 @@ import platform
 from datetime import datetime, timedelta
 import json
 import numpy as np
+
+# Add required paths for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'system'))
 
 try:
     import pymongo
@@ -31,7 +34,7 @@ except ImportError:
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
 class MongoDBOfflineSetup:
-    def __init__(self, db_name="qradar_ml", host="localhost", port=27017):
+    def __init__(self, db_name="qradar_detection", host="localhost", port=27017):
         self.db_name = db_name
         self.host = host
         self.port = port
@@ -290,23 +293,23 @@ class MongoDBOfflineSetup:
                     return False
     
     def setup_collections(self):
-        """Setup collections for detection-only mode with real AQL schema"""
-        print("Setting up collections for detection-only pipeline...")
+        """Setup collections for detection-only pipeline with time_utils integration"""
+        print("Setting up detection collections...")
         
-        # Collections for detection mode only (no training data)
+        # Collections for detection-only mode with new schema
         collections = {
-            'qradar_events': [
-                IndexModel([("timestamp", 1)]),
-                IndexModel([("rule_id", 1)]),
-                IndexModel([("timestamp", 1), ("rule_id", 1)]),
-                IndexModel([("timestamp", -1)]),  # For 7-day cleanup
+            'qradar_detection_windows': [
+                IndexModel([("window_start", -1), ("window_end", -1)]),
+                IndexModel([("query_time", -1)]),
+                IndexModel([("host_triggers", 1)]),
+                IndexModel([("total_triggers", -1)]),
+                IndexModel([("window_start", 1), ("window_end", 1)]),
             ],
             'detection_results': [
                 IndexModel([("timestamp", -1)]),
-                IndexModel([("hostname", 1)]),
+                IndexModel([("window_id", 1)]),
                 IndexModel([("prediction", 1)]),
                 IndexModel([("confidence", -1)]),
-                IndexModel([("timestamp", -1), ("hostname", 1)]),
             ]
         }
         
@@ -324,70 +327,110 @@ class MongoDBOfflineSetup:
                 print(f"Verified {collection_name} exists")
     
     def insert_sample_data(self):
-        """Insert sample data using real AQL schema from result.json"""
-        print("Inserting sample data with real AQL schema...")
+        """Insert sample detection data using real AQL schema and time_utils"""
+        print("Inserting sample detection data...")
         
-        # Real rule IDs from result.json
-        real_rule_ids = [100227, 100221, 100277, 100272, 100216, 100101, 100215, 100223, 100217, 100271]
-        real_counts = [184518, 184518, 184195, 184195, 184130, 184130, 323, 65, 65, 22]
+        # Import time_utils for integration
+        try:
+            from time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
+        except ImportError:
+            print("Warning: time_utils not available, using manual calculation")
+            def get_window_start_end(timestamp, window_size=30):
+                minutes = timestamp.minute
+                window_start = timestamp.replace(minute=(minutes // 30) * 30, second=0, microsecond=0)
+                window_end = window_start + timedelta(minutes=30)
+                return window_start, window_end
+            
+            def get_window_id(timestamp):
+                start, _ = get_window_start_end(timestamp)
+                return start.strftime("%Y-%m-%d_%H-%M-%S")
+        
+        # Real rule IDs from AQLjsonResult.json
+        real_rule_ids = [100227, 100221, 100272, 100277, 100101, 100216, 100215, 100225, 100218, 100265]
+        real_counts = [211656, 211656, 210870, 210838, 210776, 210774, 6561, 6561, 6561, 6561]
         
         base_time = datetime.now().replace(minute=0, second=0, microsecond=0)
         
-        # 1. Insert real AQL-style qradar_events (detection mode)
-        print("   Inserting qradar_events with real AQL schema...")
-        events = []
+        # Generate 30-minute detection windows
+        detection_windows = []
         
-        # Generate realistic timeline with 30-minute windows
-        for window_idx in range(48):  # 24 hours worth
-            window_start = base_time - timedelta(hours=window_idx)
+        for window_idx in range(48):  # 24 hours worth of 30-min windows
+            event_time = base_time - timedelta(minutes=30 * window_idx)
             
-            # Add events for each rule in this window
-            for rule_idx, (rule_id, count) in enumerate(zip(real_rule_ids, real_counts)):
-                # Add some realistic variation to counts
+            # Use time_utils to get proper window boundaries
+            window_start, window_end = get_window_start_end(event_time)
+            window_id = get_window_id(event_time)
+            
+            # Create feature vector with realistic variation
+            feature_vector = {}
+            rule_counts = {}
+            total_triggers = 0
+            
+            for rule_id, base_count in zip(real_rule_ids, real_counts):
                 variation = np.random.uniform(0.8, 1.2)
-                adjusted_count = int(count * variation)
-                
-                event = {
-                    'rule_id': int(rule_id),
-                    'timestamp': window_start,
-                    'count': int(adjusted_count),
-                    'hostname': None,  # Real AQL data has null hostname
-                    'source': 'qradar_aql',
-                    'window_id': f"window_{window_idx}"
-                }
-                events.append(event)
-        
-        if events:
-            collection = self.db['qradar_events']
-            result = collection.insert_many(events)
-            print(f"   Inserted {len(result.inserted_ids)} qradar_events")
-        
-        # 2. Insert detection_results with realistic predictions
-        print("   Inserting detection_results...")
-        results = []
-        
-        for window_idx in range(48):
-            timestamp = base_time - timedelta(hours=window_idx)
+                count = int(base_count * variation)
+                rule_str = str(rule_id)
+                feature_vector[rule_str] = count
+                rule_counts[rule_str] = count
+                total_triggers += count
             
-            # Simulate realistic detection rates (low false positive rate)
-            is_anomaly = np.random.choice([0, 1], p=[0.95, 0.05])
+            # Create host-level breakdown
+            host_triggers = {
+                "192.168.153.166": {
+                    "total_triggers": int(total_triggers * 0.3),
+                    "rules": {str(rule_id): int(count * 0.3) 
+                             for rule_id, count in zip(real_rule_ids[:5], real_counts[:5])}
+                },
+                "DESKTOP-64-EDR": {
+                    "total_triggers": int(total_triggers * 0.7),
+                    "rules": {str(rule_id): int(count * 0.7) 
+                             for rule_id, count in zip(real_rule_ids, real_counts)}
+                }
+            }
+            
+            detection_window = {
+                "_id": window_id,
+                "window_start": window_start,
+                "window_end": window_end,
+                "query_time": datetime.now(),
+                "feature_vector": feature_vector,
+                "rule_counts": rule_counts,
+                "host_triggers": host_triggers,
+                "total_triggers": total_triggers,
+                "total_rules_triggered": len(real_rule_ids)
+            }
+            
+            detection_windows.append(detection_window)
+        
+        if detection_windows:
+            collection = self.db['qradar_detection_windows']
+            result = collection.insert_many(detection_windows)
+            print(f"Inserted {len(result.inserted_ids)} detection windows")
+        
+        # Insert detection results
+        detection_results = []
+        for window_idx in range(48):
+            event_time = base_time - timedelta(minutes=30 * window_idx)
+            window_id = get_window_id(event_time)
+            
+            # Simulate realistic detection with low false positive rate
+            is_anomaly = np.random.choice([0, 1], p=[0.97, 0.03])
             
             result = {
-                'timestamp': timestamp,
-                'hostname': f'WINDOW-{window_idx:03d}',  # Synthetic hostname for window
-                'prediction': int(is_anomaly),
-                'confidence': float(np.random.uniform(0.85, 0.99) if is_anomaly else np.random.uniform(0.70, 0.85)),
-                'window_id': f"window_{window_idx}",
-                'model_version': 'ransomware_detector_v1.0',
-                'rule_count': int(len(real_rule_ids)),
-                'total_events': int(sum(real_counts))
+                "window_id": window_id,
+                "timestamp": event_time,
+                "prediction": int(is_anomaly),
+                "confidence": float(np.random.uniform(0.85, 0.99) if is_anomaly else np.random.uniform(0.70, 0.85)),
+                "model_version": "ransomware_detector_v1.0",
+                "total_events": sum(real_counts),
+                "unique_rules": len(real_rule_ids)
             }
-            results.append(result)
+            detection_results.append(result)
         
-        if results:
+        if detection_results:
             collection = self.db['detection_results']
-            result = collection.insert_many(results)
-            print(f"   Inserted {len(result.inserted_ids)} detection results")
+            result = collection.insert_many(detection_results)
+            print(f"Inserted {len(result.inserted_ids)} detection results")
         
     def verify_setup(self):
         """Verify the setup is working correctly"""
@@ -412,9 +455,18 @@ class MongoDBOfflineSetup:
         return True
     
     def create_config_file(self):
-        """Create configuration file for detection-only mode with real rule count"""
-        # Count actual rules from result.json
-        real_rule_ids = [100227, 100221, 100277, 100272, 100216, 100101, 100215, 100223, 100217, 100271]
+        """Create updated configuration file with detection-only schema"""
+        # Load actual rule data from AQLjsonResult.json
+        aql_file = os.path.join(os.path.dirname(__file__), '..', 'AQLjsonResult.json')
+        rule_ids = []
+        
+        try:
+            with open(aql_file, 'r') as f:
+                aql_data = json.load(f)
+                rule_ids = list(set(str(event['Custom Rule']) for event in aql_data.get('events', [])))
+        except:
+            # Fallback to known rules
+            rule_ids = ["100227", "100221", "100272", "100277", "100101", "100216", "100215", "100225", "100218", "100265"]
         
         config = {
             "mongodb": {
@@ -425,27 +477,39 @@ class MongoDBOfflineSetup:
             },
             "pipeline": {
                 "mode": "detection_only",
+                "query_frequency_minutes": 15,
                 "window_size": "30min",
-                "timezone": "local",
+                "timezone": "HKT",
                 "retention_days": 7
             },
             "collections": {
-                "qradar_events": "qradar_events",
+                "detection_windows": "qradar_detection_windows",
                 "detection_results": "detection_results"
             },
             "data_schema": {
-                "qradar_events": {
-                    "rule_id": "integer",
-                    "timestamp": "datetime",
-                    "count": "integer",
-                    "hostname": "null",
-                    "source": "string"
+                "detection_windows": {
+                    "_id": "string (window_id from time_utils)",
+                    "window_start": "datetime (from time_utils)",
+                    "window_end": "datetime (from time_utils)",
+                    "query_time": "datetime",
+                    "feature_vector": "object (rule_id -> count)",
+                    "rule_counts": "object (rule_id -> count)",
+                    "host_triggers": "object (hostname -> {total_triggers, rules})",
+                    "total_triggers": "integer",
+                    "total_rules_triggered": "integer"
                 }
             },
             "rule_mapping": {
-                "total_rules": len(real_rule_ids),
-                "rule_ids": real_rule_ids,
-                "source": "result.json"
+                "total_rules": len(rule_ids),
+                "rule_ids": rule_ids,
+                "source": "AQLjsonResult.json",
+                "description": "Dynamic rule extraction from QRadar AQL results"
+            },
+            "time_utils": {
+                "timezone": "Asia/Hong_Kong",
+                "window_size_minutes": 30,
+                "tolerance_seconds": 5,
+                "timestamp_format": "%b %d, %Y, %I:%M:%S %p"
             }
         }
         
@@ -509,13 +573,16 @@ class MongoDBOfflineSetup:
         self.create_config_file()
         
         print("\n" + "=" * 50)
-        print("MongoDB Offline Setup Complete!")
+        print("Updated MongoDB Detection Setup Complete!")
         print(f"Database: {self.db_name}")
-        print(f"Connection: {self.connection_string}")
+        print(f"Collection: qradar_detection_windows")
+        print(f"Mode: Detection-only with 30-min sliding windows")
+        print(f"Timezone: HKT (Asia/Hong_Kong)")
         print("Next steps:")
-        print("   - Use data_loader.py with mode='detect' for MongoDB data loading")
-        print("   - Run pipeline/data_loader.py to test data ingestion")
-        print("   - Use shared_utils/config.py for configuration management")
+        print("   - Use mongodb_connection.py for unified MongoDB operations")
+        print("   - Run tests/test_aql_insert.py to test time_utils integration")
+        print("   - Use mongodb/insert_DB.py for production data processing")
+        print("   - Check mongodb_config.json for configuration details")
         
         return True
     

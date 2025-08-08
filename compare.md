@@ -113,7 +113,7 @@
                                                         |
                                                         V
                           +-------------------------------------------------------------+
-                          |                   feature_aggregator.py                     |
+                          |                   feature_aggregator.py(John)                     |
                           |  • Groups by hostname & 30-min window                     |
                           |  • Aggregates Rule counts                                   |
                           +-------------------------------------------------------------+

@@ -2,42 +2,37 @@
   "mongodb": {
     "host": "localhost",
     "port": 27017,
-    "db_name": "qradar_ml",
+    "db_name": "qradar_detection",
     "connection_string": "mongodb://localhost:27017/"
   },
   "pipeline": {
     "mode": "detection_only",
+    "query_frequency_minutes": 15,
     "window_size": "30min",
-    "timezone": "local",
+    "timezone": "HKT",
     "retention_days": 7
   },
   "collections": {
-    "qradar_events": "qradar_events",
+    "detection_windows": "qradar_detection_windows",
     "detection_results": "detection_results"
   },
   "data_schema": {
-    "qradar_events": {
-      "rule_id": "integer",
-      "timestamp": "datetime",
-      "count": "integer",
-      "hostname": "null",
-      "source": "string"
+    "detection_windows": {
+      "_id": "string",
+      "window_start": "datetime",
+      "window_end": "datetime",
+      "query_time": "datetime",
+      "feature_vector": "object",
+      "rule_counts": "object",
+      "host_triggers": "object",
+      "total_triggers": "integer",
+      "total_rules_triggered": "integer"
     }
   },
   "rule_mapping": {
-    "total_rules": 10,
-    "rule_ids": [
-      100227,
-      100221,
-      100277,
-      100272,
-      100216,
-      100101,
-      100215,
-      100223,
-      100217,
-      100271
-    ],
-    "source": "result.json"
+    "total_rules": 1500,
+    "comment": "rules number should match the number of rules in the Qradar_rule_folder",
+    "source": "Qradar_rule_folder",
+    "description": "Dynamic rule extraction from Qradar_rule folder for detection"
   }
 }
