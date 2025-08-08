@@ -1,4 +1,4 @@
-# AIDetection4All - Ransomware Detection System
+# AIDetection4Ransomware - Ransomware Detection System
 
 A supervised machine learning system specifically designed to detect ransomware activity using QRadar rule trigger frequencies. Built for enterprise-scale detection with support for both offline deployment and production environments.
 
@@ -96,7 +96,7 @@ process_qradar_data(
 ## 📁 Project Structure
 
 ```
-AIDetection4All/
+AIDetection4Ransomware/
 ├── mongodb/                    # Database layer
 │   ├── mongodb_connection.py   # Unified MongoDB operations
 │   ├── insert_DB.py           # QRadar data processing

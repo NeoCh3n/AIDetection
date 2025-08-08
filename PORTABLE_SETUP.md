@@ -41,7 +41,7 @@ python qradar_to_matrix.py your_data.csv
 ## File Structure
 
 ```
-AIDetection4All/
+AIDetection4Ransomware/
 ├── Qradar_rule/              # Rule files directory
 │   ├── qradar_rules.csv      # Standard rules
 │   ├── qradar_aderules.csv   # ADE rules
