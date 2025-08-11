@@ -1,4 +1,7 @@
-import run_log
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from system import run_log
 import requests
 import urllib3
 urllib3.disable_warnings()
@@ -42,5 +45,9 @@ def create_searches_Qradar(qradar_address = Qradar_address_default, AQL = AQL_de
         return
 
 if __name__ == "__main__":
-    search_id = create_searches_Qradar(qradar_address = Qradar_address_default, AQL = AQL_default, request_header = request_header_default)["search_id"]
-    print(search_id)
+    result = create_searches_Qradar(qradar_address = Qradar_address_default, AQL = AQL_default, request_header = request_header_default)
+    if result and "search_id" in result:
+        search_id = result["search_id"]
+        print(search_id)
+    else:
+        print("Error: Failed to create search or no search_id returned")

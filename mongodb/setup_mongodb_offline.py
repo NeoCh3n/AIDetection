@@ -34,11 +34,29 @@ except ImportError:
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
 class MongoDBOfflineSetup:
-    def __init__(self, db_name="qradar_detection", host="localhost", port=27017):
-        self.db_name = db_name
-        self.host = host
-        self.port = port
-        self.connection_string = f"mongodb://{host}:{port}/"
+    def __init__(self, config_path=None):
+        # Load configuration from mongodb_config.json
+        if config_path is None:
+            config_path = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
+        
+        try:
+            with open(config_path, 'r') as f:
+                self.config = json.load(f)
+        except FileNotFoundError:
+            # Create default config if not exists
+            self.config = self._create_default_config()
+            with open(config_path, 'w') as f:
+                json.dump(self.config, f, indent=2)
+        
+        self.mongo_config = self.config['mongodb']
+        self.pipeline_config = self.config['pipeline']
+        self.collections_config = self.config['collections']
+        
+        self.db_name = self.mongo_config['db_name']
+        self.host = self.mongo_config['host']
+        self.port = self.mongo_config['port']
+        self.connection_string = self.mongo_config['connection_string']
+        
         self.client = None
         self.db = None
         self.platform = platform.system()
@@ -56,7 +74,7 @@ class MongoDBOfflineSetup:
         
     def check_mongodb_installation(self):
         """Check if MongoDB is installed and running - cross-platform"""
-        print("🔍 Checking MongoDB installation...")
+        print("Checking MongoDB installation...")
         print(f"   Platform: {self.platform}")
         if self.distro:
             print(f"   Distribution: {self.distro}")
@@ -285,7 +303,7 @@ class MongoDBOfflineSetup:
             except (ConnectionFailure, ServerSelectionTimeoutError) as e:
                 print(f"Connection attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
-                    print(f"⏳ Retrying in {retry_delay} seconds...")
+                    print(f"Retrying in {retry_delay} seconds...")
                     import time
                     time.sleep(retry_delay)
                 else:
@@ -531,7 +549,7 @@ class MongoDBOfflineSetup:
     def run_setup(self):
         """Run the complete setup process"""
         print("MongoDB Offline Setup Starting...")
-        print("=" * 50)
+        print("-" * 50)
         print(f"   Target Platform: {self.platform}")
         if self.distro:
             print(f"   Distribution: {self.distro}")
@@ -581,7 +599,7 @@ class MongoDBOfflineSetup:
         # Create config file
         self.create_config_file()
         
-        print("\n" + "=" * 50)
+        print("\n" + "-" * 50)
         print("Updated MongoDB Detection Setup Complete!")
         print(f"Database: {self.db_name}")
         print(f"Collection: qradar_sliding_windows")

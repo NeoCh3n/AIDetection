@@ -17,10 +17,10 @@ from datetime import datetime, timedelta
 
 # Add shared_utils to path for time_utils integration
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'system'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
-import run_log
+from shared_utils.time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
+from system import run_log
 
 
 class MongoDBConnectionManager:
@@ -44,6 +44,12 @@ class MongoDBConnectionManager:
         self.config = self._load_config()
         self.client = None
         self.db = None
+        
+        # Initialize collections from config
+        collection_config = self.config['collections']
+        self.detection_windows_collection_name = collection_config['detection_windows']
+        self.detection_results_collection_name = collection_config['detection_results']
+        
         self.detection_windows_collection = None
         self.detection_results_collection = None
         
@@ -76,9 +82,8 @@ class MongoDBConnectionManager:
             self.db = self.client[mongo_config['db_name']]
             
             # Initialize collections
-            collection_config = self.config['collections']
-            self.detection_windows_collection = self.db[collection_config['detection_windows']]
-            self.detection_results_collection = self.db[collection_config['detection_results']]
+            self.detection_windows_collection = self.db[self.detection_windows_collection_name]
+            self.detection_results_collection = self.db[self.detection_results_collection_name]
             
             # Test connection
             self.client.admin.command('ping')

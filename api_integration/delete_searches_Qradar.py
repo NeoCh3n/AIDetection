@@ -1,4 +1,7 @@
-import run_log
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from system import run_log
 import requests
 import urllib3
 urllib3.disable_warnings()

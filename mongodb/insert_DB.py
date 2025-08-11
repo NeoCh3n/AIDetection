@@ -1,7 +1,7 @@
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'system'))
-import run_log
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from system import run_log
 from datetime import datetime, timedelta
 import json
 import pandas as pd
@@ -9,16 +9,37 @@ import numpy as np
 from typing import Dict, List, Any, Tuple, Generator
 import delete_DB  # # Import delete module for data lifecycle management
 
-#### MongoDB configuration for detection-only mode
-CONNECTION_STRING_default = "mongodb://localhost:27017/"  # # Local MongoDB connection for offline use
-NAME_DB_default = "qradar_detection"  # # Database for detection pipeline
-COLLECTION_default = "qradar_sliding_windows"  # Collection for 30-min detection windows (unified)
+#### MongoDB configuration loaded from config file
+import json
+import os
 
-# Import get_DB with path fix
-import importlib.util
-spec = importlib.util.spec_from_file_location("get_DB", os.path.join(os.path.dirname(__file__), 'get_DB.py'))
-get_DB = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(get_DB)
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
+
+def load_config():
+    """Load configuration from mongodb_config.json"""
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        run_log.run_log("ERROR", f"Failed to load config: {str(e)}")
+        return None
+
+# Load configuration
+config = load_config()
+if config:
+    CONNECTION_STRING_default = config['mongodb']['connection_string']
+    NAME_DB_default = config['mongodb']['db_name']
+    COLLECTION_default = config['collections']['detection_windows']
+    RETENTION_DAYS = config['pipeline']['retention_days']
+else:
+    # Fallback defaults
+    CONNECTION_STRING_default = "mongodb://localhost:27017/"
+    NAME_DB_default = "qradar_detection"
+    COLLECTION_default = "qradar_sliding_windows"
+    RETENTION_DAYS = 7
+
+# Import get_DB with corrected path
+import get_DB
 
 #### Data processing constants
 MAX_BSON_SIZE = 16 * 1024 * 1024  # # 16MB MongoDB document limit
@@ -38,9 +59,11 @@ class QRadarDataProcessor:
         
     def connect(self):
         """# # Connect to MongoDB for offline deployment"""
-        self.db = get_DB.get_database(self.connection_string, self.db_name)
-        self.collection = self.db[COLLECTION_default]
-        return self.db is not None
+        self.db = get_DB.get_database()
+        if self.db is not None:
+            self.collection = self.db[COLLECTION_default]
+            return True
+        return False
     
     def create_production_indexes(self):
         """
@@ -90,8 +113,7 @@ class QRadarDataProcessor:
         # # Uses time_utils.py for consistent timestamp processing
         """
         # Import time_utils for consistent processing
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
-        from time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
+        from shared_utils.time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
         
         # Group events by 30-minute windows with host-level breakdown
         window_groups = {}

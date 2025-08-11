@@ -1,4 +1,7 @@
-import run_log
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from system import run_log
 import requests
 import urllib3
 urllib3.disable_warnings()
@@ -42,7 +45,8 @@ def result_searches_Qradar(Qradar_address = Qradar_address_default , search_id =
 #### default
 if __name__ == "__main__":
     get_response_ariel_searches_results = result_searches_Qradar(Qradar_address = Qradar_address_default , search_id = search_id_default , request_header = request_header_default )
-    try:
-        print("Number of items:",len(get_response_ariel_searches_results["events"]))
-    except:
+    if get_response_ariel_searches_results and "events" in get_response_ariel_searches_results:
+        print("Number of items:", len(get_response_ariel_searches_results["events"]))
+    else:
+        print("Error: No results returned or unexpected response format")
         print(get_response_ariel_searches_results)
