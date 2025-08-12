@@ -3,6 +3,66 @@
 Updated MongoDB Offline Setup and Initialization Script
 Compatible with RHEL 7.9 and macOS ARM
 
+COMPLETE MONGODB RULE SETUP PLAN
+================================
+
+PHASE 1: RULE DISCOVERY & COUNTING
+---------------------------------
+1. Use shared_utils/qradar_rule_manager.py to discover all QRadar rules
+   - Supports both API mode (fetch from QRadar) and file mode (load from CSV)
+   - Discovers rules from Qradar_rule/ directory
+   - Current CSV files: qradar_BBrules.csv, qradar_customrules.csv
+
+2. Count exact number of rules
+   - Run: python shared_utils/qradar_rule_manager.py file --stats
+   - This generates rule_mapping.json with exact count
+
+PHASE 2: CONFIGURATION UPDATE
+-----------------------------
+3. Update mongodb_config.json with exact rule count:
+   - Edit line 33: "total_rules": <actual_count_from_step_2>
+   - Verify "rule_mapping.source" is "Qradar_rule_folder"
+   - Ensure rule_ids array matches discovered rules
+
+PHASE 3: MONGODB SETUP
+----------------------
+4. Run this setup script to:
+   - Verify MongoDB installation and status
+   - Create detection collections with proper indexes
+   - Set up schema for 30-minute sliding windows
+   - Configure time_utils integration
+   - Insert sample data for testing
+
+PHASE 4: VALIDATION
+-------------------
+5. Validate setup:
+   - Verify rule mapping file exists: rule_mapping.json
+   - Confirm MongoDB collections are created
+   - Test rule count matches configuration
+
+EXECUTION ORDER:
+--------------
+cd /Users/chaoyanchen/Desktop/AIDetection4Ransomware
+
+# Step 1: Discover and count rules
+python shared_utils/qradar_rule_manager.py file --stats
+
+# Step 2: Update configuration (manual edit)
+vim mongodb/mongodb_config.json  # Update total_rules field
+
+# Step 3: Run complete setup
+python mongodb/setup_mongodb_offline.py
+
+# Step 4: Validate setup
+python shared_utils/qradar_rule_manager.py file --validate
+
+EXPECTED LOCATIONS:
+------------------
+- Rule CSV files: /Users/chaoyanchen/Desktop/AIDetection4Ransomware/Qradar_rule/
+- Rule mapping: /Users/chaoyanchen/Desktop/AIDetection4Ransomware/rule_mapping.json
+- Configuration: /Users/chaoyanchen/Desktop/AIDetection4Ransomware/mongodb/mongodb_config.json
+- MongoDB collections: Created inside MongoDB (not files)
+
 This updated script integrates with:
 1. Unified MongoDB connection utility (mongodb_connection.py)
 2. time_utils.py for consistent timestamp processing
@@ -19,17 +79,16 @@ import json
 import numpy as np
 
 # Add required paths for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'system'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'system'))
 
 try:
-    import pymongo
     from pymongo import MongoClient, IndexModel
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 except ImportError:
     print("Installing required packages...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pymongo"])
-    import pymongo
     from pymongo import MongoClient, IndexModel
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
@@ -61,6 +120,47 @@ class MongoDBOfflineSetup:
         self.db = None
         self.platform = platform.system()
         self.distro = self._get_linux_distro()
+        
+    def _create_default_config(self):
+        """Create default configuration for MongoDB setup"""
+        return {
+            "mongodb": {
+                "host": "localhost",
+                "port": 27017,
+                "db_name": "qradar_detection",
+                "connection_string": "mongodb://localhost:27017/"
+            },
+            "pipeline": {
+                "mode": "detection_only",
+                "query_frequency_minutes": 15,
+                "window_size": "30min",
+                "timezone": "HKT",
+                "retention_days": 7
+            },
+            "collections": {
+                "detection_windows": "qradar_sliding_windows",
+                "detection_results": "detection_results"
+            },
+            "data_schema": {
+                "detection_windows": {
+                    "_id": "string",
+                    "window_start": "datetime",
+                    "window_end": "datetime",
+                    "query_time": "datetime",
+                    "feature_vector": "object",
+                    "rule_counts": "object",
+                    "host_triggers": "object",
+                    "total_triggers": "integer",
+                    "total_rules_triggered": "integer"
+                }
+            },
+            "rule_mapping": {
+                "total_rules": 1500,
+                "comment": "rules number should match the number of rules in the Qradar_rule_folder",
+                "source": "Qradar_rule_folder",
+                "description": "Dynamic rule extraction from QRadar AQL results"
+            }
+        }
         
     def _get_linux_distro(self):
         """Detect Linux distribution"""
@@ -310,12 +410,12 @@ class MongoDBOfflineSetup:
                     print("Failed to connect to MongoDB")
                     return False
     
-    def setup_collections(self):
+    def setup_collections(self, force_recreate=False):
         """Setup collections for detection-only pipeline with time_utils integration"""
         print("Setting up detection collections...")
         
         # Collections for detection-only mode with new schema
-        collections = {
+        collections_dict = {
             'qradar_sliding_windows': [
                 IndexModel([("window_start", -1), ("window_end", -1)]),
                 IndexModel([("query_time", -1)]),
@@ -333,43 +433,73 @@ class MongoDBOfflineSetup:
             ]
         }
         
-        for collection_name, indexes in collections.items():
+        if not self.db:
+            raise RuntimeError("Database not connected")
+            
+        for collection_name, indexes in collections_dict.items():
             collection = self.db[collection_name]
             
-            # Drop existing indexes (except _id)
-            collection.drop_indexes()
+            # Check if collection exists and has data
+            doc_count = collection.count_documents({})
             
-            # Create new indexes
-            if indexes:
-                collection.create_indexes(indexes)
-                print(f"Created indexes for {collection_name}")
+            if doc_count > 0 and not force_recreate:
+                print(f"Collection {collection_name} has {doc_count} documents - preserving existing data and indexes")
+                # Verify required indexes exist, create missing ones
+                existing_indexes = [idx['name'] for idx in collection.list_indexes()]
+                missing_indexes = []
+                
+                for new_idx in indexes or []:
+                    idx_name = new_idx.document.get('name', f"idx_{collection_name}")
+                    if idx_name not in existing_indexes:
+                        missing_indexes.append(new_idx)
+                
+                if missing_indexes:
+                    collection.create_indexes(missing_indexes)
+                    print(f"Created {len(missing_indexes)} missing indexes for {collection_name}")
+                else:
+                    print(f"Verified {collection_name} has all required indexes")
             else:
-                print(f"Verified {collection_name} exists")
+                # Safe to drop and recreate indexes for empty collections or forced recreation
+                if force_recreate and doc_count > 0:
+                    print(f"Force recreating indexes for {collection_name} with {doc_count} documents")
+                
+                if doc_count == 0:
+                    print(f"Setting up fresh collection: {collection_name}")
+                
+                # Drop existing indexes (except _id) only for empty collections or forced recreation
+                if force_recreate or doc_count == 0:
+                    collection.drop_indexes()
+                
+                # Create new indexes
+                if indexes:
+                    collection.create_indexes(indexes)
+                    print(f"Created indexes for {collection_name}")
+                else:
+                    print(f"Verified {collection_name} exists")
     
     def insert_sample_data(self):
         """Insert sample detection data using real AQL schema and time_utils"""
         print("Inserting sample detection data...")
         
-        # Import time_utils for integration
-        try:
-            from time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
-        except ImportError:
-            print("Warning: time_utils not available, using manual calculation")
-            def get_window_start_end(timestamp, window_size=30):
-                minutes = timestamp.minute
-                window_start = timestamp.replace(minute=(minutes // 30) * 30, second=0, microsecond=0)
-                window_end = window_start + timedelta(minutes=30)
-                return window_start, window_end
-            
-            def get_window_id(timestamp):
-                start, _ = get_window_start_end(timestamp)
-                return start.strftime("%Y-%m-%d_%H-%M-%S")
+        if not self.db:
+            raise RuntimeError("Database connection not established. Call connect_to_mongodb() first.")
+        
+        # Define local time utility functions to avoid import issues
+        def get_window_start_end(timestamp):
+            """Calculate window start and end times"""
+            minutes = timestamp.minute
+            window_start = timestamp.replace(minute=(minutes // 30) * 30, second=0, microsecond=0)
+            window_end = window_start + timedelta(minutes=30)
+            return window_start, window_end
+        
+        def get_window_id(timestamp):
+            """Generate window ID from timestamp"""
+            start, _ = get_window_start_end(timestamp)
+            return start.strftime("%Y-%m-%d_%H-%M-%S")
         
         # Real rule IDs from AQLjsonResult.json
         real_rule_ids = [100227, 100221, 100272, 100277, 100101, 100216, 100215, 100225, 100218, 100265]
         real_counts = [211656, 211656, 210870, 210838, 210776, 210774, 6561, 6561, 6561, 6561]
-        
-        base_time = datetime.now().replace(minute=0, second=0, microsecond=0)
         
         # Simulate 15-minute queries upserting 30-minute window documents
         # Align base time to nearest 15-minute mark
@@ -462,6 +592,10 @@ class MongoDBOfflineSetup:
         """Verify the setup is working correctly"""
         print("Verifying setup...")
         
+        if not self.db:
+            print("Error: Database not connected")
+            return False
+        
         # Check collections
         collections = self.db.list_collection_names()
         print(f"Available collections: {collections}")
@@ -474,10 +608,15 @@ class MongoDBOfflineSetup:
         if count > 0:
             # Show first document
             doc = collection.find_one()
-            print(f"Sample window_id: {doc.get('_id')}")
-            print(f"   Time window: {doc.get('window_start')} -> {doc.get('window_end')}")
-            print(f"   Total triggers: {doc.get('total_triggers')}")
-            print(f"   Window sequence: {doc.get('window_sequence')}")
+            if doc:
+                print(f"Sample window_id: {doc.get('_id')}")
+                print(f"   Time window: {doc.get('window_start')} -> {doc.get('window_end')}")
+                print(f"   Total triggers: {doc.get('total_triggers')}")
+                print(f"   Window sequence: {doc.get('window_sequence')}")
+            else:
+                print("No sample data available")
+        else:
+            print("No documents in collection")
         
         return True
     
@@ -546,7 +685,7 @@ class MongoDBOfflineSetup:
         
         print(f"Configuration saved to {config_path}")
     
-    def run_setup(self):
+    def run_setup(self, force_recreate=False):
         """Run the complete setup process"""
         print("MongoDB Offline Setup Starting...")
         print("-" * 50)
@@ -587,16 +726,30 @@ class MongoDBOfflineSetup:
         if not self.connect_to_mongodb():
             return False
         
-        # Setup collections
-        self.setup_collections()
+        if not self.db:
+            print("Error: Failed to establish database connection")
+            return False
         
-        # Insert sample data
-        self.insert_sample_data()
+        # Setup collections with safety check
+        self.setup_collections(force_recreate=force_recreate)
+        
+        # Insert sample data only for fresh setup or forced recreation
+        collection_name = 'qradar_sliding_windows'
+        try:
+            collection = self.db[collection_name]
+            doc_count = collection.count_documents({})
+            if force_recreate or doc_count == 0:
+                self.insert_sample_data()
+            else:
+                print("Skipping sample data insertion - collection already has data")
+        except Exception as e:
+            print(f"Error checking collection: {e}")
+            return False
         
         # Verify setup
         self.verify_setup()
         
-        # Create config file
+        # Update config file with current settings
         self.create_config_file()
         
         print("\n" + "-" * 50)
@@ -605,6 +758,7 @@ class MongoDBOfflineSetup:
         print(f"Collection: qradar_sliding_windows")
         print(f"Mode: Detection-only with 30-min sliding windows")
         print(f"Timezone: HKT (Asia/Hong_Kong)")
+        print(f"Force recreate: {'Yes' if force_recreate else 'No'}")
         print("Next steps:")
         print("   - Use mongodb_connection.py for unified MongoDB operations")
         print("   - Run tests/test_aql_insert.py to test time_utils integration")
