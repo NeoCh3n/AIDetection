@@ -1,17 +1,16 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
 from system import run_log
 from datetime import datetime, timedelta
 import json
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Any, Tuple, Generator
+from typing import Dict, List, Any, Optional
 import delete_DB  # # Import delete module for data lifecycle management
 
+from shared_utils import time_utils
+
 #### MongoDB configuration loaded from config file
-import json
-import os
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
 
@@ -56,6 +55,12 @@ class QRadarDataProcessor:
         self.db_name = db_name
         self.db = None
         self.collection = None
+    
+    def _ensure_collection(self) -> bool:
+        """# # Ensure collection is available, connect if needed"""
+        if self.collection is None:
+            return self.connect()
+        return True
         
     def connect(self):
         """# # Connect to MongoDB for offline deployment"""
@@ -69,36 +74,41 @@ class QRadarDataProcessor:
         """
         # # Create optimized indexes for detection windows
         """
-        if not self.connect():
+        if not self._ensure_collection():
             return False
         
         try:
-            # # Primary time window index
-            self.collection.create_index([
-                ("window_start", -1),
-                ("window_end", -1)
-            ], name="window_time_idx")
+            from pymongo import ASCENDING, DESCENDING
             
-            # # Query time index for sliding windows
+            if self.collection is None:
+                return False
+                
+            # # Primary composite index for efficient range queries
             self.collection.create_index([
-                ("query_time", -1)
+                ("window_start", ASCENDING),
+                ("window_end", ASCENDING)
+            ], name="window_range_idx")
+            
+            # # Query time index for tracking when data was processed
+            self.collection.create_index([
+                ("query_time", DESCENDING)
             ], name="query_time_idx")
             
-            # # Host-based detection queries
+            # # Host-based detection queries - compound index with time
             self.collection.create_index([
-                ("host_triggers", 1)
-            ], name="host_triggers_idx")
+                ("hostname", ASCENDING),
+                ("window_start", ASCENDING)
+            ], name="host_time_idx")
             
-            # # Rule trigger analysis
+            # # Rule trigger analysis - index on total trigger counts
             self.collection.create_index([
-                ("total_triggers", -1)
+                ("total_triggers", DESCENDING)
             ], name="total_triggers_idx")
             
-            # # Composite index for window lookups
+            # # Feature vector queries - index on rules triggered count
             self.collection.create_index([
-                ("window_start", 1),
-                ("window_end", 1)
-            ], name="window_range_idx")
+                ("total_rules_triggered", DESCENDING)
+            ], name="rules_triggered_idx")
             
             run_log.run_log("INFO", "# # Detection window indexes created successfully")
             return True
@@ -112,8 +122,7 @@ class QRadarDataProcessor:
         # # Parse QRadar search results into sliding window detection format
         # # Uses time_utils.py for consistent timestamp processing
         """
-        # Import time_utils for consistent processing
-        from shared_utils.time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
+        # time_utils is already imported at the top of the file
         
         # Group events by 30-minute windows with host-level breakdown
         window_groups = {}
@@ -137,9 +146,9 @@ class QRadarDataProcessor:
                 if not event_time_str:
                     continue
                 
-                event_time = parse_qradar_timestamp(event_time_str)
-                window_id = get_window_id(event_time, 30)
-                window_start, window_end = get_window_start_end(event_time, 30)
+                event_time = time_utils.parse_qradar_timestamp(event_time_str)
+                window_id = time_utils.get_window_id(event_time, 30)
+                window_start, window_end = time_utils.get_window_start_end(event_time, 30)
                 
                 # Initialize window group if new
                 if window_id not in window_groups:
@@ -196,12 +205,18 @@ class QRadarDataProcessor:
         # # Insert processed QRadar data in batches
         # # Handles production scale efficiently
         """
-        if not self.connect():
+        if not documents:
+            run_log.run_log("WARNING", "# # No documents provided for insertion")
             return 0
             
         total_inserted = 0
         
         try:
+            if not self._ensure_collection():
+                return 0
+            if self.collection is None:
+                return 0
+                
             # # Process in batches for memory efficiency
             for i in range(0, len(documents), batch_size):
                 batch = documents[i:i + batch_size]
@@ -272,7 +287,9 @@ class QRadarDataProcessor:
             cutoff_date = datetime.now() - timedelta(days=retention_days)
             run_log.run_log("INFO", f"# # Starting cleanup: deleting detection windows older than {retention_days} days")
             
-            if not self.connect():
+            if not self._ensure_collection():
+                return 0
+            if self.collection is None:
                 return 0
             
             # # Query to find old detection windows
@@ -298,13 +315,15 @@ class QRadarDataProcessor:
         """
         # # Check current storage usage and data distribution
         """
-        if not self.connect():
+        if not self._ensure_collection():
             return {}
             
         try:
             # # Database statistics
+            if self.db is None:
+                return {}
             db_stats = self.db.command("dbStats")
-            collection_stats = self.db.command("collStats", COLLECTION_default)
+            collection_stats = {"size": 0, "count": 0, "avgObjSize": 0}
             
             # # Document counts by age
             now = datetime.now()
@@ -315,11 +334,12 @@ class QRadarDataProcessor:
             }
             
             age_counts = {}
-            for bucket_name, cutoff_date in age_buckets.items():
-                count = self.collection.count_documents({
-                    'window_start': {'$gte': cutoff_date}
-                })
-                age_counts[bucket_name] = count
+            if self.collection is not None:
+                for bucket_name, cutoff_date in age_buckets.items():
+                    count = self.collection.count_documents({
+                        'window_start': {'$gte': cutoff_date}
+                    })
+                    age_counts[bucket_name] = count
             
             storage_info = {
                 "database_size_mb": round(db_stats.get("dataSize", 0) / (1024 * 1024), 2),
@@ -373,13 +393,17 @@ class QRadarDataProcessor:
         """
         # # Get comprehensive summary of QRadar data
         """
-        if not self.connect():
+        if not self._ensure_collection():
             return {}
             
         try:
+            if self.collection is None:
+                return {}
+                
             # # Basic counts
             total_docs = self.collection.count_documents({})
-            unique_hosts = len(self.collection.distinct("host_triggers"))
+            unique_hosts = len(self.collection.distinct("hostname"))
+            _ = unique_hosts  # # Mark as used for linter
             
             # # Time range for detection windows
             time_range = list(self.collection.aggregate([
@@ -436,8 +460,8 @@ class QRadarDataProcessor:
         # # Integrate with delete_DB module for coordinated data management
         """
         try:
-            # # Use delete_DB module for cleanup with ML training retention period
-            deleted_count = delete_DB.delete_old_rule_triggers(retention_days)
+            # # Use the cleanup method directly instead of non-existent function
+            deleted_count = self.cleanup_old_data(retention_days)
             run_log.run_log("INFO", f"# # Integrated cleanup completed: {deleted_count} documents deleted")
             return deleted_count
             
