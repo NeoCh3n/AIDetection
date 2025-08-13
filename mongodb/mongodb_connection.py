@@ -1,9 +1,9 @@
 """
 Unified MongoDB Connection Utility for Ransomware Detection Pipeline
 
-This module provides a centralized MongoDB connection utility that integrates
-with time_utils.py for consistent timestamp processing across both training
-and detection modes.
+This module provides centralized MongoDB management for the unified data processing pipeline.
+It supports both training and detection modes with consistent data structures and 
+time handling using shared utilities.
 
 Python 3.6.8 Compatible
 """
@@ -11,15 +11,17 @@ Python 3.6.8 Compatible
 import os
 import sys
 import pymongo
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import json
 from datetime import datetime, timedelta
+import logging
 
-# Add shared_utils to path for time_utils integration
+# Add shared_utils to path for shared utilities integration
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared_utils.time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
+from shared_utils.qradar_rule_manager import get_rule_list
 from system import run_log
 
 
@@ -27,8 +29,8 @@ class MongoDBConnectionManager:
     """
     Unified MongoDB connection manager for ransomware detection pipeline.
     
-    Provides centralized database operations with consistent timestamp handling
-    using time_utils.py across both training and detection modes.
+    Provides centralized database operations with consistent data structures
+    across both training and detection modes as per the unified pipeline architecture.
     """
     
     def __init__(self, config_path: Optional[str] = None):
@@ -47,11 +49,16 @@ class MongoDBConnectionManager:
         
         # Initialize collections from config
         collection_config = self.config['collections']
-        self.detection_windows_collection_name = collection_config['detection_windows']
-        self.detection_results_collection_name = collection_config['detection_results']
+        self.events_collection_name = collection_config.get('events', 'events')
+        self.windows_collection_name = collection_config.get('windows', 'windows')
+        self.predictions_collection_name = collection_config.get('predictions', 'predictions')
+        self.rule_mappings_collection_name = collection_config.get('rule_mappings', 'rule_mappings')
         
-        self.detection_windows_collection = None
-        self.detection_results_collection = None
+        # Collection references
+        self.events_collection = None
+        self.windows_collection = None
+        self.predictions_collection = None
+        self.rule_mappings_collection = None
         
     def _load_config(self) -> Dict[str, Any]:
         """Load MongoDB configuration from JSON file."""
@@ -81,9 +88,11 @@ class MongoDBConnectionManager:
             self.client = pymongo.MongoClient(connection_string)
             self.db = self.client[mongo_config['db_name']]
             
-            # Initialize collections
-            self.detection_windows_collection = self.db[self.detection_windows_collection_name]
-            self.detection_results_collection = self.db[self.detection_results_collection_name]
+            # Initialize collections for unified pipeline
+            self.events_collection = self.db[self.events_collection_name]
+            self.windows_collection = self.db[self.windows_collection_name]
+            self.predictions_collection = self.db[self.predictions_collection_name]
+            self.rule_mappings_collection = self.db[self.rule_mappings_collection_name]
             
             # Test connection
             self.client.admin.command('ping')
@@ -96,65 +105,244 @@ class MongoDBConnectionManager:
     
     def create_indexes(self) -> bool:
         """
-        Create optimized indexes for detection pipeline.
+        Create optimized indexes for unified pipeline schema.
         
         Returns:
             True if indexes created successfully, False otherwise
         """
         try:
-            # Detection windows collection indexes
-            indexes = [
-                ([('window_start', -1), ('window_end', -1)], "window_time_idx"),
-                ([('query_time', -1)], "query_time_idx"),
-                ([('window_sequence', 1)], "window_sequence_idx"),
-                ([('metadata.query_id', 1)], "query_id_idx"),
-                ([('host_triggers', 1)], "host_triggers_idx"),
-                ([('total_triggers', -1)], "total_triggers_idx"),
-                ([('window_start', 1), ('window_end', 1)], "window_range_idx")
+            if not self.db and not self.connect():
+                run_log.run_log("ERROR", "Cannot create indexes: MongoDB not connected")
+                return False
+
+            # Events collection indexes (raw QRadar events)
+            events_indexes = [
+                ([('timestamp', -1)], "event_timestamp_idx"),
+                ([('rule_id', 1)], "rule_id_idx"),
+                ([('hostname', 1)], "hostname_idx"),
+                ([('timestamp', 1), ('rule_id', 1)], "timestamp_rule_idx"),
+                ([('window_id', 1)], "window_id_idx")
             ]
             
-            for index_spec, index_name in indexes:
-                self.detection_windows_collection.create_index(index_spec, name=index_name)
+            # Windows collection indexes (aggregated features)
+            windows_indexes = [
+                ([('window_start', -1), ('window_end', -1)], "window_time_idx"),
+                ([('hostname', 1)], "hostname_idx"),
+                ([('window_id', 1)], "window_id_unique_idx"),
+                ([('window_start', 1), ('hostname', 1)], "window_host_idx"),
+                ([('label', 1)], "label_idx")
+            ]
             
-            run_log.run_log("INFO", "MongoDB indexes created successfully")
+            # Predictions collection indexes
+            predictions_indexes = [
+                ([('window_id', 1)], "prediction_window_idx"),
+                ([('hostname', 1)], "prediction_hostname_idx"),
+                ([('prediction_time', -1)], "prediction_time_idx"),
+                ([('predicted_label', 1)], "predicted_label_idx")
+            ]
+            
+            # Create indexes only if collections exist
+            if self.events_collection:
+                for index_spec, index_name in events_indexes:
+                    try:
+                        self.events_collection.create_index(index_spec, name=index_name)
+                    except Exception as e:
+                        run_log.run_log("WARNING", f"Failed to create events index {index_name}: {e}")
+            
+            if self.windows_collection:
+                for index_spec, index_name in windows_indexes:
+                    try:
+                        self.windows_collection.create_index(index_spec, name=index_name)
+                    except Exception as e:
+                        run_log.run_log("WARNING", f"Failed to create windows index {index_name}: {e}")
+                
+                try:
+                    # Create unique index on window_id for windows collection
+                    self.windows_collection.create_index([('window_id', 1)], unique=True)
+                except Exception as e:
+                    run_log.run_log("WARNING", f"Failed to create unique window_id index: {e}")
+            
+            if self.predictions_collection:
+                for index_spec, index_name in predictions_indexes:
+                    try:
+                        self.predictions_collection.create_index(index_spec, name=index_name)
+                    except Exception as e:
+                        run_log.run_log("WARNING", f"Failed to create predictions index {index_name}: {e}")
+            
+            run_log.run_log("INFO", "MongoDB indexes created successfully for unified pipeline")
             return True
             
         except Exception as e:
             run_log.run_log("ERROR", f"Failed to create indexes: {e}")
             return False
     
-    def insert_detection_window(self, window_data: Dict[str, Any]) -> bool:
+    def insert_event(self, event_data: Dict[str, Any]) -> bool:
         """
-        Insert a single detection window with time_utils integration.
+        Insert a single raw QRadar event with unified schema.
         
         Args:
-            window_data: Detection window data to insert
+            event_data: Event data with ['hostname', 'rule_id', 'timestamp', 'count']
             
         Returns:
             True if insertion successful, False otherwise
         """
         try:
-            if not self.db:
-                if not self.connect():
+            if not self.db and not self.connect():
+                run_log.run_log("ERROR", "Cannot insert event: MongoDB not connected")
+                return False
+            
+            if not self.events_collection:
+                run_log.run_log("ERROR", "Events collection not initialized")
+                return False
+            
+            # Ensure proper timestamp parsing using time_utils
+            if isinstance(event_data.get('timestamp'), str):
+                event_data['timestamp'] = parse_qradar_timestamp(event_data['timestamp'])
+            
+            # Calculate window_id using time_utils
+            if 'timestamp' in event_data:
+                event_data['window_id'] = get_window_id(event_data['timestamp'])
+            
+            # Ensure required fields
+            required_fields = ['hostname', 'rule_id', 'timestamp', 'count']
+            for field in required_fields:
+                if field not in event_data:
+                    run_log.run_log("ERROR", f"Missing required field: {field}")
                     return False
             
-            # Ensure proper window ID and timestamps using time_utils
-            if 'window_start' not in window_data or 'window_end' not in window_data:
-                # Use time_utils to calculate window boundaries
-                if 'timestamp' in window_data:
-                    event_time = parse_qradar_timestamp(window_data['timestamp'])
-                    window_start, window_end = get_window_start_end(event_time)
-                    window_data['window_start'] = window_start
-                    window_data['window_end'] = window_end
-                    window_data['_id'] = get_window_id(event_time)
+            # Ensure correct data types
+            event_data['rule_id'] = int(event_data['rule_id'])
+            event_data['count'] = int(event_data['count'])
+            event_data['hostname'] = str(event_data['hostname'])
             
-            # Ensure query_time is set
-            if 'query_time' not in window_data:
-                window_data['query_time'] = datetime.now()
+            # Insert with upsert
+            self.events_collection.replace_one(
+                {
+                    'window_id': event_data['window_id'],
+                    'hostname': event_data['hostname'],
+                    'rule_id': event_data['rule_id']
+                },
+                event_data,
+                upsert=True
+            )
             
-            # Insert with upsert to handle duplicates
-            self.detection_windows_collection.replace_one(
-                {'_id': window_data['_id']},
+            return True
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed to insert event: {e}")
+            return False
+    
+    def batch_insert_events(self, events: List[Dict[str, Any]], 
+                           batch_size: int = 1000) -> int:
+        """
+        Batch insert raw QRadar events with optimized performance.
+        
+        Args:
+            events: List of event documents
+            batch_size: Number of documents to process per batch
+            
+        Returns:
+            Number of documents successfully inserted
+        """
+        if not self.db and not self.connect():
+            run_log.run_log("ERROR", "Cannot batch insert events: MongoDB not connected")
+            return 0
+        
+        if not self.events_collection:
+            run_log.run_log("ERROR", "Events collection not initialized")
+            return 0
+        
+        if not events:
+            return 0
+        
+        total_inserted = 0
+        
+        try:
+            for i in range(0, len(events), batch_size):
+                batch = events[i:i + batch_size]
+                
+                # Prepare bulk operations
+                operations = []
+                for event_data in batch:
+                    # Process timestamps
+                    if isinstance(event_data.get('timestamp'), str):
+                        event_data['timestamp'] = parse_qradar_timestamp(event_data['timestamp'])
+                    
+                    if 'timestamp' in event_data:
+                        event_data['window_id'] = get_window_id(event_data['timestamp'])
+                    
+                    # Ensure data types
+                    event_data['rule_id'] = int(event_data['rule_id'])
+                    event_data['count'] = int(event_data['count'])
+                    event_data['hostname'] = str(event_data['hostname'])
+                    
+                    operations.append({
+                        'replaceOne': {
+                            'filter': {
+                                'window_id': event_data['window_id'],
+                                'hostname': event_data['hostname'],
+                                'rule_id': event_data['rule_id']
+                            },
+                            'replacement': event_data,
+                            'upsert': True
+                        }
+                    })
+                
+                if operations:
+                    result = self.events_collection.bulk_write(operations)
+                    total_inserted += result.upserted_count + result.modified_count
+                    
+                    if i % (batch_size * 10) == 0:
+                        run_log.run_log("INFO", f"Processed {i + len(batch)} events...")
+            
+            run_log.run_log("INFO", f"Batch insert completed: {total_inserted} events")
+            return total_inserted
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed batch insert events: {e}")
+            return total_inserted
+    
+    def insert_window(self, window_data: Dict[str, Any]) -> bool:
+        """
+        Insert an aggregated window with unified schema.
+        
+        Args:
+            window_data: Window data with features and optional label
+            
+        Returns:
+            True if insertion successful, False otherwise
+        """
+        try:
+            if not self.db and not self.connect():
+                run_log.run_log("ERROR", "Cannot insert window: MongoDB not connected")
+                return False
+            
+            if not self.windows_collection:
+                run_log.run_log("ERROR", "Windows collection not initialized")
+                return False
+            
+            # Ensure window boundaries using time_utils
+            if 'timestamp' in window_data:
+                event_time = parse_qradar_timestamp(window_data['timestamp'])
+                window_start, window_end = get_window_start_end(event_time)
+                window_data['window_start'] = window_start
+                window_data['window_end'] = window_end
+                window_data['window_id'] = get_window_id(event_time)
+            
+            # Ensure required fields
+            required_fields = ['window_id', 'window_start', 'window_end', 'hostname']
+            for field in required_fields:
+                if field not in window_data:
+                    run_log.run_log("ERROR", f"Missing required field: {field}")
+                    return False
+            
+            # Ensure features dict exists
+            if 'features' not in window_data:
+                window_data['features'] = {}
+            
+            # Insert with upsert
+            self.windows_collection.replace_one(
+                {'window_id': window_data['window_id'], 'hostname': window_data['hostname']},
                 window_data,
                 upsert=True
             )
@@ -162,97 +350,12 @@ class MongoDBConnectionManager:
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to insert detection window: {e}")
+            run_log.run_log("ERROR", f"Failed to insert window: {e}")
             return False
-    
-    def batch_insert_detection_windows(self, windows: List[Dict[str, Any]], 
-                                     batch_size: int = 1000) -> int:
-        """
-        Batch insert detection windows with optimized performance.
-        
-        Args:
-            windows: List of detection window documents
-            batch_size: Number of documents to process per batch
-            
-        Returns:
-            Number of documents successfully inserted/updated
-        """
-        if not self.db:
-            if not self.connect():
-                return 0
-        
-        total_inserted = 0
-        
-        try:
-            for i in range(0, len(windows), batch_size):
-                batch = windows[i:i + batch_size]
-                
-                # Prepare bulk operations
-                operations = []
-                for window_data in batch:
-                    # Process timestamps using time_utils
-                    if 'timestamp' in window_data:
-                        event_time = parse_qradar_timestamp(window_data['timestamp'])
-                        window_start, window_end = get_window_start_end(event_time)
-                        window_data['window_start'] = window_start
-                        window_data['window_end'] = window_end
-                        window_data['_id'] = get_window_id(event_time)
-                    
-                    if 'query_time' not in window_data:
-                        window_data['query_time'] = datetime.now()
-                    
-                    operations.append({
-                        'replaceOne': {
-                            'filter': {'_id': window_data['_id']},
-                            'replacement': window_data,
-                            'upsert': True
-                        }
-                    })
-                
-                if operations:
-                    result = self.detection_windows_collection.bulk_write(operations)
-                    total_inserted += result.upserted_count + result.modified_count
-                    
-                    if i % (batch_size * 10) == 0:
-                        run_log.run_log("INFO", f"Processed {i + len(batch)} detection windows...")
-            
-            run_log.run_log("INFO", f"Batch insert completed: {total_inserted} documents")
-            return total_inserted
-            
-        except Exception as e:
-            run_log.run_log("ERROR", f"Failed batch insert: {e}")
-            return total_inserted
-    
-    def get_detection_windows(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
-        """
-        Retrieve detection windows within a time range using time_utils.
-        
-        Args:
-            start_time: Start of time range
-            end_time: End of time range
-            
-        Returns:
-            List of detection windows
-        """
-        if not self.db:
-            if not self.connect():
-                return []
-        
-        try:
-            query = {
-                'window_start': {'$gte': start_time},
-                'window_end': {'$lte': end_time}
-            }
-            
-            windows = list(self.detection_windows_collection.find(query).sort('window_start', 1))
-            return windows
-        except Exception as e:
-            run_log.run_log("ERROR", f"Failed to retrieve detection windows: {e}")
-            return []
     
     def cleanup_old_data(self, retention_days: int = 7) -> int:
         """
-        Clean up old detection data based on retention policy.
+        Clean up old data based on retention policy for unified pipeline.
         
         Args:
             retention_days: Number of days to retain data
@@ -260,90 +363,295 @@ class MongoDBConnectionManager:
         Returns:
             Number of documents deleted
         """
-        if not self.db:
-            if not self.connect():
-                return 0
+        if not self.db and not self.connect():
+            run_log.run_log("ERROR", "Cannot cleanup old data: MongoDB not connected")
+            return 0
         
         try:
             cutoff_date = datetime.now() - timedelta(days=retention_days)
+            total_deleted = 0
             
-            query = {'window_start': {'$lt': cutoff_date}}
-            count_to_delete = self.detection_windows_collection.count_documents(query)
+            # Clean events
+            if self.events_collection:
+                events_query = {'timestamp': {'$lt': cutoff_date}}
+                events_count = self.events_collection.count_documents(events_query)
+                if events_count > 0:
+                    events_result = self.events_collection.delete_many(events_query)
+                    total_deleted += events_result.deleted_count
+                    run_log.run_log("INFO", f"Deleted {events_result.deleted_count} old events")
             
-            if count_to_delete > 0:
-                result = self.detection_windows_collection.delete_many(query)
-                run_log.run_log("INFO", f"Deleted {result.deleted_count} old detection windows")
-                return result.deleted_count
-            else:
-                run_log.run_log("INFO", "No old detection windows found to delete")
-                return 0
+            # Clean windows
+            if self.windows_collection:
+                windows_query = {'window_start': {'$lt': cutoff_date}}
+                windows_count = self.windows_collection.count_documents(windows_query)
+                if windows_count > 0:
+                    windows_result = self.windows_collection.delete_many(windows_query)
+                    total_deleted += windows_result.deleted_count
+                    run_log.run_log("INFO", f"Deleted {windows_result.deleted_count} old windows")
+            
+            # Clean old predictions (keep last 30 days)
+            if self.predictions_collection:
+                predictions_cutoff = datetime.now() - timedelta(days=30)
+                predictions_query = {'prediction_time': {'$lt': predictions_cutoff}}
+                predictions_count = self.predictions_collection.count_documents(predictions_query)
+                if predictions_count > 0:
+                    predictions_result = self.predictions_collection.delete_many(predictions_query)
+                    total_deleted += predictions_result.deleted_count
+                    run_log.run_log("INFO", f"Deleted {predictions_result.deleted_count} old predictions")
+            
+            if total_deleted == 0:
+                run_log.run_log("INFO", "No old data found to delete")
+            
+            return total_deleted
                 
         except Exception as e:
             run_log.run_log("ERROR", f"Failed to cleanup old data: {e}")
             return 0
     
-    def get_data_summary(self) -> Dict[str, Any]:
+    def get_events_for_window(self, window_start: datetime, window_end: datetime, 
+                            hostname: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Get comprehensive summary of detection data with time_utils integration.
+        Retrieve raw events for a specific time window and hostname.
         
+        Args:
+            window_start: Start of time window
+            window_end: End of time window
+            hostname: Optional hostname filter
+            
         Returns:
-            Dictionary with data statistics
+            List of events
         """
-        if not self.db:
-            if not self.connect():
-                return {}
+        if not self.db and not self.connect():
+            run_log.run_log("ERROR", "Cannot retrieve events: MongoDB not connected")
+            return []
+        
+        if not self.events_collection:
+            run_log.run_log("ERROR", "Events collection not initialized")
+            return []
         
         try:
-            # Basic counts
-            total_docs = self.detection_windows_collection.count_documents({})
-            unique_hosts = len(self.detection_windows_collection.distinct("host_triggers"))
-            
-            # Time range analysis
-            time_range = list(self.detection_windows_collection.aggregate([
-                {"$group": {
-                    "_id": None,
-                    "min_window_start": {"$min": "$window_start"},
-                    "max_window_end": {"$max": "$window_end"}
-                }}
-            ]))
-            
-            # Rule statistics using feature_vector
-            rule_stats = list(self.detection_windows_collection.aggregate([
-                {"$project": {"rules": {"$objectToArray": "$feature_vector"}}},
-                {"$unwind": "$rules"},
-                {"$group": {
-                    "_id": None,
-                    "unique_rules": {"$addToSet": "$rules.k"},
-                    "total_rule_triggers": {"$sum": "$rules.v"}
-                }}
-            ]))
-            
-            # Host-level statistics
-            host_stats = list(self.detection_windows_collection.aggregate([
-                {"$project": {"hosts": {"$objectToArray": "$host_triggers"}}},
-                {"$unwind": "$hosts"},
-                {"$group": {
-                    "_id": "$hosts.k",
-                    "total_triggers": {"$sum": "$hosts.v.total_triggers"}
-                }},
-                {"$group": {
-                    "_id": None,
-                    "total_unique_hosts": {"$sum": 1},
-                    "total_host_triggers": {"$sum": "$total_triggers"}
-                }}
-            ]))
-            
-            summary = {
-                "total_detection_windows": total_docs,
-                "unique_hosts": host_stats[0]["total_unique_hosts"] if host_stats else 0,
-                "total_host_triggers": host_stats[0]["total_host_triggers"] if host_stats else 0,
-                "window_range": time_range[0] if time_range else {},
-                "unique_rules": len(rule_stats[0]["unique_rules"]) if rule_stats else 0,
-                "total_rule_triggers": rule_stats[0]["total_rule_triggers"] if rule_stats else 0
+            from typing import Dict, Any
+            query: Dict[str, Any] = {
+                'timestamp': {
+                    '$gte': window_start,
+                    '$lt': window_end
+                }
             }
             
-            return summary
+            if hostname:
+                query['hostname'] = hostname
             
+            events = list(self.events_collection.find(query).sort('timestamp', 1))
+            return events
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed to retrieve events: {e}")
+            return []
+    
+    def get_windows_for_training(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """
+        Retrieve windows with labels for training mode.
+        
+        Args:
+            start_time: Start of time range
+            end_time: End of time range
+            
+        Returns:
+            List of windows with labels
+        """
+        if not self.db and not self.connect():
+            run_log.run_log("ERROR", "Cannot retrieve training windows: MongoDB not connected")
+            return []
+        
+        if not self.windows_collection:
+            run_log.run_log("ERROR", "Windows collection not initialized")
+            return []
+        
+        try:
+            query = {
+                'window_start': {'$gte': start_time},
+                'window_end': {'$lte': end_time},
+                'label': {'$exists': True}
+            }
+            
+            windows = list(self.windows_collection.find(query).sort('window_start', 1))
+            return windows
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed to retrieve training windows: {e}")
+            return []
+    
+    def get_unlabeled_windows(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """
+        Retrieve windows without labels for detection mode.
+        
+        Args:
+            start_time: Start of time range
+            end_time: End of time range
+            
+        Returns:
+            List of windows without labels
+        """
+        if not self.db and not self.connect():
+            run_log.run_log("ERROR", "Cannot retrieve unlabeled windows: MongoDB not connected")
+            return []
+        
+        if not self.windows_collection:
+            run_log.run_log("ERROR", "Windows collection not initialized")
+            return []
+        
+        try:
+            query = {
+                'window_start': {'$gte': start_time},
+                'window_end': {'$lte': end_time},
+                'label': {'$exists': False}
+            }
+            
+            windows = list(self.windows_collection.find(query).sort('window_start', 1))
+            return windows
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed to retrieve unlabeled windows: {e}")
+            return []
+    
+    def insert_prediction(self, prediction_data: Dict[str, Any]) -> bool:
+        """
+        Insert a prediction result for detection mode.
+        
+        Args:
+            prediction_data: Prediction with window_id, hostname, predicted_label, confidence
+            
+        Returns:
+            True if insertion successful, False otherwise
+        """
+        try:
+            if not self.db and not self.connect():
+                run_log.run_log("ERROR", "Cannot insert prediction: MongoDB not connected")
+                return False
+            
+            if not self.predictions_collection:
+                run_log.run_log("ERROR", "Predictions collection not initialized")
+                return False
+            
+            # Ensure required fields
+            required_fields = ['window_id', 'hostname', 'predicted_label', 'confidence']
+            for field in required_fields:
+                if field not in prediction_data:
+                    run_log.run_log("ERROR", f"Missing required field: {field}")
+                    return False
+            
+            # Add prediction timestamp
+            prediction_data['prediction_time'] = datetime.now()
+            
+            # Insert with upsert
+            self.predictions_collection.replace_one(
+                {'window_id': prediction_data['window_id'], 'hostname': prediction_data['hostname']},
+                prediction_data,
+                upsert=True
+            )
+            
+            return True
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed to insert prediction: {e}")
+            return False
+    
+    def get_data_summary(self) -> Dict[str, Any]:
+        """
+        Get comprehensive summary of detection data for unified pipeline.
+        
+        Returns:
+            Dictionary with data statistics for all collections
+        """
+        if not self.db and not self.connect():
+            run_log.run_log("ERROR", "Cannot get data summary: MongoDB not connected")
+            return {}
+
+        try:
+            # Initialize results
+            events_result = {'total_events': 0, 'unique_hosts': 0, 'unique_rules': 0, 'time_range': {}}
+            windows_result = {'total_windows': 0, 'unique_hosts': 0, 'labeled_windows': 0, 'attack_windows': 0, 'normal_windows': 0, 'time_range': {}}
+            predictions_result = {'total_predictions': 0, 'unique_hosts': 0}
+
+            # Events collection
+            if self.events_collection:
+                try:
+                    total_events = self.events_collection.count_documents({})
+                    if total_events > 0:
+                        unique_hosts_events = len(self.events_collection.distinct("hostname"))
+                        unique_rules_events = len(self.events_collection.distinct("rule_id"))
+                        
+                        events_time_range = list(self.events_collection.aggregate([
+                            {"$group": {
+                                "_id": None,
+                                "min_timestamp": {"$min": "$timestamp"},
+                                "max_timestamp": {"$max": "$timestamp"}
+                            }}
+                        ]))
+                        
+                        events_result = {
+                            "total_events": total_events,
+                            "unique_hosts": unique_hosts_events,
+                            "unique_rules": unique_rules_events,
+                            "time_range": events_time_range[0] if events_time_range else {}
+                        }
+                except Exception as e:
+                    run_log.run_log("ERROR", f"Failed to get events summary: {e}")
+
+            # Windows collection
+            if self.windows_collection:
+                try:
+                    total_windows = self.windows_collection.count_documents({})
+                    if total_windows > 0:
+                        unique_hosts_windows = len(self.windows_collection.distinct("hostname"))
+                        labeled_windows = self.windows_collection.count_documents({'label': {'$exists': True}})
+                        attack_windows = self.windows_collection.count_documents({'label': 1})
+                        normal_windows = self.windows_collection.count_documents({'label': 0})
+                        
+                        windows_time_range = list(self.windows_collection.aggregate([
+                            {"$group": {
+                                "_id": None,
+                                "min_window_start": {"$min": "$window_start"},
+                                "max_window_end": {"$max": "$window_end"}
+                            }}
+                        ]))
+                        
+                        windows_result = {
+                            "total_windows": total_windows,
+                            "unique_hosts": unique_hosts_windows,
+                            "labeled_windows": labeled_windows,
+                            "attack_windows": attack_windows,
+                            "normal_windows": normal_windows,
+                            "time_range": windows_time_range[0] if windows_time_range else {}
+                        }
+                except Exception as e:
+                    run_log.run_log("ERROR", f"Failed to get windows summary: {e}")
+
+            # Predictions collection
+            if self.predictions_collection:
+                try:
+                    total_predictions = self.predictions_collection.count_documents({})
+                    if total_predictions > 0:
+                        unique_hosts_predictions = len(self.predictions_collection.distinct("hostname"))
+                        predictions_result = {
+                            "total_predictions": total_predictions,
+                            "unique_hosts": unique_hosts_predictions
+                        }
+                except Exception as e:
+                    run_log.run_log("ERROR", f"Failed to get predictions summary: {e}")
+
+            summary = {
+                "events_collection": events_result,
+                "windows_collection": windows_result,
+                "predictions_collection": predictions_result,
+                "overall": {
+                    "total_hosts": max(events_result.get("unique_hosts", 0), windows_result.get("unique_hosts", 0)),
+                    "training_ready": windows_result.get("labeled_windows", 0) > 0
+                }
+            }
+
+            return summary
+
         except Exception as e:
             run_log.run_log("ERROR", f"Failed to get data summary: {e}")
             return {}
@@ -378,9 +686,9 @@ def get_mongodb_manager(config_path: Optional[str] = None) -> MongoDBConnectionM
 
 
 if __name__ == "__main__":
-    # Test the MongoDB connection utility
-    print("Testing MongoDB Connection Utility...")
-    print("=" * 50)
+    # Test the MongoDB connection utility for unified pipeline
+    print("Testing MongoDB Connection Utility for Unified Pipeline...")
+    print("=" * 70)
     
     # Test connection
     with get_mongodb_manager() as manager:
@@ -389,21 +697,57 @@ if __name__ == "__main__":
         
         # Get data summary
         summary = manager.get_data_summary()
-        print(f"Data Summary: {summary}")
+        print("Data Summary:")
+        for collection, data in summary.items():
+            print(f"  {collection}: {data}")
         
-        # Test with sample AQL data
+        # Test with sample unified schema data
         from datetime import datetime
-        sample_window = {
-            "window_start": datetime(2025, 8, 8, 10, 0, 0),
-            "window_end": datetime(2025, 8, 8, 10, 30, 0),
-            "feature_vector": {"100227": 211656, "100221": 211656},
-            "host_triggers": {
-                "192.168.153.166": {"total_triggers": 6561, "rules": {"100227": 6561}},
-                "DESKTOP-64-EDR": {"total_triggers": 5610, "rules": {"100227": 5610}}
-            },
-            "total_triggers": 217266,
-            "total_rules_triggered": 2
+        
+        # Sample raw event
+        sample_event = {
+            "hostname": "192.168.153.166",
+            "rule_id": 100227,
+            "timestamp": datetime(2025, 8, 8, 10, 15, 0),
+            "count": 6561
         }
         
-        success = manager.insert_detection_window(sample_window)
-        print(f"Test insert: {'Success' if success else 'Failed'}")
+        # Sample aggregated window
+        sample_window = {
+            "hostname": "192.168.153.166",
+            "timestamp": datetime(2025, 8, 8, 10, 30, 0),
+            "features": {"100227": 211656, "100221": 211656},
+            "label": 1  # 1 for attack, 0 for normal
+        }
+        
+        # Sample prediction
+        sample_prediction = {
+            "window_id": "2025-08-08_10-00-00_W20",
+            "hostname": "192.168.153.166",
+            "predicted_label": 1,
+            "confidence": 0.95,
+            "top_features": ["100227", "100221"]
+        }
+        
+        # Test event insertion
+        event_success = manager.insert_event(sample_event)
+        print(f"Test event insert: {'Success' if event_success else 'Failed'}")
+        
+        # Test window insertion
+        window_success = manager.insert_window(sample_window)
+        print(f"Test window insert: {'Success' if window_success else 'Failed'}")
+        
+        # Test prediction insertion
+        prediction_success = manager.insert_prediction(sample_prediction)
+        print(f"Test prediction insert: {'Success' if prediction_success else 'Failed'}")
+        
+        # Test data retrieval
+        windows = manager.get_windows_for_training(
+            datetime(2025, 8, 8, 0, 0, 0),
+            datetime(2025, 8, 8, 23, 59, 59)
+        )
+        print(f"Retrieved training windows: {len(windows)}")
+        
+        # Test cleanup
+        # cleanup_count = manager.cleanup_old_data(retention_days=1)
+        # print(f"Cleanup deleted: {cleanup_count} documents")
