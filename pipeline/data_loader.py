@@ -11,6 +11,16 @@ import pandas as pd
 from typing import Dict, Any, Optional
 import logging
 import glob
+import json
+from datetime import datetime, timedelta
+import pytz
+
+try:
+    import pymongo
+    from pymongo import MongoClient
+except ImportError:
+    pymongo = None
+    MongoClient = None
 
 # Import time utilities for inline timestamp processing
 from shared_utils.time_utils import parse_qradar_timestamp, categorize_query_timestamp
@@ -144,9 +154,13 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
                 df['source_label'] = source_label
                 
                 # Ensure correct data types
-                df['rule_id'] = pd.to_numeric(df['rule_id'], errors='coerce').astype(int)
-                df['count'] = pd.to_numeric(df['count'], errors='coerce').astype(int)
+                df['rule_id'] = pd.to_numeric(df['rule_id'], errors='coerce')
+                df['count'] = pd.to_numeric(df['count'], errors='coerce')
                 df['hostname'] = df['hostname'].astype(str)
+                
+                # Convert to nullable integer types, handling potential NaN values
+                df['rule_id'] = df['rule_id'].astype('Int64')
+                df['count'] = df['count'].astype('Int64')
                 
                 # Drop rows with invalid data
                 df = df.dropna(subset=['hostname', 'rule_id', 'timestamp', 'count'])
@@ -169,16 +183,114 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
 
 def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
     """
-    Load detection data from MongoDB (to be implemented).
+    Load detection data from MongoDB JSON format.
     
     Args:
         config: Configuration dictionary with MongoDB settings
         
     Returns:
-        Standardized DataFrame ready for preprocessing
+        Standardized DataFrame with columns: hostname, rule_id, timestamp, count, source_label
     """
-    # TODO: Implement MongoDB data loading for detection mode
-    raise NotImplementedError("Detection mode data loading not yet implemented")
+    if pymongo is None:
+        raise ImportError("pymongo is required for detection mode. Install with: pip install pymongo")
+    
+    logger.info("Loading detection data from MongoDB...")
+    
+    # Load MongoDB configuration
+    mongodb_config_path = config.get('mongodb_config', './mongodb/mongodb_config.json')
+    try:
+        with open(mongodb_config_path, 'r') as f:
+            mongodb_config = json.load(f)
+    except FileNotFoundError:
+        logger.error(f"MongoDB config file not found: {mongodb_config_path}")
+        raise
+    
+    # Extract MongoDB settings
+    mongo_config = mongodb_config['mongodb']
+    collection_name = mongodb_config['collections']['detection_windows']
+    
+    # Calculate query window based on configuration
+    query_window_minutes = mongodb_config['pipeline']['query_frequency_minutes']
+    timezone = mongodb_config['pipeline']['timezone']
+    
+    # Set timezone
+    tz = pytz.timezone('Asia/Hong_Kong') if timezone == 'HKT' else pytz.UTC
+    
+    # Calculate time window
+    end_time = datetime.now(tz)
+    start_time = end_time - timedelta(minutes=query_window_minutes)
+    
+    try:
+        # Connect to MongoDB
+        if MongoClient is None:
+            raise ImportError("MongoClient not available - pymongo not installed")
+        
+        client = MongoClient(mongo_config['connection_string'])
+        db = client[mongo_config['db_name']]
+        collection = db[collection_name]
+        
+        # Query recent detection windows
+        query = {
+            'window_start': {
+                '$gte': start_time,
+                '$lte': end_time
+            }
+        }
+        
+        cursor = collection.find(query)
+        documents = list(cursor)
+        
+        if not documents:
+            logger.warning(f"No detection data found for window: {start_time} to {end_time}")
+            return pd.DataFrame(columns=['hostname', 'rule_id', 'timestamp', 'count', 'source_label'])
+        
+        # Transform MongoDB JSON to DataFrame
+        rows = []
+        for doc in documents:
+            window_start = doc.get('window_start')
+            rule_counts = doc.get('rule_counts', {})
+            host_triggers = doc.get('host_triggers', {})
+            
+            # Extract hostname from host_triggers
+            hostname = 'unknown'
+            if host_triggers:
+                # Get first hostname from host_triggers keys
+                hostname = next(iter(host_triggers.keys()), 'unknown')
+            
+            # Flatten rule_counts into individual rows
+            for rule_id, count in rule_counts.items():
+                rows.append({
+                    'hostname': hostname,
+                    'rule_id': int(rule_id),
+                    'timestamp': window_start,
+                    'count': int(count),
+                    'source_label': 'detection'
+                })
+        
+        # Create DataFrame
+        df = pd.DataFrame(rows)
+        
+        # Ensure correct data types
+        df['rule_id'] = pd.to_numeric(df['rule_id'], errors='coerce')
+        df['count'] = pd.to_numeric(df['count'], errors='coerce')
+        df['hostname'] = df['hostname'].astype(str)
+        
+        # Convert to nullable integer types
+        df['rule_id'] = df['rule_id'].astype('Int64')
+        df['count'] = df['count'].astype('Int64')
+        
+        # Drop rows with invalid data
+        df = df.dropna(subset=['hostname', 'rule_id', 'timestamp', 'count'])
+        
+        logger.info(f"Loaded {len(df)} detection records from MongoDB")
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error loading detection data from MongoDB: {e}")
+        raise
+    finally:
+        if 'client' in locals():
+            client.close()
 
 
 def validate_data(df: pd.DataFrame) -> bool:
