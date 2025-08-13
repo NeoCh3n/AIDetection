@@ -13,26 +13,38 @@
     "retention_days": 7
   },
   "collections": {
-  "detection_windows": "qradar_sliding_windows",
+    "detection_windows": "qradar_sliding_windows",
     "detection_results": "detection_results"
   },
   "data_schema": {
     "detection_windows": {
-      "_id": "string",
-      "window_start": "datetime",
-      "window_end": "datetime",
+      "_id": "string (window_id from time_utils)",
+      "window_start": "datetime (from time_utils)",
+      "window_end": "datetime (from time_utils)",
       "query_time": "datetime",
-      "feature_vector": "object",
-      "rule_counts": "object",
-      "host_triggers": "object",
+      "feature_vector": "object (rule_id -> count)",
+      "rule_counts": "object (rule_id -> count)",
+      "host_triggers": "object (hostname -> {total_triggers, rules})",
       "total_triggers": "integer",
       "total_rules_triggered": "integer"
     }
   },
   "rule_mapping": {
-    "total_rules": 1500,
-    "comment": "rules number should match the number of rules in the Qradar_rule_folder",
-    "source": "Qradar_rule_folder",
-    "description": "Dynamic rule extraction from Qradar_rule folder for detection"
+    "total_rules": 2898,
+    "rule_ids": [],
+    "source": "Production_baseline",
+    "description": "Fixed 2898 production rules as baseline for consistent feature vectors across environments",
+    "fixed_count": true,
+    "uat_mapping": {
+      "enabled": true,
+      "mapping_file": "shared_utils/uat_to_prod_mapping.csv",
+      "description": "UAT-to-Production rule ID mapping for consistent training"
+    }
+  },
+  "time_utils": {
+    "timezone": "Asia/Hong_Kong",
+    "window_size_minutes": 30,
+    "tolerance_seconds": 5,
+    "timestamp_format": "%b %d, %Y, %I:%M:%S %p"
   }
 }

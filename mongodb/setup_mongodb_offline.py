@@ -122,7 +122,7 @@ class MongoDBOfflineSetup:
         self.distro = self._get_linux_distro()
         
     def _create_default_config(self):
-        """Create default configuration for MongoDB setup"""
+        """Create default configuration for MongoDB setup with UAT-Production mapping"""
         return {
             "mongodb": {
                 "host": "localhost",
@@ -155,10 +155,15 @@ class MongoDBOfflineSetup:
                 }
             },
             "rule_mapping": {
-                "total_rules": 1500,
-                "comment": "rules number should match the number of rules in the Qradar_rule_folder",
-                "source": "Qradar_rule_folder",
-                "description": "Dynamic rule extraction from QRadar AQL results"
+                "total_rules": 2898,
+                "comment": "Fixed production rule count - using production rule coordinates as baseline",
+                "source": "Production_baseline",
+                "description": "Using 2898 production rules as baseline for consistent feature vector dimensions across environments",
+                "uat_mapping": {
+                    "enabled": True,
+                    "mapping_file": "shared_utils/uat_to_prod_mapping.csv",
+                    "description": "UAT-to-Production rule ID mapping for consistent training"
+                }
             }
         }
         
@@ -433,7 +438,7 @@ class MongoDBOfflineSetup:
             ]
         }
         
-        if not self.db:
+        if self.db is None:
             raise RuntimeError("Database not connected")
             
         for collection_name, indexes in collections_dict.items():
@@ -481,7 +486,7 @@ class MongoDBOfflineSetup:
         """Insert sample detection data using real AQL schema and time_utils"""
         print("Inserting sample detection data...")
         
-        if not self.db:
+        if self.db is None:
             raise RuntimeError("Database connection not established. Call connect_to_mongodb() first.")
         
         # Define local time utility functions to avoid import issues
@@ -592,7 +597,7 @@ class MongoDBOfflineSetup:
         """Verify the setup is working correctly"""
         print("Verifying setup...")
         
-        if not self.db:
+        if self.db is None:
             print("Error: Database not connected")
             return False
         
@@ -666,10 +671,16 @@ class MongoDBOfflineSetup:
                 }
             },
             "rule_mapping": {
-                "total_rules": len(rule_ids),
+                "total_rules": 2898,
                 "rule_ids": rule_ids,
-                "source": "AQLjsonResult.json",
-                "description": "Dynamic rule extraction from QRadar AQL results"
+                "source": "Production_baseline",
+                "description": "Fixed 2898 production rules as baseline for consistent feature vectors across environments",
+                "fixed_count": True,
+                "uat_mapping": {
+                    "enabled": True,
+                    "mapping_file": "shared_utils/uat_to_prod_mapping.csv",
+                    "description": "UAT-to-Production rule ID mapping for consistent training"
+                }
             },
             "time_utils": {
                 "timezone": "Asia/Hong_Kong",
@@ -726,7 +737,7 @@ class MongoDBOfflineSetup:
         if not self.connect_to_mongodb():
             return False
         
-        if not self.db:
+        if self.db is None:
             print("Error: Failed to establish database connection")
             return False
         
