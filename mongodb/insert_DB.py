@@ -1,156 +1,209 @@
-import sys
+#!/usr/bin/env python3
+"""
+MongoDB Data Insertion Script for Detection-Only Mode
+
+This script processes QRadar AQL search results (JSON format) and inserts them
+into MongoDB collections in detection-only mode.
+Handles 30-minute sliding window aggregation of AQL rule trigger data.
+
+Python 3.6.8 Compatible
+"""
+
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
-from system import run_log
-from datetime import datetime, timedelta
+import sys
 import json
+import argparse
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-import delete_DB  # # Import delete module for data lifecycle management
+import math
 
-from shared_utils import time_utils
+# Add required paths
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-#### MongoDB configuration loaded from config file
+from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure
+from system import run_log
 
+# Configuration
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
 
-def load_config():
-    """Load configuration from mongodb_config.json"""
-    try:
-        with open(CONFIG_PATH, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        run_log.run_log("ERROR", f"Failed to load config: {str(e)}")
-        return None
 
-# Load configuration
-config = load_config()
-if config:
-    CONNECTION_STRING_default = config['mongodb']['connection_string']
-    NAME_DB_default = config['mongodb']['db_name']
-    COLLECTION_default = config['collections']['detection_windows']
-    RETENTION_DAYS = config['pipeline']['retention_days']
-else:
-    # Fallback defaults
-    CONNECTION_STRING_default = "mongodb://localhost:27017/"
-    NAME_DB_default = "qradar_detection"
-    COLLECTION_default = "qradar_sliding_windows"
-    RETENTION_DAYS = 7
-
-# Import get_DB with corrected path
-import get_DB
-
-#### Data processing constants
-MAX_BSON_SIZE = 16 * 1024 * 1024  # # 16MB MongoDB document limit
-BATCH_SIZE = 1000  # # Batch size for bulk operations
-
-class QRadarDataProcessor:
+class AQLDataInserter:
     """
-    Process real QRadar rule trigger data for ML training and testing
-    # # Handles production data from QRadar searches (6000+ hosts, 1+ month)
+    Specialized inserter for QRadar AQL JSON data in detection-only mode.
+    
+    Processes QRadar search results formatted as JSON and creates 30-minute
+    sliding windows for ransomware detection without training labels.
     """
     
-    def __init__(self, connection_string=CONNECTION_STRING_default, db_name=NAME_DB_default):
-        self.connection_string = connection_string
-        self.db_name = db_name
+    def __init__(self, config_path: str = None):
+        """Initialize AQL data inserter with detection-specific configuration."""
+        self.config_path = config_path or CONFIG_PATH
+        self.config = self._load_config()
+        self.client = None
         self.db = None
-        self.collection = None
-    
-    def _ensure_collection(self) -> bool:
-        """# # Ensure collection is available, connect if needed"""
-        if self.collection is None:
-            return self.connect()
-        return True
         
-    def connect(self):
-        """# # Connect to MongoDB for offline deployment"""
-        self.db = get_DB.get_database()
-        if self.db is not None:
-            self.collection = self.db[COLLECTION_default]
-            return True
-        return False
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration for detection-only AQL processing."""
+        try:
+            with open(self.config_path, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            run_log.run_log("ERROR", f"Config file not found: {self.config_path}")
+            return self._create_default_config()
+        except json.JSONDecodeError as e:
+            run_log.run_log("ERROR", f"Invalid JSON in config: {e}")
+            return self._create_default_config()
     
-    def create_production_indexes(self):
-        """
-        # # Create optimized indexes for detection windows
-        """
-        if not self._ensure_collection():
+    def _create_default_config(self) -> Dict[str, Any]:
+        """Create default configuration for AQL detection mode."""
+        return {
+            "mongodb": {
+                "host": "localhost",
+                "port": 27017,
+                "db_name": "qradar_detection",
+                "connection_string": "mongodb://localhost:27017/"
+            },
+            "pipeline": {
+                "mode": "detection_only",
+                "window_size_minutes": 30,
+                "retention_days": 7
+            },
+            "collections": {
+                "detection_windows": "qradar_sliding_windows",
+                "aql_events": "aql_events"
+            }
+        }
+    
+    def connect(self) -> bool:
+        """Connect to MongoDB for AQL data insertion."""
+        try:
+            mongo_config = self.config['mongodb']
+            self.client = MongoClient(mongo_config['connection_string'])
+            self.db = self.client[mongo_config['db_name']]
+            
+            # Test connection
+            self.client.admin.command('ping')
+            run_log.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (AQL detection)")
+            return True
+            
+        except ConnectionFailure as e:
+            run_log.run_log("ERROR", f"MongoDB connection failed: {e}")
+            return False
+        except Exception as e:
+            run_log.run_log("ERROR", f"Connection error: {e}")
+            return False
+    
+    def create_indexes(self) -> bool:
+        """Create optimized indexes for AQL detection data."""
+        if not self.db:
             return False
         
         try:
             from pymongo import ASCENDING, DESCENDING
             
-            if self.collection is None:
-                return False
-                
-            # # Primary composite index for efficient range queries
-            self.collection.create_index([
-                ("window_start", ASCENDING),
-                ("window_end", ASCENDING)
-            ], name="window_range_idx")
+            # Indexes for detection_windows collection
+            windows_collection = self.db['qradar_sliding_windows']
+            windows_indexes = [
+                [("window_start", ASCENDING), ("window_end", ASCENDING)],
+                [("query_time", DESCENDING)],
+                [("total_triggers", DESCENDING)],
+                [("window_id", ASCENDING)]
+            ]
             
-            # # Query time index for tracking when data was processed
-            self.collection.create_index([
-                ("query_time", DESCENDING)
-            ], name="query_time_idx")
+            for index_spec in windows_indexes:
+                try:
+                    windows_collection.create_index(index_spec)
+                except Exception as e:
+                    run_log.run_log("WARNING", f"Index creation warning: {e}")
             
-            # # Host-based detection queries - compound index with time
-            self.collection.create_index([
-                ("hostname", ASCENDING),
-                ("window_start", ASCENDING)
-            ], name="host_time_idx")
+            # Indexes for aql_events collection
+            events_collection = self.db['aql_events']
+            events_indexes = [
+                [("timestamp", DESCENDING)],
+                [("rule_id", ASCENDING)],
+                [("hostname", ASCENDING)],
+                [("window_id", ASCENDING)]
+            ]
             
-            # # Rule trigger analysis - index on total trigger counts
-            self.collection.create_index([
-                ("total_triggers", DESCENDING)
-            ], name="total_triggers_idx")
+            for index_spec in events_indexes:
+                try:
+                    events_collection.create_index(index_spec)
+                except Exception as e:
+                    run_log.run_log("WARNING", f"Index creation warning: {e}")
             
-            # # Feature vector queries - index on rules triggered count
-            self.collection.create_index([
-                ("total_rules_triggered", DESCENDING)
-            ], name="rules_triggered_idx")
-            
-            run_log.run_log("INFO", "# # Detection window indexes created successfully")
+            run_log.run_log("INFO", "AQL detection indexes created successfully")
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed to create indexes: {str(e)}")
+            run_log.run_log("ERROR", f"Index creation failed: {e}")
             return False
-
-    def parse_qradar_search_result(self, result_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        # # Parse QRadar search results into sliding window detection format
-        # # Uses time_utils.py for consistent timestamp processing
-        """
-        # time_utils is already imported at the top of the file
+    
+    def parse_aql_timestamp(self, timestamp_str: str) -> Optional[datetime]:
+        """Parse QRadar AQL timestamp string to datetime."""
+        try:
+            # Handle QRadar AQL timestamp format: "Jul 29, 2025, 9:50:55 AM"
+            return datetime.strptime(timestamp_str, "%b %d, %Y, %I:%M:%S %p")
+        except ValueError:
+            try:
+                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                run_log.run_log("WARNING", f"Failed to parse timestamp: {timestamp_str}")
+                return None
+    
+    def get_window_boundaries(self, timestamp: datetime) -> tuple:
+        """Calculate 30-minute window boundaries for AQL data."""
+        minutes = timestamp.minute
+        window_start = timestamp.replace(
+            minute=(minutes // 30) * 30, 
+            second=0, 
+            microsecond=0
+        )
+        window_end = window_start + timedelta(minutes=30)
+        window_id = window_start.strftime("%Y-%m-%d_%H-%M-%S")
         
-        # Group events by 30-minute windows with host-level breakdown
+        return window_id, window_start, window_end
+    
+    def parse_aql_json_result(self, result_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Parse QRadar AQL JSON results into detection windows.
+        
+        Args:
+            result_data: AQL search result in JSON format
+            
+        Returns:
+            List of detection window documents
+        """
+        if 'events' not in result_data:
+            run_log.run_log("WARNING", "No events found in AQL result")
+            return []
+        
+        events = result_data['events']
+        run_log.run_log("INFO", f"Processing {len(events)} AQL events")
+        
+        # Group events by 30-minute windows
         window_groups = {}
         
-        if 'events' not in result_data:
-            run_log.run_log("WARNING", "# # No events found in QRadar result")
-            return []
-            
-        run_log.run_log("INFO", f"# # Processing {len(result_data['events'])} QRadar events")
-        
-        # Group events by 30-minute window with host breakdown
-        for event in result_data['events']:
+        for event in events:
             try:
-                # Extract real AQL data fields
-                rule_id = str(int(event.get('Custom Rule', 0)))
+                # Extract AQL data fields
+                rule_id = str(event.get('Custom Rule', '0'))
                 count = int(event.get('Count', 0))
                 hostname = str(event.get('sysmon_hostname (custom)', 'global'))
                 
-                # Parse timestamp using time_utils
+                # Parse timestamp
                 event_time_str = event.get('Log Source Time (Minimum)', '')
                 if not event_time_str:
                     continue
                 
-                event_time = time_utils.parse_qradar_timestamp(event_time_str)
-                window_id = time_utils.get_window_id(event_time, 30)
-                window_start, window_end = time_utils.get_window_start_end(event_time, 30)
+                event_time = self.parse_aql_timestamp(event_time_str)
+                if not event_time:
+                    continue
                 
-                # Initialize window group if new
+                window_id, window_start, window_end = self.get_window_boundaries(event_time)
+                
+                # Initialize window group
                 if window_id not in window_groups:
                     window_groups[window_id] = {
                         '_id': window_id,
@@ -158,20 +211,19 @@ class QRadarDataProcessor:
                         'window_end': window_end,
                         'query_time': datetime.now(),
                         'feature_vector': {},
-                        'rule_counts': {},
                         'host_triggers': {},
                         'total_triggers': 0,
-                        'total_rules_triggered': 0
+                        'total_rules_triggered': 0,
+                        'metadata': {
+                            'source': 'qradar_aql',
+                            'data_type': 'detection',
+                            'window_size_minutes': 30
+                        }
                     }
                 
-                # Update feature vector (aggregate counts across all hosts)
+                # Update feature vector (aggregate counts)
                 window_groups[window_id]['feature_vector'][rule_id] = (
                     window_groups[window_id]['feature_vector'].get(rule_id, 0) + count
-                )
-                
-                # Update rule counts
-                window_groups[window_id]['rule_counts'][rule_id] = (
-                    window_groups[window_id]['rule_counts'].get(rule_id, 0) + count
                 )
                 
                 # Update host-level breakdown
@@ -188,40 +240,41 @@ class QRadarDataProcessor:
                 
                 # Update totals
                 window_groups[window_id]['total_triggers'] += count
-                window_groups[window_id]['total_rules_triggered'] = len(window_groups[window_id]['feature_vector'])
+                window_groups[window_id]['total_rules_triggered'] = len(
+                    window_groups[window_id]['feature_vector']
+                )
                 
             except Exception as e:
-                run_log.run_log("WARNING", f"# # Failed to parse event: {str(e)}")
+                run_log.run_log("WARNING", f"Failed to parse AQL event: {e}")
                 continue
         
-        # Convert window groups to list of documents
         documents = list(window_groups.values())
-        run_log.run_log("INFO", f"# # Created {len(documents)} detection windows")
+        run_log.run_log("INFO", f"Created {len(documents)} detection windows from AQL data")
         return documents
     
-    
-    def insert_qradar_data(self, documents: List[Dict[str, Any]], batch_size: int = BATCH_SIZE):
+    def insert_detection_windows(self, documents: List[Dict[str, Any]], 
+                               batch_size: int = 1000) -> int:
         """
-        # # Insert processed QRadar data in batches
-        # # Handles production scale efficiently
-        """
-        if not documents:
-            run_log.run_log("WARNING", "# # No documents provided for insertion")
-            return 0
+        Insert detection windows into MongoDB with batch processing.
+        
+        Args:
+            documents: List of detection window documents
+            batch_size: Number of documents per batch
             
+        Returns:
+            Number of documents successfully inserted
+        """
+        if not self.db or not documents:
+            return 0
+        
+        collection = self.db['qradar_sliding_windows']
         total_inserted = 0
         
         try:
-            if not self._ensure_collection():
-                return 0
-            if self.collection is None:
-                return 0
-                
-            # # Process in batches for memory efficiency
             for i in range(0, len(documents), batch_size):
                 batch = documents[i:i + batch_size]
                 
-                # # Insert with upsert to handle duplicates
+                # Prepare bulk operations with upsert
                 operations = []
                 for doc in batch:
                     operations.append({
@@ -232,316 +285,181 @@ class QRadarDataProcessor:
                         }
                     })
                 
-                result = self.collection.bulk_write(operations)
-                total_inserted += result.upserted_count + result.modified_count
-                
-                if i % (batch_size * 10) == 0:
-                    run_log.run_log("INFO", f"# # Processed {i + len(batch)} documents...")
+                if operations:
+                    result = collection.bulk_write(operations)
+                    total_inserted += result.upserted_count + result.modified_count
+                    
+                    if i % (batch_size * 5) == 0:
+                        run_log.run_log("INFO", f"Processed {i + len(batch)} detection windows...")
             
-            run_log.run_log("INFO", f"# # Completed: {total_inserted} documents inserted/updated")
+            run_log.run_log("INFO", f"AQL insertion completed: {total_inserted} detection windows")
             return total_inserted
             
         except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed to insert QRadar data: {str(e)}")
+            run_log.run_log("ERROR", f"AQL insertion failed: {e}")
             return total_inserted
     
-    def process_qradar_json_files(self, json_files: List[str]):
+    def process_aql_json_files(self, json_files: List[str]) -> int:
         """
-        # # Process QRadar JSON files for detection-only pipeline
-        # # Creates 30-minute detection windows without training data splitting
-        """
-        all_documents = []
+        Process multiple AQL JSON files for detection mode.
         
-        # # Process each JSON file
-        for json_file in json_files:
-            try:
-                run_log.run_log("INFO", f"# # Processing QRadar file: {json_file}")
+        Args:
+            json_files: List of AQL JSON file paths
+            
+        Returns:
+            Total number of detection windows inserted
+        """
+        if not json_files:
+            run_log.run_log("ERROR", "No AQL JSON files provided")
+            return 0
+        
+        if not self.connect():
+            return 0
+        
+        # Create indexes
+        self.create_indexes()
+        
+        total_windows = 0
+        
+        try:
+            for json_file in json_files:
+                if not os.path.exists(json_file):
+                    run_log.run_log("WARNING", f"AQL file not found: {json_file}")
+                    continue
+                
+                run_log.run_log("INFO", f"Processing AQL file: {json_file}")
                 
                 with open(json_file, 'r') as f:
                     result_data = json.load(f)
                 
-                # # Parse QRadar data into detection windows
-                documents = self.parse_qradar_search_result(result_data)
-                all_documents.extend(documents)
-                
-                run_log.run_log("INFO", f"# # Processed {len(documents)} detection windows from {json_file}")
-                
-            except Exception as e:
-                run_log.run_log("ERROR", f"# # Failed to process {json_file}: {str(e)}")
-                continue
-        
-        # # Insert all processed data
-        if all_documents:
-            total_count = self.insert_qradar_data(all_documents)
-            return total_count
-        else:
-            run_log.run_log("WARNING", "# # No documents to insert")
-            return 0
+                # Parse and insert
+                documents = self.parse_aql_json_result(result_data)
+                if documents:
+                    inserted = self.insert_detection_windows(documents)
+                    total_windows += inserted
+                    run_log.run_log("INFO", f"Inserted {inserted} detection windows from {json_file}")
+            
+            return total_windows
+            
+        except Exception as e:
+            run_log.run_log("ERROR", f"AQL processing failed: {e}")
+            return total_windows
+        finally:
+            self.close()
     
-    def cleanup_old_data(self, retention_days: int = 7):
-        """
-        # # Clean up old detection windows based on retention policy
-        # # Integrates with delete_DB module for data lifecycle management
-        """
-        try:
-            cutoff_date = datetime.now() - timedelta(days=retention_days)
-            run_log.run_log("INFO", f"# # Starting cleanup: deleting detection windows older than {retention_days} days")
-            
-            if not self._ensure_collection():
-                return 0
-            if self.collection is None:
-                return 0
-            
-            # # Query to find old detection windows
-            query = {'window_start': {'$lt': cutoff_date}}
-            
-            # # Count documents to be deleted
-            count_to_delete = self.collection.count_documents(query)
-            
-            if count_to_delete > 0:
-                # # Delete old documents
-                result = self.collection.delete_many(query)
-                run_log.run_log("INFO", f"# # Deleted {result.deleted_count} old detection windows")
-                return result.deleted_count
-            else:
-                run_log.run_log("INFO", "# # No old detection windows found to delete")
-                return 0
-                
-        except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed to cleanup old data: {str(e)}")
-            return 0
-
-    def check_storage_usage(self):
-        """
-        # # Check current storage usage and data distribution
-        """
-        if not self._ensure_collection():
+    def get_insertion_summary(self) -> Dict[str, Any]:
+        """Get summary of inserted AQL data."""
+        if not self.db:
             return {}
-            
-        try:
-            # # Database statistics
-            if self.db is None:
-                return {}
-            db_stats = self.db.command("dbStats")
-            collection_stats = {"size": 0, "count": 0, "avgObjSize": 0}
-            
-            # # Document counts by age
-            now = datetime.now()
-            age_buckets = {
-                "last_24h": now - timedelta(hours=24),
-                "last_7d": now - timedelta(days=7),
-                "last_30d": now - timedelta(days=30)
-            }
-            
-            age_counts = {}
-            if self.collection is not None:
-                for bucket_name, cutoff_date in age_buckets.items():
-                    count = self.collection.count_documents({
-                        'window_start': {'$gte': cutoff_date}
-                    })
-                    age_counts[bucket_name] = count
-            
-            storage_info = {
-                "database_size_mb": round(db_stats.get("dataSize", 0) / (1024 * 1024), 2),
-                "collection_size_mb": round(collection_stats.get("size", 0) / (1024 * 1024), 2),
-                "total_documents": collection_stats.get("count", 0),
-                "average_doc_size": round(collection_stats.get("avgObjSize", 0), 2),
-                "age_distribution": age_counts
-            }
-            
-            run_log.run_log("INFO", f"# # Storage usage: {storage_info['database_size_mb']} MB")
-            return storage_info
-            
-        except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed to check storage usage: {str(e)}")
-            return {}
-
-    def manage_data_lifecycle(self, auto_cleanup: bool = True, retention_days: int = 7):
-        """
-        # # Manage complete data lifecycle: insert, retention, cleanup
-        # # Default 7-day retention for ML training requirements
-        """
-        lifecycle_info = {
-            "cleanup_performed": False,
-            "documents_deleted": 0,
-            "storage_before": {},
-            "storage_after": {}
-        }
         
         try:
-            # # Check storage before cleanup
-            lifecycle_info["storage_before"] = self.check_storage_usage()
-            
-            if auto_cleanup:
-                # # Perform automatic cleanup
-                deleted_count = self.cleanup_old_data(retention_days)
-                lifecycle_info["cleanup_performed"] = True
-                lifecycle_info["documents_deleted"] = deleted_count
-                
-                # # Check storage after cleanup
-                lifecycle_info["storage_after"] = self.check_storage_usage()
-                
-                run_log.run_log("INFO", f"# # Data lifecycle management completed: {deleted_count} documents cleaned")
-            
-            return lifecycle_info
-            
-        except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed data lifecycle management: {str(e)}")
-            return lifecycle_info
-
-    def get_data_summary(self) -> Dict[str, Any]:
-        """
-        # # Get comprehensive summary of QRadar data
-        """
-        if not self._ensure_collection():
-            return {}
-            
-        try:
-            if self.collection is None:
-                return {}
-                
-            # # Basic counts
-            total_docs = self.collection.count_documents({})
-            unique_hosts = len(self.collection.distinct("hostname"))
-            _ = unique_hosts  # # Mark as used for linter
-            
-            # # Time range for detection windows
-            time_range = list(self.collection.aggregate([
-                {"$group": {
-                    "_id": None,
-                    "min_window_start": {"$min": "$window_start"},
-                    "max_window_end": {"$max": "$window_end"}
-                }}
-            ]))
-            
-            # # Rule statistics from feature vectors
-            rule_stats = list(self.collection.aggregate([
-                {"$project": {"rules": {"$objectToArray": "$feature_vector"}}},
-                {"$unwind": "$rules"},
-                {"$group": {
-                    "_id": None,
-                    "unique_rules": {"$addToSet": "$rules.k"},
-                    "total_rule_triggers": {"$sum": "$rules.v"}
-                }}
-            ]))
-            
-            # # Host statistics
-            host_stats = list(self.collection.aggregate([
-                {"$project": {"hosts": {"$objectToArray": "$host_triggers"}}},
-                {"$unwind": "$hosts"},
-                {"$group": {
-                    "_id": "$hosts.k",
-                    "total_triggers": {"$sum": "$hosts.v.total_triggers"}
-                }},
-                {"$group": {
-                    "_id": None,
-                    "total_unique_hosts": {"$sum": 1},
-                    "total_host_triggers": {"$sum": "$total_triggers"}
-                }}
-            ]))
+            windows_collection = self.db['qradar_sliding_windows']
+            events_collection = self.db['aql_events']
             
             summary = {
-                "total_detection_windows": total_docs,
-                "unique_hosts": host_stats[0]["total_unique_hosts"] if host_stats else 0,
-                "total_host_triggers": host_stats[0]["total_host_triggers"] if host_stats else 0,
-                "window_range": time_range[0] if time_range else {},
-                "unique_rules": len(rule_stats[0]["unique_rules"]) if rule_stats else 0,
-                "total_rule_triggers": rule_stats[0]["total_rule_triggers"] if rule_stats else 0
+                "aql_detection_windows": {
+                    "total_documents": windows_collection.count_documents({}),
+                    "unique_hosts": len(windows_collection.distinct("host_triggers")),
+                    "time_range": {}
+                },
+                "aql_events": {
+                    "total_documents": events_collection.count_documents({})
+                }
             }
+            
+            # Get time range
+            if windows_collection.count_documents({}) > 0:
+                time_range = list(windows_collection.aggregate([
+                    {"$group": {
+                        "_id": None,
+                        "min_window_start": {"$min": "$window_start"},
+                        "max_window_end": {"$max": "$window_end"}
+                    }}
+                ]))
+                summary["aql_detection_windows"]["time_range"] = time_range[0] if time_range else {}
             
             return summary
             
         except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed to get data summary: {str(e)}")
-            return {}
-
-    def integrate_with_delete_db(self, retention_days: int = 30):
-        """
-        # # Integrate with delete_DB module for coordinated data management
-        """
-        try:
-            # # Use the cleanup method directly instead of non-existent function
-            deleted_count = self.cleanup_old_data(retention_days)
-            run_log.run_log("INFO", f"# # Integrated cleanup completed: {deleted_count} documents deleted")
-            return deleted_count
-            
-        except Exception as e:
-            run_log.run_log("ERROR", f"# # Failed to integrate with delete_DB: {str(e)}")
-            return 0
-
-def process_qradar_data(connection_string=CONNECTION_STRING_default, db_name=NAME_DB_default,
-                       json_files=None, auto_cleanup=True):
-    """
-    # # Main function to process QRadar search results for detection-only pipeline
-    # # Creates 30-minute sliding window detection windows from AQL results
-    # # Integrates with delete_DB module for automatic data lifecycle management
-    """
-    if not json_files:
-        run_log.run_log("ERROR", "# # No QRadar JSON files provided")
-        return False
+            run_log.run_log("ERROR", f"Failed to get insertion summary: {e}")
+            return {"error": str(e)}
     
-    processor = QRadarDataProcessor(connection_string, db_name)
+    def close(self):
+        """Close MongoDB connection."""
+        if self.client:
+            self.client.close()
+
+
+def insert_aql_data(json_files: List[str], config_path: str = None) -> int:
+    """
+    Main function to process and insert AQL JSON data.
+    
+    Args:
+        json_files: List of AQL JSON file paths
+        config_path: Optional path to mongodb_config.json
+        
+    Returns:
+        Total number of detection windows inserted
+    """
+    processor = AQLDataInserter(config_path)
+    return processor.process_aql_json_files(json_files)
+
+
+def main():
+    """CLI interface for AQL data insertion."""
+    parser = argparse.ArgumentParser(description='Insert AQL JSON data for detection mode')
+    parser.add_argument('json_files', nargs='+', help='AQL JSON files to process')
+    parser.add_argument('--config', type=str, help='Path to mongodb_config.json')
+    parser.add_argument('--batch-size', type=int, default=1000, help='Batch size for insertion')
+    
+    args = parser.parse_args()
+    
+    print("📊 Starting AQL JSON data processing...")
+    print(f"   Mode: Detection-only")
+    print(f"   Data source: AQL JSON")
+    print(f"   Files to process: {len(args.json_files)}")
+    print(f"   Batch size: {args.batch_size}")
+    
+    # Validate files exist
+    valid_files = []
+    for file_path in args.json_files:
+        if os.path.exists(file_path):
+            valid_files.append(file_path)
+        else:
+            print(f"File not found: {file_path}")
+    
+    if not valid_files:
+        print("No valid AQL JSON files to process")
+        return 1
     
     try:
-        # # Pre-processing cleanup if enabled
-        if auto_cleanup:
-            run_log.run_log("INFO", "# # Running pre-processing cleanup...")
-            lifecycle_info = processor.manage_data_lifecycle(auto_cleanup=True, retention_days=7)
-            run_log.run_log("INFO", f"# # Pre-cleanup deleted {lifecycle_info['documents_deleted']} old documents")
+        total_windows = insert_aql_data(valid_files, args.config)
         
-        # # Create optimized indexes
-        processor.create_production_indexes()
-        
-        # # Process QRadar data files
-        run_log.run_log("INFO", f"# # Processing {len(json_files)} QRadar JSON files")
-        
-        total_count = processor.process_qradar_json_files(json_files)
-        
-        # # Post-processing cleanup and storage check
-        if auto_cleanup:
-            run_log.run_log("INFO", "# # Running post-processing cleanup...")
-            processor.integrate_with_delete_db(retention_days=7)
-            storage_info = processor.check_storage_usage()
-            run_log.run_log("INFO", f"# # Final storage: {storage_info.get('database_size_mb', 0)} MB")
-        
-        # # Print summary
-        summary = processor.get_data_summary()
-        if summary:
-            print(f"# # QRadar Detection Data Summary:")
-            print(f"   Total detection windows: {summary.get('total_detection_windows', 0)}")
-            print(f"   Unique hosts: {summary.get('unique_hosts', 0)}")
-            print(f"   Total host triggers: {summary.get('total_host_triggers', 0)}")
-            print(f"   Unique rules triggered: {summary.get('unique_rules', 0)}")
-            print(f"   Total rule triggers: {summary.get('total_rule_triggers', 0)}")
-            print(f"   Window range: {summary.get('window_range', {})}")
+        if total_windows > 0:
+            print(f"AQL processing completed successfully")
+            print(f"   Total detection windows created: {total_windows}")
             
-        return total_count > 0
+            # Show summary
+            processor = AQLDataInserter(args.config)
+            if processor.connect():
+                summary = processor.get_insertion_summary()
+                processor.close()
+                
+                if "error" not in summary:
+                    windows = summary.get("aql_detection_windows", {})
+                    print(f"   Unique AQL hosts: {windows.get('unique_hosts', 0)}")
+                    time_range = windows.get("time_range", {})
+                    if time_range:
+                        print(f"   AQL time range: {time_range.get('min_window_start', 'N/A')} to {time_range.get('max_window_end', 'N/A')}")
+        else:
+            print("No AQL detection windows created")
+        
+        return 0
         
     except Exception as e:
-        run_log.run_log("ERROR", f"# # Failed to process QRadar data: {str(e)}")
-        return False
+        print(f"AQL processing failed: {e}")
+        return 1
+
 
 if __name__ == "__main__":
-    # # Example usage for detection-only pipeline
-    print("# # Starting QRadar detection data processing...")
-    
-    # # Example: Process QRadar search results for detection windows
-    qradar_files = [
-        "result.json",  # # Use actual QRadar search result files
-        # "/path/to/qradar_search_results.json"
-    ]
-    
-    success = process_qradar_data(
-        connection_string=CONNECTION_STRING_default,
-        db_name=NAME_DB_default,
-        json_files=qradar_files,
-        auto_cleanup=True  # 启用自动清理
-    )
-    
-    print(f"# # QRadar data processing completed: {'Success' if success else 'Failed'}")
-    
-    # # Optional: Manual cleanup using delete_DB integration
-    if success:
-        processor = QRadarDataProcessor()
-        cleanup_count = processor.integrate_with_delete_db(retention_days=7)
-        print(f"# # Additional cleanup completed: {cleanup_count} documents deleted")
+    exit(main())

@@ -1,17 +1,10 @@
 import pandas as pd
 import numpy as np
-from typing import Tuple, Optional, Dict, List, Any, Hashable
+from typing import Tuple, Optional, Dict, List, Any
 import logging
-import sys
-from pathlib import Path
 
-# Add shared_utils to path for importing QRadarRuleManager
-sys.path.append(str(Path(__file__).parent.parent / 'shared_utils'))
-try:
-    from qradar_rule_manager import QRadarRuleManager
-except ImportError:
-    # Fallback import for compatibility
-    from shared_utils.qradar_rule_manager import QRadarRuleManager
+# Import QRadarRuleManager from shared_utils
+from shared_utils.qradar_rule_manager import QRadarRuleManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +14,7 @@ class FeatureGenerator:
     Uses QRadarRuleManager with UAT-to-Production rule ID mapping support.
     """
     
-    def __init__(self, environment: str = 'prod', config: Dict = None):
+    def __init__(self, environment: str = 'prod', config: Optional[Dict] = None):
         """
         Initialize feature generator with environment-aware rule mapping
         
@@ -31,7 +24,7 @@ class FeatureGenerator:
         """
         self.environment = environment
         self.config = config or {}
-        self.rule_manager = QRadarRuleManager(mode='file', config=config, environment=environment)
+        self.rule_manager = QRadarRuleManager(mode='file', config=self.config, environment=environment)
         self._rule_to_index = None
         self._vector_dimension = None
         self._production_rule_to_index = None
@@ -67,12 +60,14 @@ class FeatureGenerator:
         
         # Initialize feature matrix
         n_samples = len(df_agg)
-        X = np.zeros((n_samples, self._vector_dimension), dtype=np.float32)
+        X = np.zeros((n_samples, self._vector_dimension), dtype=float)
         
         # Get UAT-to-Production mapping for training mode
-        uat_to_prod_map = {}
+        uat_to_prod_map: Dict[int, int] = {}
         if mode == 'train' and self.environment == 'uat':
-            uat_to_prod_map = self.rule_manager.get_uat_to_prod_map()
+            uat_map = self.rule_manager.get_uat_to_prod_map()
+            if uat_map:
+                uat_to_prod_map = {int(k): int(v) for k, v in uat_map.items()}
             logger.info(f"Using {len(uat_to_prod_map)} UAT-to-Production mappings")
         
         # Map aggregated rule counts to feature vectors
@@ -81,10 +76,11 @@ class FeatureGenerator:
                 rule_counts = row['aggregated_rules_dict']
                 if isinstance(rule_counts, dict):
                     for rule_id, count in rule_counts.items():
+                        rule_id_int = int(rule_id)
                         # Map UAT rule to production rule if necessary
-                        prod_rule_id = uat_to_prod_map.get(rule_id, rule_id)
+                        prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                         
-                        if prod_rule_id in self._rule_to_index:
+                        if self._rule_to_index and prod_rule_id in self._rule_to_index:
                             col_idx = self._rule_to_index[prod_rule_id]
                             X[idx, col_idx] = float(count)
                         else:
@@ -97,7 +93,7 @@ class FeatureGenerator:
                 # Map UAT rule to production rule if necessary
                 prod_rule_id = uat_to_prod_map.get(rule_id, rule_id)
                 
-                if prod_rule_id in self._rule_to_index:
+                if self._rule_to_index and prod_rule_id in self._rule_to_index:
                     col_idx = self._rule_to_index[prod_rule_id]
                     X[idx, col_idx] = count
                 else:
@@ -107,14 +103,14 @@ class FeatureGenerator:
         y = None
         if mode == 'train':
             if 'label' in df_agg.columns:
-                y = df_agg['label'].values.astype(np.int32)
+                y = df_agg['label'].values.astype(int)
             elif 'is_attack' in df_agg.columns:
-                y = df_agg['is_attack'].values.astype(np.int32)
+                y = df_agg['is_attack'].values.astype(int)
             else:
                 logger.warning("No label column found in training mode")
         
         logger.info(f"Generated feature matrix: {X.shape[0]} samples × {X.shape[1]} features")
-        if y is not None and len(y) > 0:
+        if y is not None and y.size > 0:
             unique_labels, counts = np.unique(y, return_counts=True)
             logger.info(f"Label distribution: {dict(zip(unique_labels.tolist(), counts.tolist()))}")
         
@@ -125,7 +121,7 @@ class FeatureGenerator:
         rule_list = self.rule_manager.get_production_rule_list()
         return [f"rule_{rule_id}" for rule_id in rule_list]
     
-    def get_rule_statistics(self) -> Dict[str, int]:
+    def get_rule_statistics(self) -> Dict[str, Any]:
         """Get statistics about discovered rules using production baseline."""
         prod_rules = self.rule_manager.get_production_rule_list()
         return {
@@ -139,22 +135,24 @@ class FeatureGenerator:
         """Validate how many rules are actually present in the data with UAT mapping."""
         uat_to_prod_map = {}
         if self.environment == 'uat':
-            uat_to_prod_map = self.rule_manager.get_uat_to_prod_map()
+            uat_map = self.rule_manager.get_uat_to_prod_map()
+            if uat_map:
+                uat_to_prod_map = {int(k): int(v) for k, v in uat_map.items()}
+        
+        all_rules = set()
         
         if 'aggregated_rules_dict' in df_agg.columns:
-            all_rules = set()
             for rules_dict in df_agg['aggregated_rules_dict']:
                 if isinstance(rules_dict, dict):
                     for rule_id in rules_dict.keys():
-                        prod_rule_id = uat_to_prod_map.get(rule_id, rule_id)
+                        rule_id_int = int(rule_id)
+                        prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                         all_rules.add(prod_rule_id)
         elif 'rule_id' in df_agg.columns:
-            all_rules = set()
             for rule_id in df_agg['rule_id'].unique():
-                prod_rule_id = uat_to_prod_map.get(rule_id, rule_id)
+                rule_id_int = int(rule_id)
+                prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                 all_rules.add(prod_rule_id)
-        else:
-            return {'present_rules': 0, 'missing_rules': self._vector_dimension, 'unknown_rules': 0}
         
         discovered_rules = set(self.rule_manager.get_production_rule_list())
         present_rules = len(all_rules.intersection(discovered_rules))

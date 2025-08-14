@@ -14,19 +14,45 @@
   },
   "collections": {
     "detection_windows": "qradar_sliding_windows",
-    "detection_results": "detection_results"
+    "detection_results": "detection_results",
+    "aql_events": "aql_events"
   },
   "data_schema": {
     "detection_windows": {
       "_id": "string (window_id from time_utils)",
-      "window_start": "datetime (from time_utils)",
-      "window_end": "datetime (from time_utils)",
+      "window_start": "datetime",
+      "window_end": "datetime",
       "query_time": "datetime",
       "feature_vector": "object (rule_id -> count)",
       "rule_counts": "object (rule_id -> count)",
       "host_triggers": "object (hostname -> {total_triggers, rules})",
       "total_triggers": "integer",
-      "total_rules_triggered": "integer"
+      "total_rules_triggered": "integer",
+      "metadata": {
+        "source": "string",
+        "data_type": "string",
+        "query_id": "string"
+      }
+    },
+    "detection_results": {
+      "window_id": "string",
+      "timestamp": "datetime",
+      "prediction": "integer (0=normal, 1=anomaly)",
+      "confidence": "float",
+      "model_version": "string",
+      "total_events": "integer",
+      "unique_rules": "integer"
+    },
+    "aql_events": {
+      "hostname": "string",
+      "rule_id": "string",
+      "timestamp": "datetime",
+      "count": "integer",
+      "window_id": "string",
+      "metadata": {
+        "source": "string",
+        "raw_event": "object"
+      }
     }
   },
   "rule_mapping": {
@@ -45,6 +71,21 @@
     "timezone": "Asia/Hong_Kong",
     "window_size_minutes": 30,
     "tolerance_seconds": 5,
-    "timestamp_format": "%b %d, %Y, %I:%M:%S %p"
+    "timestamp_format": "%b %d, %Y, %I:%M:%S %p",
+    "aql_timestamp_format": "%b %d, %Y, %I:%M:%S %p"
+  },
+  "detection_mode": {
+    "enabled": true,
+    "data_source": "AQL_JSON",
+    "collections": {
+      "windows": "qradar_sliding_windows",
+      "results": "detection_results",
+      "events": "aql_events"
+    },
+    "retention_policy": {
+      "enabled": true,
+      "days": 7,
+      "cleanup_collections": ["qradar_sliding_windows", "detection_results", "aql_events"]
+    }
   }
 }

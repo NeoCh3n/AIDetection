@@ -10,7 +10,7 @@ Primary ML Algorithm: Random Forest Classifier (sklearn.ensemble.RandomForestCla
 - Python Version: Ensure all code is compatible with Python 3.6.8.
 Input Data Schema:
 Each row represents a 30-minute aggregated time window.
-Features: Approximately 1500 columns, each corresponding to a unique QRadar Rule ID. Cell values are the Rule's trigger count. The exact number of features may be refined.
+Features: 2898 columns, each corresponding to a unique QRadar Rule ID. Cell values are the Rule's trigger count. The exact number of features may be refined.
 Labels: A binary target column (is_attack), where 1 indicates a window containing a Picus-simulated Ransomware attack, and 0 indicates a normal window.
 Core Libraries:
 pandas & numpy for data manipulation.
@@ -30,13 +30,13 @@ Purpose: To query labeled event data from MongoDB and aggregate it into feature 
 
 # Parameters:
 mongo_collection: A pymongo collection object.
-rule_list (list): A list of the ~1500 Rule IDs that will form the columns of the DataFrame.
+rule_list (list): A list of the 2898 Rule IDs that will form the columns of the DataFrame.
 Since data and training are separate, there will be a folder Qradar_rule to store all the rule files Training_data folder to store all the training data.Qradar rule and training data are manually fetched and stored in this folder.
 
 Implementation Steps:
 Query MongoDB for event data within defined time windows.
 For each 30-minute window, aggregate the trigger counts for every Rule in the rule_list.
-Create a Pandas DataFrame where each row is a 1500-dimension feature vector.
+Create a Pandas DataFrame where each row is a 2898-dimension feature vector.
 Add a label column based on whether the time window corresponds to a Picus Ransomware simulation (1) or normal activity (0).
 Return: A labeled Pandas DataFrame ready for training.
 
@@ -68,7 +68,7 @@ Purpose: To evaluate the trained model and identify the most important features 
 # Parameters:
 model_path (str): Path to the trained .joblib model file.
 test_data_path (str): Path to the testing dataset CSV.
-rule_list (list): The list of the ~1500 Rule IDs.
+rule_list (list): The list of the 2898 Rule IDs.
 Implementation Steps:
 Load the model and the test data.
 Generate predictions on the test set (X_test).
@@ -208,7 +208,7 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
 | feature_generator.py                                         |
 |  • Role: Converts aggregated data to model-ready features.   |
 |  • Uses rule_manager.py to get ordered Rule ID list & mapping|
-|  • Creates dense feature vectors (e.g., 1500-dim) from sparse|
+|  • Creates dense feature vectors (e.g., 2898-dim) from sparse|
 |    aggregated_rules_dict.                                    |
 |  • Mode 'train': Adds 'is_attack' label column.              |
 |  • Output: X (feature matrix), y (labels in train mode)      |
@@ -265,7 +265,7 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
 **Shared Components & Utilities:**
 +----------------------------------+
 | rule_manager.py                  |
-|  • Manages 2989 Rule IDs         |
+|  • Manages 2898 Rule IDs         |
 |  • Provides list & index mapping |
 +----------------------------------+
 +----------------------------------+
@@ -322,7 +322,7 @@ A. Core Pipeline Modules
 	•	Main function/class: generate_feature_vectors(df_agg, mode)
 	•	Used by: Called by pipeline_controller.py after feature_aggregator.py.
 	•	Details:
-	•	Pull ordered rule list and index map from rule_manager.py (e.g., ~1500 rules).
+	•	Pull ordered rule list and index map from rule_manager.py (e.g., 2898 rules).
 	•	For each row, build dense vector from aggregated_rules_dict.
 	•	If mode='train', append is_attack label.
 	•	Output: X (feature matrix) and y (labels only in train mode).
@@ -375,7 +375,7 @@ B. Model Layer & Notifications
 C. Shared Utilities
 	1.	rule_manager.py
 
-	•	Purpose: Central management of the ordered rule universe (~1500 IDs).
+	•	Purpose: Central management of the ordered rule universe (2898 IDs).
 	•	Main functions: get_rule_list(), get_rule_to_index_map()
 	•	Details: Load from rules.json/rules.txt; provide caching to avoid repeated I/O.
 

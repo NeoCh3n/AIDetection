@@ -220,7 +220,7 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
     
     try:
         # Get configuration parameters
-        query_window_minutes = config.fetch_data_frequency_default
+        query_window_minutes = config.get('fetch_data_frequency_default', 15)
         
         # Set timezone
         tz = pytz.UTC

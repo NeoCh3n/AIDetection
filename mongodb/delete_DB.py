@@ -1,101 +1,398 @@
 #!/usr/bin/env python3
 """
-MongoDB Data Cleanup Script
-Deletes data older than 7 days from detection collections
+MongoDB Data Cleanup Script for Detection-Only Mode
+
+This script specifically handles cleanup of AQL JSON data 
+in detection-only mode. It processes QRadar search results (JSON format) and
+manages the corresponding MongoDB collections.
+
+Python 3.6.8 Compatible
 """
 
 import os
 import sys
-from datetime import datetime, timedelta
 import json
+import argparse
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+
+# Add mongodb directory to path for imports
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
+from system import run_log
 
-# Load configuration
-config_path = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
-try:
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    MONGODB_CONFIG = config['mongodb']
-except FileNotFoundError:
-    MONGODB_CONFIG = {
-        "host": "localhost",
-        "port": 27017,
-        "db_name": "qradar_detection"
-    }
+# Configuration
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
 
-def cleanup_old_data(retention_days: int = 7):
+
+class DetectionDataCleanup:
     """
-    Delete data older than 7 days from MongoDB collections.
+    Specialized cleanup manager for detection-only mode with AQL JSON data.
     
-    Args:
-        retention_days: Number of days to retain data
+    This class handles cleanup of MongoDB collections that store QRadar AQL
+    search results in JSON format.
     """
-    try:
-        # Connect to MongoDB
-        client = MongoClient(
-            f"mongodb://{MONGODB_CONFIG['host']}:{MONGODB_CONFIG['port']}/"
-        )
-        db = client[MONGODB_CONFIG['db_name']]
+    
+    def __init__(self, config_path: str = None):
+        """Initialize cleanup manager with AQL-specific configuration."""
+        self.config_path = config_path or CONFIG_PATH
+        self.config = self._load_config()
+        self.client = None
+        self.db = None
         
-        # Calculate cutoff date
+    def _load_config(self) -> Dict[str, Any]:
+        """Load MongoDB configuration for detection-only mode."""
+        try:
+            with open(self.config_path, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            run_log.run_log("ERROR", f"Config file not found: {self.config_path}")
+            return self._create_default_config()
+        except json.JSONDecodeError as e:
+            run_log.run_log("ERROR", f"Invalid JSON in config: {e}")
+            return self._create_default_config()
+    
+    def _create_default_config(self) -> Dict[str, Any]:
+        """Create default configuration for detection-only mode."""
+        return {
+            "mongodb": {
+                "host": "localhost",
+                "port": 27017,
+                "db_name": "qradar_detection",
+                "connection_string": "mongodb://localhost:27017/"
+            },
+            "pipeline": {
+                "mode": "detection_only",
+                "retention_days": 7
+            },
+            "collections": {
+                "detection_windows": "qradar_sliding_windows",
+                "detection_results": "detection_results",
+                "aql_events": "aql_events"
+            }
+        }
+    
+    def connect(self) -> bool:
+        """Connect to MongoDB for AQL data processing."""
+        try:
+            mongo_config = self.config['mongodb']
+            self.client = MongoClient(mongo_config['connection_string'])
+            self.db = self.client[mongo_config['db_name']]
+            
+            # Test connection
+            self.client.admin.command('ping')
+            run_log.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (detection mode)")
+            return True
+            
+        except ConnectionFailure as e:
+            run_log.run_log("ERROR", f"MongoDB connection failed: {e}")
+            return False
+        except Exception as e:
+            run_log.run_log("ERROR", f"Connection error: {e}")
+            return False
+    
+    def cleanup_detection_data(self, retention_days: int = 7) -> Dict[str, int]:
+        """
+        Clean up AQL JSON detection data based on retention policy.
+        
+        Args:
+            retention_days: Number of days to retain AQL data
+            
+        Returns:
+            Dictionary with cleanup results by collection
+        """
+        if not self.db:
+            run_log.run_log("ERROR", "Database not connected")
+            return {}
+        
+        collections_to_clean = [
+            'qradar_sliding_windows',
+            'detection_results', 
+            'aql_events'
+        ]
+        
+        results = {}
         cutoff_date = datetime.now() - timedelta(days=retention_days)
         
-        # Collections to clean up
-        collections = ['qradar_events', 'detection_results']
-        
-        total_deleted = 0
-        
-        for collection_name in collections:
-            collection = db[collection_name]
+        try:
+            for collection_name in collections_to_clean:
+                collection = self.db[collection_name]
+                
+                # Build time-based query for AQL data
+                if collection_name == 'aql_events':
+                    time_field = 'timestamp'
+                elif collection_name == 'qradar_sliding_windows':
+                    time_field = 'window_start'
+                elif collection_name == 'detection_results':
+                    time_field = 'timestamp'
+                else:
+                    time_field = 'created_at'
+                
+                query = {time_field: {'$lt': cutoff_date}}
+                
+                # Count documents to be deleted
+                old_docs = collection.count_documents(query)
+                
+                if old_docs > 0:
+                    # Delete old documents
+                    result = collection.delete_many(query)
+                    deleted_count = result.deleted_count
+                    results[collection_name] = deleted_count
+                    run_log.run_log("INFO", f"🗑️  Deleted {deleted_count} documents from {collection_name}")
+                else:
+                    results[collection_name] = 0
+                    run_log.run_log("INFO", f"No old documents to delete from {collection_name}")
             
-            # Count documents to be deleted
-            old_docs = collection.count_documents({"timestamp": {"$lt": cutoff_date}})
+            return results
             
-            if old_docs > 0:
-                # Delete old documents
-                result = collection.delete_many({"timestamp": {"$lt": cutoff_date}})
-                print(f"🗑️  Deleted {result.deleted_count} documents from {collection_name}")
-                total_deleted += result.deleted_count
-            else:
-                print(f"No old documents to delete from {collection_name}")
-        
-        if total_deleted > 0:
-            print(f"🧹 Cleanup complete. Total deleted: {total_deleted} documents")
-        else:
-            print("No cleanup needed")
-            
-    except ConnectionFailure as e:
-        print(f"MongoDB connection failed: {e}")
-        return False
-    except Exception as e:
-        print(f"Cleanup error: {e}")
-        return False
-    finally:
-        if 'client' in locals():
-            client.close()
+        except Exception as e:
+            run_log.run_log("ERROR", f"Cleanup error: {e}")
+            return {"error": str(e)}
     
-    return True
+    def cleanup_by_window_range(self, start_time: datetime, end_time: datetime) -> Dict[str, int]:
+        """
+        Clean up AQL data by specific window range.
+        
+        Args:
+            start_time: Start of cleanup range
+            end_time: End of cleanup range
+            
+        Returns:
+            Cleanup results by collection
+        """
+        if not self.db:
+            return {}
+        
+        collections = [
+            'qradar_sliding_windows',
+            'detection_results',
+            'aql_events'
+        ]
+        
+        results = {}
+        
+        try:
+            for collection_name in collections:
+                collection = self.db[collection_name]
+                
+                # Build time-based query
+                if collection_name == 'aql_events':
+                    time_field = 'timestamp'
+                elif collection_name == 'qradar_sliding_windows':
+                    time_field = 'window_start'
+                elif collection_name == 'detection_results':
+                    time_field = 'timestamp'
+                else:
+                    time_field = 'created_at'
+                
+                query = {time_field: {'$gte': start_time, '$lt': end_time}}
+                
+                count = collection.count_documents(query)
+                if count > 0:
+                    result = collection.delete_many(query)
+                    results[collection_name] = result.deleted_count
+                    run_log.run_log("INFO", f"Deleted {result.deleted_count} documents from {collection_name}")
+                else:
+                    results[collection_name] = 0
+                    
+        except Exception as e:
+            run_log.run_log("ERROR", f"Range cleanup error: {e}")
+            results["error"] = str(e)
+        
+        return results
+    
+    def get_cleanup_summary(self) -> Dict[str, Any]:
+        """Get summary of AQL data before cleanup."""
+        if not self.db:
+            return {}
+        
+        collections = [
+            'qradar_sliding_windows',
+            'detection_results',
+            'aql_events'
+        ]
+        
+        summary = {}
+        
+        try:
+            for collection_name in collections:
+                collection = self.db[collection_name]
+                total_docs = collection.count_documents({})
+                
+                if total_docs > 0:
+                    # Get time range
+                    time_field = 'timestamp' if collection_name in ['aql_events', 'detection_results'] else 'window_start'
+                    time_range = list(collection.aggregate([
+                        {"$group": {
+                            "_id": None,
+                            "min_time": {"$min": f"${time_field}"},
+                            "max_time": {"$max": f"${time_field}"}
+                        }}
+                    ]))
+                    
+                    summary[collection_name] = {
+                        "total_documents": total_docs,
+                        "time_range": time_range[0] if time_range else {}
+                    }
+                else:
+                    summary[collection_name] = {
+                        "total_documents": 0,
+                        "time_range": {}
+                    }
+        
+        except Exception as e:
+            run_log.run_log("ERROR", f"Failed to get summary: {e}")
+            summary["error"] = str(e)
+        
+        return summary
+    
+    def execute_cleanup_plan(self, retention_days: int = 7, dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Execute comprehensive cleanup plan for AQL detection data.
+        
+        Args:
+            retention_days: Days to retain AQL data
+            dry_run: If True, only show what would be deleted
+            
+        Returns:
+            Cleanup execution results
+        """
+        if not self.connect():
+            return {"error": "Failed to connect to MongoDB"}
+        
+        results = {
+            "mode": "detection_only",
+            "data_source": "AQL_JSON",
+            "retention_days": retention_days,
+            "dry_run": dry_run,
+            "summary_before": self.get_cleanup_summary()
+        }
+        
+        if dry_run:
+            # Calculate what would be deleted
+            cutoff_date = datetime.now() - timedelta(days=retention_days)
+            
+            collections = [
+                'qradar_sliding_windows',
+                'detection_results',
+                'aql_events'
+            ]
+            
+            would_delete = {}
+            
+            for collection_name in collections:
+                collection = self.db[collection_name]
+                
+                time_field = 'timestamp' if collection_name in ['aql_events', 'detection_results'] else 'window_start'
+                query = {time_field: {'$lt': cutoff_date}}
+                
+                count = collection.count_documents(query)
+                would_delete[collection_name] = count
+            
+            results["would_delete"] = would_delete
+            total_would_delete = sum(would_delete.values())
+            run_log.run_log("INFO", f"Dry run: would delete {total_would_delete} AQL documents")
+            
+        else:
+            # Execute actual cleanup
+            cleanup_results = self.cleanup_detection_data(retention_days)
+            results["cleanup_results"] = cleanup_results
+            results["summary_after"] = self.get_cleanup_summary()
+        
+        self.close()
+        return results
+    
+    def close(self):
+        """Close MongoDB connection."""
+        if self.client:
+            self.client.close()
+
+
+def cleanup_old_data(retention_days: int = 7) -> Dict[str, Any]:
+    """
+    Legacy cleanup function for AQL JSON detection data.
+    
+    Args:
+        retention_days: Number of days to retain AQL data
+        
+    Returns:
+        Cleanup results dictionary
+    """
+    cleanup = DetectionDataCleanup()
+    
+    try:
+        if cleanup.connect():
+            results = cleanup.cleanup_detection_data(retention_days)
+            cleanup.close()
+            return results
+        else:
+            return {"error": "Failed to connect to MongoDB"}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 def main():
-    """CLI interface for cleanup"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Clean up old MongoDB data')
-    parser.add_argument('--days', type=int, default=7, help='Days to retain')
+    """CLI interface for AQL detection data cleanup."""
+    parser = argparse.ArgumentParser(description='Clean up AQL JSON detection data')
+    parser.add_argument('--days', type=int, default=7,
+                       help='Days to retain AQL detection data (default: 7)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Show what would be deleted without actual deletion')
+    parser.add_argument('--config', type=str,
+                       help='Path to mongodb_config.json')
     
     args = parser.parse_args()
     
-    print("🧹 Starting MongoDB cleanup...")
+    print("🧹 Starting AQL detection data cleanup...")
+    print(f"   Mode: Detection-only")
+    print(f"   Data source: AQL JSON")
     print(f"   Retention: {args.days} days")
+    print(f"   Dry run: {'Yes' if args.dry_run else 'No'}")
     
-    success = cleanup_old_data(args.days)
+    cleanup = DetectionDataCleanup(args.config)
     
-    if success:
-        print("Cleanup completed successfully")
-    else:
-        print("Cleanup failed")
-        sys.exit(1)
+    try:
+        results = cleanup.execute_cleanup_plan(
+            retention_days=args.days,
+            dry_run=args.dry_run
+        )
+        
+        if "error" in results:
+            print(f"❌ Cleanup failed: {results['error']}")
+            return 1
+        
+        if args.dry_run:
+            print("\n📊 Dry run results for AQL data:")
+            would_delete = results.get("would_delete", {})
+            total_would_delete = sum(would_delete.values())
+            
+            for collection, count in would_delete.items():
+                print(f"   {collection}: {count} AQL documents")
+            print(f"   Total: {total_would_delete} AQL documents would be deleted")
+            
+        else:
+            print("\n✅ AQL detection data cleanup completed")
+            cleanup_results = results.get("cleanup_results", {})
+            total_deleted = sum(cleanup_results.values())
+            
+            print(f"   Total AQL documents deleted: {total_deleted}")
+            
+            if total_deleted > 0:
+                print("   Storage space freed up for new AQL data")
+            else:
+                print("   No old AQL documents to delete")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"❌ AQL cleanup error: {e}")
+        return 1
+    finally:
+        cleanup.close()
+
 
 if __name__ == "__main__":
-    main()
+    exit(main())
