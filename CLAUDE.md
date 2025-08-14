@@ -265,7 +265,7 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
 **Shared Components & Utilities:**
 +----------------------------------+
 | rule_manager.py                  |
-|  • Manages 1500 Rule IDs         |
+|  • Manages 2989 Rule IDs         |
 |  • Provides list & index mapping |
 +----------------------------------+
 +----------------------------------+

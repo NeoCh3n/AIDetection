@@ -6,68 +6,83 @@ Compatible with RHEL 7.9 and macOS ARM
 COMPLETE MONGODB RULE SETUP PLAN
 ================================
 
-PHASE 1: RULE DISCOVERY & COUNTING
----------------------------------
-1. Use shared_utils/qradar_rule_manager.py to discover all QRadar rules
-   - Supports both API mode (fetch from QRadar) and file mode (load from CSV)
-   - Discovers rules from Qradar_rule/ directory
-   - Current CSV files: qradar_BBrules.csv, qradar_customrules.csv
+ARCHITECTURE ALIGNMENT: Unified Processing Pipeline
+--------------------------------------------------
+This setup follows the unified data processing pipeline:
+- Detection-only mode with 30-minute sliding windows
+- 2898 production rules as fixed baseline
+- Shared utilities: mongodb_connection.py, time_utils.py, rule_manager.py
+- 15-minute query frequency with 30-minute aggregation windows
 
-2. Count exact number of rules
-   - Run: python shared_utils/qradar_rule_manager.py file --stats
-   - This generates rule_mapping.json with exact count
+PHASE 1: RULE MANAGEMENT & VALIDATION
+------------------------------------
+1. Rule Discovery via rule_manager.py:
+   - Fixed 2898 production rules (confirmed baseline)
+   - Uses rule_manager.py for centralized rule ID management
+   - Maps to Qradar_rule/ directory structure
+   - Validates rule count consistency across environments
 
-PHASE 2: CONFIGURATION UPDATE
------------------------------
-3. Update mongodb_config.json with exact rule count:
-   - Edit line 33: "total_rules": <actual_count_from_step_2>
-   - Verify "rule_mapping.source" is "Qradar_rule_folder"
-   - Ensure rule_ids array matches discovered rules
+2. Configuration Validation:
+   - mongodb_config.json contains 2898 total_rules
+   - rule_mapping.json aligns with production baseline
+   - UAT-to-Production mapping enabled via shared_utils/
 
-PHASE 3: MONGODB SETUP
-----------------------
-4. Run this setup script to:
-   - Verify MongoDB installation and status
-   - Create detection collections with proper indexes
-   - Set up schema for 30-minute sliding windows
-   - Configure time_utils integration
-   - Insert sample data for testing
+PHASE 2: UNIFIED PIPELINE SETUP
+------------------------------
+3. MongoDB Integration:
+   - Uses mongodb_connection.py (centralized connection utility)
+   - Creates detection collections with time_utils integration
+   - Sets up 30-minute window aggregation schema
+   - Configures proper indexes for sliding window queries
 
-PHASE 4: VALIDATION
--------------------
-5. Validate setup:
-   - Verify rule mapping file exists: rule_mapping.json
-   - Confirm MongoDB collections are created
-   - Test rule count matches configuration
+4. Time Window Configuration:
+   - 30-minute sliding windows (aligned with feature_aggregator.py)
+   - 15-minute query frequency (detection mode)
+   - HKT timezone handling via time_utils.py
+   - Window ID generation consistent across pipeline
 
-EXECUTION ORDER:
---------------
+PHASE 3: PIPELINE VALIDATION
+---------------------------
+5. End-to-End Verification:
+   - Test mongodb_connection.py integration
+   - Validate time_utils window calculation
+   - Confirm rule_manager.py rule mapping
+   - Test 15-minute query → 30-minute aggregation pipeline
+
+EXECUTION ORDER (Unified Pipeline):
+----------------------------------
 cd /Users/chaoyanchen/Desktop/AIDetection4Ransomware
 
-# Step 1: Discover and count rules
-python shared_utils/qradar_rule_manager.py file --stats
+# Step 1: Validate rule setup (2898 rules)
+python shared_utils/rule_manager.py validate --count
 
-# Step 2: Update configuration (manual edit)
-vim mongodb/mongodb_config.json  # Update total_rules field
-
-# Step 3: Run complete setup
+# Step 2: Run complete MongoDB setup
 python mongodb/setup_mongodb_offline.py
 
-# Step 4: Validate setup
-python shared_utils/qradar_rule_manager.py file --validate
+# Step 3: Test unified connection
+python -c "from mongodb_connection import MongoDBConnection; print('✓ Connection OK')"
+
+# Step 4: Validate pipeline integration
+python shared_utils/time_utils.py test-window-calculation
+
+PIPELINE INTEGRATION POINTS:
+---------------------------
+- data_loader.py → Uses mongodb_connection.py for MongoDB access
+- feature_aggregator.py → Uses time_utils for window calculations
+- feature_generator.py → Uses rule_manager.py for rule ID mapping
+- model_predictor.py → Writes to detection_results collection
+- All modules use unified configuration from mongodb_config.json
 
 EXPECTED LOCATIONS:
 ------------------
-- Rule CSV files: /Users/chaoyanchen/Desktop/AIDetection4Ransomware/Qradar_rule/
-- Rule mapping: /Users/chaoyanchen/Desktop/AIDetection4Ransomware/rule_mapping.json
-- Configuration: /Users/chaoyanchen/Desktop/AIDetection4Ransomware/mongodb/mongodb_config.json
-- MongoDB collections: Created inside MongoDB (not files)
+- Rule definitions: Qradar_rule/ (managed by rule_manager.py)
+- MongoDB config: mongodb/mongodb_config.json
+- Rule mapping: shared_utils/rule_mapping.json
+- UAT mapping: shared_utils/uat_to_prod_mapping.csv
+- MongoDB collections: Created via mongodb_connection.py
+- Time utilities: shared_utils/time_utils.py
 
-This updated script integrates with:
-1. Unified MongoDB connection utility (mongodb_connection.py)
-2. time_utils.py for consistent timestamp processing
-3. Detection-only pipeline architecture
-4. 30-minute sliding windows with 15-minute queries
+This setup ensures zero training-serving skew by using identical rule baseline (2898 rules) across all environments.
 """
 
 import subprocess
