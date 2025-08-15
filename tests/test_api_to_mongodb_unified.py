@@ -17,9 +17,6 @@ import os
 import sys
 import json
 import unittest
-import tempfile
-import shutil
-import warnings
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
@@ -94,23 +91,28 @@ class BaseStandaloneAPITest(unittest.TestCase):
         """Standalone AQL processor for testing."""
         
         def __init__(self, config_path=None):
-            self.config_path = config_path
+            self.config_path = config_path or os.path.join(os.path.dirname(__file__), '..', 'mongodb', 'mongodb_config.json')
             self.config = self._load_config()
         
         def _load_config(self):
-            """Load test configuration."""
-            return {
-                "mongodb": {
-                    "host": "localhost",
-                    "port": 27017,
-                    "db_name": "test_ransomware_detection"
-                },
-                "pipeline": {
-                    "mode": "test",
-                    "window_size_minutes": 30,
-                    "retention_days": 1
+            """Load configuration from existing mongodb_config.json."""
+            try:
+                with open(self.config_path, 'r') as f:
+                    return json.load(f)
+            except (IOError, json.JSONDecodeError):
+                # Fallback to basic config if file not found or invalid
+                return {
+                    "mongodb": {
+                        "host": "localhost",
+                        "port": 27017,
+                        "db_name": "test_ransomware_detection"
+                    },
+                    "pipeline": {
+                        "mode": "test",
+                        "window_size_minutes": 30,
+                        "retention_days": 1
+                    }
                 }
-            }
         
         def parse_aql_timestamp(self, timestamp_str):
             """Parse QRadar AQL timestamp string to datetime."""
@@ -209,15 +211,43 @@ class Level0StandaloneTests(BaseStandaloneAPITest):
         documents = processor.parse_aql_json_result(self.sample_aql_json)
         
         # Assertions
-        self.assertEqual(len(documents), 1)
-        self.assertIsNotNone(documents[0]['_id'])
-        self.assertEqual(documents[0]['total_triggers'], 150)
-        self.assertIn('test-host-1', documents[0]['host_triggers'])
-        self.assertIn('test-host-2', documents[0]['host_triggers'])
-        self.assertIn('100227', documents[0]['feature_vector'])
-        self.assertIn('100221', documents[0]['feature_vector'])
-        self.assertEqual(documents[0]['feature_vector']['100227'], 125)  # 50 + 75
-        self.assertEqual(documents[0]['feature_vector']['100221'], 25)
+        self.assertEqual(len(documents), 2)  # Two 30-minute windows based on timestamps
+        
+        # Find the windows for verification
+        windows_by_time = {doc['_id']: doc for doc in documents}
+        
+        # Verify windows exist and have correct data
+        window_keys = list(windows_by_time.keys())
+        self.assertEqual(len(window_keys), 2)
+        
+        # Sort windows by time to ensure consistent testing
+        window_keys.sort()
+        
+        # Get first window (should be 9:30-10:00)
+        first_window = windows_by_time[window_keys[0]]
+        self.assertIsInstance(first_window, dict)
+        self.assertEqual(first_window.get('total_triggers'), 75)  # 50 + 25
+        
+        first_hosts = first_window.get('host_triggers', {})
+        first_features = first_window.get('feature_vector', {})
+        
+        self.assertIn('test-host-1', first_hosts)
+        self.assertIn('100227', first_features)
+        self.assertIn('100221', first_features)
+        self.assertEqual(first_features.get('100227'), 50)
+        self.assertEqual(first_features.get('100221'), 25)
+        
+        # Get second window (should be 10:00-10:30)
+        second_window = windows_by_time[window_keys[1]]
+        self.assertIsInstance(second_window, dict)
+        self.assertEqual(second_window.get('total_triggers'), 75)
+        
+        second_hosts = second_window.get('host_triggers', {})
+        second_features = second_window.get('feature_vector', {})
+        
+        self.assertIn('test-host-2', second_hosts)
+        self.assertIn('100227', second_features)
+        self.assertEqual(second_features.get('100227'), 75)
     
     def test_timestamp_parsing_standalone(self):
         """Test AQL timestamp parsing."""
@@ -265,30 +295,12 @@ class Level1MockTests(BaseStandaloneAPITest):
     def setUp(self):
         """Set up mock test fixtures."""
         super().setUp()
-        self.temp_dir = tempfile.mkdtemp()
-        self.test_config_path = os.path.join(self.temp_dir, 'test_config.json')
-        
-        # Create test configuration
-        self.test_config = {
-            "mongodb": {
-                "host": "localhost",
-                "port": 27017,
-                "db_name": "test_ransomware_detection"
-            },
-            "pipeline": {
-                "mode": "test",
-                "window_size_minutes": 30,
-                "retention_days": 1
-            }
-        }
-        
-        with open(self.test_config_path, 'w') as f:
-            json.dump(self.test_config, f)
+        self.test_config_path = os.path.join(os.path.dirname(__file__), '..', 'mongodb', 'mongodb_config.json')
     
     def tearDown(self):
         """Clean up mock test fixtures."""
-        if os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
+        # No temp directory cleanup needed since using existing config
+        pass
     
     def test_mock_aql_processing_with_pymongo(self):
         """Test AQL processing with mocked MongoDB."""
@@ -336,43 +348,35 @@ class Level2IntegrationTests(BaseStandaloneAPITest):
     def setUp(self):
         """Set up integration test fixtures."""
         super().setUp()
-        self.temp_dir = tempfile.mkdtemp()
-        self.test_config_path = os.path.join(self.temp_dir, 'test_integration_config.json')
-        
-        # Create comprehensive test configuration
-        self.test_config = {
-            "mongodb": {
-                "host": "localhost",
-                "port": 27017,
-                "db_name": "test_ransomware_detection_integration",
-                "connection_string": "mongodb://localhost:27017/"
-            },
-            "pipeline": {
-                "mode": "test",
-                "window_size_minutes": 30,
-                "retention_days": 1
-            },
-            "collections": {
-                "events": "test_events",
-                "windows": "test_windows",
-                "predictions": "test_predictions"
-            }
-        }
-        
-        with open(self.test_config_path, 'w') as f:
-            json.dump(self.test_config, f, indent=2)
+        self.test_config_path = os.path.join(os.path.dirname(__file__), '..', 'mongodb', 'mongodb_config.json')
     
     def tearDown(self):
         """Clean up integration test fixtures."""
-        if os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
+        # No temp directory cleanup needed since using existing config
+        pass
     
     @staticmethod
     def check_mongo_available():
-        """Check if MongoDB is available for integration tests."""
+        """Check if MongoDB is available for integration tests using config."""
         try:
             import pymongo
-            client = pymongo.MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=5000)
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'mongodb', 'mongodb_config.json')
+            
+            # Load config to get connection details
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            # Get connection string from config
+            mongodb_config = config.get('mongodb', {})
+            connection_string = mongodb_config.get('connection_string')
+            host = mongodb_config.get('host', 'localhost')
+            port = mongodb_config.get('port', 27017)
+            
+            if connection_string:
+                client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
+            else:
+                client = pymongo.MongoClient(host, port, serverSelectionTimeoutMS=5000)
+            
             client.admin.command('ping')
             return True
         except Exception:
