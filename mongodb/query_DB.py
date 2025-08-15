@@ -14,7 +14,7 @@ import sys
 import json
 import argparse
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, cast
 
 # Add required paths for imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -59,7 +59,7 @@ class AQLQueryManager:
     detection results, and raw AQL events.
     """
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Optional[str] = None):
         """Initialize AQL query manager with detection-specific configuration."""
         self.config_path = config_path or CONFIG_PATH
         self.config = self._load_config()
@@ -329,7 +329,7 @@ class AQLQueryManager:
                 pass
 
 def query_database(collection_name: str = DETECTION_WINDOWS, 
-                  query: Dict[str, Any] = None,
+                  query: Optional[Dict[str, Any]] = None,
                   limit: int = 100) -> List[Dict[str, Any]]:
     """
     Legacy query function for backward compatibility.
@@ -420,26 +420,31 @@ def main():
         print(f"\n Query completed successfully")
         
         if args.collection == 'all':
+            # results is a dict when collection == 'all'; cast for type checkers
+            all_results = cast(Dict[str, Any], results)
             print(f"\n Detection Summary:")
-            summary = results['summary']
+            summary = all_results.get('summary', {})
             print(f"   Detection windows: {summary.get('total_detection_windows', 0)}")
             print(f"   Anomaly detections: {summary.get('total_anomaly_detections', 0)}")
             print(f"   Detection rate: {summary.get('detection_rate', 0)}")
             print(f"   Average confidence: {summary.get('average_confidence', 0)}")
         else:
-            print(f"   Total results: {len(results)}")
-            
-            # Show sample data
-            if results and isinstance(results, list):
-                print(f"\n📋 Sample data:")
-                for i, doc in enumerate(results[:3]):
-                    print(f"   {i+1}. _id: {doc.get('_id', 'N/A')}")
-                    if 'window_start' in doc:
-                        print(f"      Window: {doc.get('window_start')} -> {doc.get('window_end')}")
-                        print(f"      Total triggers: {doc.get('total_triggers', 0)}")
-                    elif 'timestamp' in doc:
-                        print(f"      Timestamp: {doc.get('timestamp')}")
-                        print(f"      Prediction: {doc.get('prediction', 'N/A')}")
+            # Ensure results is a list before processing
+            if isinstance(results, list):
+                list_results = results
+                print(f"   Total results: {len(list_results)}")
+                
+                # Show sample data
+                if list_results:
+                    print(f"\nSample data:")
+                    for i, doc in enumerate(list_results[:3]):
+                        print(f"   {i+1}. _id: {doc.get('_id', 'N/A')}")
+                        if 'window_start' in doc:
+                            print(f"      Window: {doc.get('window_start')} -> {doc.get('window_end')}")
+                            print(f"      Total triggers: {doc.get('total_triggers', 0)}")
+                        elif 'timestamp' in doc:
+                            print(f"      Timestamp: {doc.get('timestamp')}")
+                            print(f"      Prediction: {doc.get('prediction', 'N/A')}")
         
         return 0
         

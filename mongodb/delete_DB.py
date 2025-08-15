@@ -36,7 +36,7 @@ class DetectionDataCleanup:
     search results in JSON format.
     """
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Optional[str] = None):
         """Initialize cleanup manager with AQL-specific configuration."""
         self.config_path = config_path or CONFIG_PATH
         self.config = self._load_config()
@@ -94,7 +94,7 @@ class DetectionDataCleanup:
             run_log.run_log("ERROR", f"Connection error: {e}")
             return False
     
-    def cleanup_detection_data(self, retention_days: int = 7) -> Dict[str, int]:
+    def cleanup_detection_data(self, retention_days: int = 7) -> Dict[str, Any]:
         """
         Clean up AQL JSON detection data based on retention policy.
         
@@ -104,7 +104,7 @@ class DetectionDataCleanup:
         Returns:
             Dictionary with cleanup results by collection
         """
-        if not self.db:
+        if self.db is None:
             run_log.run_log("ERROR", "Database not connected")
             return {}
         
@@ -118,7 +118,12 @@ class DetectionDataCleanup:
         cutoff_date = datetime.now() - timedelta(days=retention_days)
         
         try:
+            available_collections = self.db.list_collection_names()
             for collection_name in collections_to_clean:
+                if collection_name not in available_collections:
+                    results[collection_name] = 0
+                    continue
+                    
                 collection = self.db[collection_name]
                 
                 # Build time-based query for AQL data
@@ -152,7 +157,7 @@ class DetectionDataCleanup:
             run_log.run_log("ERROR", f"Cleanup error: {e}")
             return {"error": str(e)}
     
-    def cleanup_by_window_range(self, start_time: datetime, end_time: datetime) -> Dict[str, int]:
+    def cleanup_by_window_range(self, start_time: datetime, end_time: datetime) -> Dict[str, Any]:
         """
         Clean up AQL data by specific window range.
         
@@ -219,6 +224,13 @@ class DetectionDataCleanup:
         
         try:
             for collection_name in collections:
+                if collection_name not in self.db.list_collection_names():
+                    summary[collection_name] = {
+                        "total_documents": 0,
+                        "time_range": {}
+                    }
+                    continue
+                    
                 collection = self.db[collection_name]
                 total_docs = collection.count_documents({})
                 
@@ -235,7 +247,7 @@ class DetectionDataCleanup:
                     
                     summary[collection_name] = {
                         "total_documents": total_docs,
-                        "time_range": time_range[0] if time_range else {}
+                        "time_range": time_range[0] if time_range and len(time_range) > 0 else {}
                     }
                 else:
                     summary[collection_name] = {
@@ -283,14 +295,32 @@ class DetectionDataCleanup:
             
             would_delete = {}
             
+            if self.db is None:
+                run_log.run_log("ERROR", "Database not connected")
+                return {"error": "Database not connected"}
+            
+            try:
+                available_collections = self.db.list_collection_names()
+            except Exception as e:
+                run_log.run_log("ERROR", f"Failed to list collections: {e}")
+                return {"error": str(e)}
+            
             for collection_name in collections:
+                if collection_name not in available_collections:
+                    would_delete[collection_name] = 0
+                    continue
+                    
                 collection = self.db[collection_name]
                 
                 time_field = 'timestamp' if collection_name in ['aql_events', 'detection_results'] else 'window_start'
                 query = {time_field: {'$lt': cutoff_date}}
                 
-                count = collection.count_documents(query)
-                would_delete[collection_name] = count
+                try:
+                    count = collection.count_documents(query)
+                    would_delete[collection_name] = count
+                except Exception as e:
+                    run_log.run_log("ERROR", f"Failed to count documents in {collection_name}: {e}")
+                    would_delete[collection_name] = 0
             
             results["would_delete"] = would_delete
             total_would_delete = sum(would_delete.values())

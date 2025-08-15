@@ -37,7 +37,7 @@ class AQLDataInserter:
     sliding windows for ransomware detection without training labels.
     """
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Optional[str] = None):
         """Initialize AQL data inserter with detection-specific configuration."""
         self.config_path = config_path or CONFIG_PATH
         self.config = self._load_config()
@@ -390,7 +390,7 @@ class AQLDataInserter:
             self.client.close()
 
 
-def insert_aql_data(json_files: List[str], config_path: str = None) -> int:
+def insert_aql_data(json_files: List[str], config_path: Optional[str] = None) -> int:
     """
     Main function to process and insert AQL JSON data.
     
