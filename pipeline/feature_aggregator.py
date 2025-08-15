@@ -1,5 +1,5 @@
 """
-Feature Aggregator Module - 30-minute window aggregation for ransomware detection
+Feature Aggregator Module - 30-minute window aggregation
 
 This module aggregates individual rule triggers into 30-minute time windows,
 creating the feature vectors needed for the Random Forest classifier.
@@ -9,16 +9,17 @@ It handles both training and detection modes with consistent aggregation logic.
 import pandas as pd
 import numpy as np
 import os
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, cast
 import logging
 from shared_utils.time_utils import get_window_id, get_window_start_end
+from shared_utils.qradar_rule_manager import get_production_rule_list, get_production_rule_to_index_map
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30) -> pd.DataFrame:
+def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: str = 'train') -> pd.DataFrame:
     """
     Aggregate individual rule triggers into 30-minute time windows.
     
@@ -57,42 +58,61 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30) -> pd.
     if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
         df['timestamp'] = pd.to_datetime(df['timestamp'])
     
+    # Apply log1p transformation to counts (RF preprocessing) and ensure numeric type
+    # Robust to objects/strings, NaNs, and negative values.
+    df['count'] = pd.to_numeric(df['count'], errors='coerce')
+    df['count'] = df['count'].where(df['count'] >= 0, 0)  # handle negatives
+    df['count'] = df['count'].fillna(0.0)  # handle NaNs
+    df['count'] = np.log1p(df['count'])  # type: ignore
+    
     # Generate window IDs for each event
     df['window_id'] = df['timestamp'].apply(
         lambda ts: get_window_id(ts, window_size_minutes)
     )
     
-    # Group by window_id and hostname for aggregation
+    # Group by window_id, hostname, and source_label for aggregation
     grouped = df.groupby(['window_id', 'hostname', 'source_label'])
     
     # Aggregate rule counts into dictionaries
     aggregated_data = []
     
-    for (window_id, hostname, source_label), group in grouped:
+    for group_key, group_df in grouped:
+        # Use typing.cast to explicitly type the tuple unpacking
+        window_id, hostname, source_label = cast(Tuple[str, str, str], group_key)
+        group = group_df
         # Build rule count dictionary
         rule_counts = group.groupby('rule_id')['count'].sum().to_dict()
         
         # Convert rule_id keys to strings for JSON compatibility
-        rule_counts_str = {str(k): int(v) for k, v in rule_counts.items()}
+        rule_counts_str = {str(k): float(v) for k, v in rule_counts.items()}
         
         # Calculate additional metrics
         total_events = group['count'].sum()
         unique_rules = len(rule_counts)
         
+        # Convert source_label to binary is_attack
+        is_attack = 1 if source_label == 'attack' else 0
+        
         # Get window boundaries
         first_timestamp = group['timestamp'].min()
         window_start, window_end = get_window_start_end(first_timestamp, window_size_minutes)
         
-        aggregated_data.append({
+        # Build result with mode-specific columns
+        result_row = {
             'window_id': window_id,
             'hostname': hostname,
             'aggregated_rules': rule_counts_str,
-            'total_events': int(total_events),
+            'total_events': float(total_events),
             'unique_rules': int(unique_rules),
-            'source_label': source_label,
             'window_start': window_start,
             'window_end': window_end
-        })
+        }
+        
+        # Add label column for training mode
+        if mode == 'train':
+            result_row['is_attack'] = is_attack
+        
+        aggregated_data.append(result_row)
     
     # Create DataFrame from aggregated data
     result_df = pd.DataFrame(aggregated_data)
@@ -121,8 +141,14 @@ def validate_aggregated_data(df: pd.DataFrame) -> bool:
     
     required_columns = [
         'window_id', 'hostname', 'aggregated_rules', 
-        'total_events', 'unique_rules', 'source_label'
+        'total_events', 'unique_rules'
     ]
+    
+    # Add mode-specific required columns
+    if 'is_attack' in df.columns:
+        required_columns.append('is_attack')
+    else:
+        required_columns.append('source_label')
     
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
@@ -134,17 +160,25 @@ def validate_aggregated_data(df: pd.DataFrame) -> bool:
         logger.error("aggregated_rules column contains non-dictionary values")
         return False
     
-    if not all(isinstance(total, (int, np.integer)) for total in df['total_events']):
+    if not all(isinstance(total, (int, float)) for total in df['total_events']):
         logger.error("total_events column contains non-integer values")
         return False
     
-    if not all(isinstance(unique, (int, np.integer)) for unique in df['unique_rules']):
+    if not all(isinstance(unique, int) for unique in df['unique_rules']):
         logger.error("unique_rules column contains non-integer values")
         return False
     
-    if not all(label in ['normal', 'attack'] for label in df['source_label']):
-        logger.error("source_label column contains invalid values")
-        return False
+    # Validate label columns
+    if 'is_attack' in df.columns:
+        valid_labels = df['is_attack'].isin([0, 1])
+        if not valid_labels.all():
+            logger.error("is_attack column contains invalid values (must be 0 or 1)")
+            return False
+    elif 'source_label' in df.columns:
+        valid_labels = df['source_label'].isin(['normal', 'attack'])
+        if not valid_labels.all():
+            logger.error("source_label column contains invalid values")
+            return False
     
     logger.info("Aggregated data validation passed")
     return True
@@ -166,8 +200,6 @@ def get_window_statistics(df: pd.DataFrame) -> Dict[str, Any]:
     stats = {
         'total_windows': len(df),
         'unique_hosts': df['hostname'].nunique(),
-        'normal_windows': len(df[df['source_label'] == 'normal']),
-        'attack_windows': len(df[df['source_label'] == 'attack']),
         'avg_events_per_window': float(df['total_events'].mean()),
         'avg_unique_rules_per_window': float(df['unique_rules'].mean()),
         'avg_rules_per_window': float(df['aggregated_rules'].apply(len).mean()),
@@ -176,6 +208,15 @@ def get_window_statistics(df: pd.DataFrame) -> Dict[str, Any]:
         'min_unique_rules': int(df['unique_rules'].min()),
         'max_unique_rules': int(df['unique_rules'].max())
     }
+    
+    # Add label statistics based on available columns
+    if 'is_attack' in df.columns:
+        stats['normal_windows'] = int(len(df[df['is_attack'] == 0]))
+        stats['attack_windows'] = int(len(df[df['is_attack'] == 1]))
+        stats['attack_ratio'] = float(df['is_attack'].mean())
+    elif 'source_label' in df.columns:
+        stats['normal_windows'] = int(len(df[df['source_label'] == 'normal']))
+        stats['attack_windows'] = int(len(df[df['source_label'] == 'attack']))
     
     # Calculate rule frequency distribution
     all_rules = []
@@ -263,8 +304,8 @@ if __name__ == "__main__":
     test_df = pd.DataFrame(test_data)
     test_df['timestamp'] = pd.to_datetime(test_df['timestamp'])
     
-    # Run aggregation
-    aggregated = aggregate_to_windows(test_df)
+    # Run aggregation with training mode
+    aggregated = aggregate_to_windows(test_df, mode='train')
     
     if not aggregated.empty:
         print("\n" + "="*60)
@@ -273,10 +314,14 @@ if __name__ == "__main__":
         print(f"Input events: {len(test_df)}")
         print(f"Output windows: {len(aggregated)}")
         print(f"Unique hosts: {aggregated['hostname'].nunique()}")
-        print(f"Data sources: {dict(aggregated['source_label'].value_counts())}")
+        if 'is_attack' in aggregated.columns:
+            print(f"Label distribution: {dict(aggregated['is_attack'].value_counts())}")
         
         print("\nAggregated windows:")
-        print(aggregated[['window_id', 'hostname', 'total_events', 'unique_rules', 'source_label']])
+        cols_to_show = ['window_id', 'hostname', 'total_events', 'unique_rules']
+        if 'is_attack' in aggregated.columns:
+            cols_to_show.append('is_attack')
+        print(aggregated[cols_to_show])
         
         # Show detailed rule counts for first window
         if len(aggregated) > 0:
@@ -290,6 +335,14 @@ if __name__ == "__main__":
         for key, value in stats.items():
             if key != 'most_common_rules':
                 print(f"  {key}: {value}")
+        
+        # Test detection mode
+        print("\n" + "-"*30)
+        print("TESTING DETECTION MODE")
+        print("-"*30)
+        aggregated_detect = aggregate_to_windows(test_df, mode='detect')
+        print(f"Detection mode windows: {len(aggregated_detect)}")
+        print(f"Columns in detection mode: {list(aggregated_detect.columns)}")
         
         # Save test data
         test_output = os.path.join(os.path.dirname(__file__), '../tests/test_aggregated_data.csv')
