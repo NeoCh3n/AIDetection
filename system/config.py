@@ -71,6 +71,56 @@ SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AIR")
 SYSLOG_HEADER_ML = os.getenv("SYSLOG_HEADER_ML", f"{SYSLOG_HEADER_BASE}-RF")
 SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-RF")
 
+#### Configuration dictionary for pipeline modules
+def get_config():
+    """
+    Returns centralized configuration dictionary for pipeline components.
+    Used by feature_generator.py and other modules.
+    """
+    return {
+        'rule_manager': {
+            'mode': 'file',
+            'rule_file_path': os.path.join('Qradar_rule', 'production_rules.txt'),
+            'uat_rule_file_path': os.path.join('Qradar_rule', 'uat_rules.txt'),
+            'mapping_file_path': os.path.join('Qradar_rule', 'uat_to_prod_mapping.json'),
+            'environment': os.getenv('ENVIRONMENT', 'prod')
+        },
+        'feature_engineering': {
+            'expected_rules': 2898,
+            'window_size_minutes': 30,
+            'log_transform': True,
+            'normalize_counts': False
+        },
+        'data_processing': {
+            'batch_size': 1000,
+            'max_features': 2898,
+            'missing_value_strategy': 'zero_fill'
+        },
+        'model': {
+            'random_forest': {
+                'n_estimators': 200,
+                'max_depth': None,
+                'min_samples_split': 2,
+                'min_samples_leaf': 1,
+                'class_weight': 'balanced_subsample',
+                'random_state': 42
+            }
+        },
+        'mongodb': {
+            'connection_string': MONGODB_CONNECTION_STRING,
+            'database_name': MONGODB_DB_NAME,
+            'collection_name': MONGODB_COLLECTION_NAME,
+            'features_collection': MONGODB_ML_FEATURES_COLLECTION,
+            'anomaly_collection': MONGODB_ANOMALY_RESULTS_COLLECTION
+        },
+        'paths': {
+            'model_dir': os.path.dirname(model_path_default),
+            'log_dir': log_dir_path_default,
+            'training_data_dir': 'Training_data',
+            'qradar_rule_dir': 'Qradar_rule'
+        }
+    }
+
 #### NEVER change the below!
 # run the default to check the parameter
 if __name__ == "__main__":

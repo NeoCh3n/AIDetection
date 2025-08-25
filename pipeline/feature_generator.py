@@ -2,9 +2,20 @@ import pandas as pd
 import numpy as np
 from typing import Tuple, Optional, Dict, List, Any
 import logging
+import sys
+import os
 
 # Import QRadarRuleManager from shared_utils
 from shared_utils.qradar_rule_manager import QRadarRuleManager
+
+# Add parent directory to path for config imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from system.config import get_config
+except ImportError:
+    # Fallback if config module not available
+    def get_config():
+        return {}
 
 logger = logging.getLogger(__name__)
 
@@ -16,25 +27,48 @@ class FeatureGenerator:
     
     def __init__(self, environment: str = 'prod', config: Optional[Dict] = None):
         """
-        Initialize feature generator with environment-aware rule mapping
+        Initialize feature generator with centralized configuration
         
         Args:
             environment: 'prod' or 'uat' - determines baseline rule set
-            config: Configuration dictionary for rule manager
+            config: Configuration dictionary for rule manager (uses system config if None)
         """
         self.environment = environment
-        self.config = config or {}
-        self.rule_manager = QRadarRuleManager(mode='file', config=self.config, environment=environment)
+        self.config = config or get_config()
+        self.rule_manager = QRadarRuleManager(
+            mode=self.config.get('rule_manager', {}).get('mode', 'file'),
+            config=self.config.get('rule_manager', {}),
+            environment=environment
+        )
         self._rule_to_index = None
         self._vector_dimension = None
         self._production_rule_to_index = None
+        
+        # Validate configuration on initialization
+        self._validate_config()
     
+    def _validate_config(self) -> None:
+        """Validate configuration parameters"""
+        if not isinstance(self.config, dict):
+            raise ValueError("Configuration must be a dictionary")
+        
+        rule_manager_config = self.config.get('rule_manager', {})
+        if not isinstance(rule_manager_config, dict):
+            self.config['rule_manager'] = {}
+        
+        logger.info(f"Feature generator initialized with {self.environment} environment")
+
     def initialize_rules(self) -> None:
         """Initialize rule mappings from discovered rules using production baseline."""
         # Always use production rule coordinates as baseline
         self._production_rule_to_index = self.rule_manager.get_production_rule_to_index_map()
         self._vector_dimension = len(self._production_rule_to_index)
         self._rule_to_index = self._production_rule_to_index
+        
+        expected_rules = self.config.get('feature_engineering', {}).get('expected_rules', 2898)
+        if self._vector_dimension != expected_rules:
+            logger.warning(f"Expected {expected_rules} rules but got {self._vector_dimension}")
+        
         logger.info(f"Initialized feature generator with {self._vector_dimension} production rules")
     
     def generate_feature_vectors(self, 
@@ -76,7 +110,7 @@ class FeatureGenerator:
                 rule_counts = row['aggregated_rules_dict']
                 if isinstance(rule_counts, dict):
                     for rule_id, count in rule_counts.items():
-                        rule_id_int = int(rule_id)
+                        rule_id_int = int(str(rule_id))
                         # Map UAT rule to production rule if necessary
                         prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                         
@@ -87,8 +121,8 @@ class FeatureGenerator:
                             logger.warning(f"Rule ID {prod_rule_id} not found in production baseline")
             elif 'rule_id' in df_agg.columns and 'count' in df_agg.columns:
                 # Handle direct rule_id/count format
-                rule_id = int(row['rule_id'])
-                count = float(row['count'])
+                rule_id = int(str(row['rule_id']))
+                count = float(str(row['count']))
                 
                 # Map UAT rule to production rule if necessary
                 prod_rule_id = uat_to_prod_map.get(rule_id, rule_id)
@@ -128,8 +162,29 @@ class FeatureGenerator:
             'total_rules': len(prod_rules),
             'rule_min': min(prod_rules) if prod_rules else 0,
             'rule_max': max(prod_rules) if prod_rules else 0,
-            'environment': self.environment
+            'environment': self.environment,
+            'expected_dimension': self.config.get('feature_engineering', {}).get('expected_rules', 2898)
         }
+
+    @classmethod
+    def create_from_config(cls, config: Optional[Dict] = None, environment: str = 'prod') -> 'FeatureGenerator':
+        """
+        Factory method to create feature generator from centralized configuration.
+        
+        Args:
+            config: Configuration dictionary (uses system config if None)
+            environment: Environment type ('prod' or 'uat')
+            
+        Returns:
+            Configured FeatureGenerator instance
+        """
+        return cls(environment=environment, config=config)
+
+    def get_feature_vector_dimension(self) -> int:
+        """Get the expected dimension of feature vectors"""
+        if self._vector_dimension is None:
+            self.initialize_rules()
+        return self._vector_dimension or 0
     
     def validate_rule_coverage(self, df_agg: pd.DataFrame) -> Dict[str, Any]:
         """Validate how many rules are actually present in the data with UAT mapping."""
@@ -145,12 +200,12 @@ class FeatureGenerator:
             for rules_dict in df_agg['aggregated_rules_dict']:
                 if isinstance(rules_dict, dict):
                     for rule_id in rules_dict.keys():
-                        rule_id_int = int(rule_id)
+                        rule_id_int = int(str(rule_id))
                         prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                         all_rules.add(prod_rule_id)
         elif 'rule_id' in df_agg.columns:
-            for rule_id in df_agg['rule_id'].unique():
-                rule_id_int = int(rule_id)
+            for rule_id in df_agg['rule_id'].unique().tolist():
+                rule_id_int = int(str(rule_id))
                 prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                 all_rules.add(prod_rule_id)
         

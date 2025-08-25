@@ -264,7 +264,7 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
 
 **Shared Components & Utilities:**
 +----------------------------------+
-| rule_manager.py                  |
+| qradar_rule_manager.py           |
 |  • Manages 2898 Rule IDs         |
 |  • Provides list & index mapping |
 +----------------------------------+
@@ -289,7 +289,7 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
 |  • Calls modules in sequence     |
 +----------------------------------+
 
-3. Explanation for Core Pipeline Modules
+1. Explanation for Core Pipeline Modules
 A. Core Pipeline Modules
 	1.	data_loader.py (enhanced responsibilities)
 
