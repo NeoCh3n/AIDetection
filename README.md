@@ -1,10 +1,10 @@
-# AIDetection4Ransomware - Ransomware Detection System
+# AIDetection - Threat Detection System
 
-A supervised machine learning system specifically designed to detect ransomware activity using QRadar rule trigger frequencies. Built for enterprise-scale detection with support for both offline deployment and production environments.
+A supervised machine learning system designed to detect various security threats and malicious activities using QRadar rule trigger frequencies. Built for enterprise-scale detection with support for both offline deployment and production environments.
 
 ## 🎯 Project Overview
 
-This system leverages labeled datasets from Picus Breach and Attack Simulation (BAS) to train a Random Forest classifier that distinguishes between normal operational behavior and ransomware attack patterns using QRadar rule trigger frequencies as primary features.
+This system leverages labeled datasets from Picus Breach and Attack Simulation (BAS) to train a Random Forest classifier that distinguishes between normal operational behavior and security threat patterns using QRadar rule trigger frequencies as primary features.
 
 **Key Features:**
 - **30-minute sliding windows** with 15-minute query frequency
@@ -24,7 +24,7 @@ QRadar AQL Queries → MongoDB Storage → ML Processing → Threat Detection
 - **MongoDB Connection Utility** (`mongodb/mongodb_connection.py`) - Unified database operations
 - **Time Utils** (`shared_utils/time_utils.py`) - Consistent timestamp processing
 - **Data Processing** (`mongodb/insert_DB.py`) - QRadar data ingestion
-- **ML Model** - Random Forest classifier for ransomware detection
+- **ML Model** - Random Forest classifier for threat detection
 
 ## 📊 Data Schema
 
@@ -96,7 +96,7 @@ process_qradar_data(
 ## 📁 Project Structure
 
 ```
-AIDetection4Ransomware/
+AIDetection/
 ├── mongodb/                    # Database layer
 │   ├── mongodb_connection.py   # Unified MongoDB operations
 │   ├── insert_DB.py           # QRadar data processing
@@ -190,7 +190,7 @@ python -c "from shared_utils.time_utils import parse_qradar_timestamp; print(par
 
 ## 🤝 Contributing
 
-This is a defensive security tool designed for ransomware detection. Contributions should focus on improving detection accuracy and system reliability.
+This is a defensive security tool designed for threat detection. Contributions should focus on improving detection accuracy and system reliability.
 
 ## 📄 License
 
