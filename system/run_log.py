@@ -2,8 +2,8 @@ import time
 import datetime
 import os
 from pathlib import Path
-import send_syslog
-import config
+from . import send_syslog
+from . import config
 
 fetch_data_frequency = config.fetch_data_frequency_default
 log_dir_path = config.log_dir_path_default
