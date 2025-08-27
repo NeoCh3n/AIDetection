@@ -248,17 +248,13 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
                                                           |              |                        |
                                                           |              V                        |
                                                           |   +--------------------------+        |
-                                                          |   |      run_log.py          |        |
+                                                          |   |      logging_utils.py    |        |
                                                           |   | • Logs detection & SHAP  |        |
                                                           |   |   results                |        |
-                                                          |   +--------------------------+        |
-                                                          |              |                        |
-                                                          |              V                        |
-                                                          |   +--------------------------+        |
-                                                          |   |    send_syslog.py        |        |
-                                                          |   | • Sends alert with SHAP  |        |
+                                                          |   |  • Sends alert with SHAP |        |
                                                           |   |   results to QRadar      |        |
                                                           |   +--------------------------+        |
+                                                          |                                       |
                                                           +---------------------------------------+
 
 

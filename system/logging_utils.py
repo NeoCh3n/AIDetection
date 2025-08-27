@@ -2,8 +2,10 @@ import time
 import datetime
 import os
 import json
+import logging
+import logging.handlers
 from pathlib import Path
-from . import send_syslog
+from typing import Optional
 from . import config
 
 # Use centralized configuration
@@ -65,9 +67,9 @@ def run_log(level, message, payload = None):
 
     try:
         if level == header_ml:
-            send_syslog.send_syslog(log_destination_address, log_destination_port, header_ml, _sanitize(message))
+            _send_syslog(log_destination_address, log_destination_port, header_ml, _sanitize(message))
         else:
-            send_syslog.send_syslog(log_destination_address, log_destination_port, header_log, _sanitize(log_message))
+            _send_syslog(log_destination_address, log_destination_port, header_log, _sanitize(log_message))
     except Exception as e:
         # Fallback: write a local error note
         with open(filepath_today, "a+") as logfile_today:
@@ -145,6 +147,49 @@ def log_feature_importance(rule_importance_dict, top_n=20):
     
     message = f"FEATURE_IMPORTANCE | top_{top_n}_rules"
     run_log("IMPORTANCE", message, payload=importance_data)
+
+# SysLogHandler cache and functions
+_LOGGER_NAME = "air.syslog"
+_handler_cache = {}
+
+def _get_logger(address: str, port: int, header: str) -> logging.Logger:
+    """Create or reuse a dedicated logger with a SysLogHandler.
+    We avoid touching the root logger to not interfere with application logging.
+    """
+    key = (address, port, header)
+    logger = logging.getLogger(f"{_LOGGER_NAME}.{address}:{port}.{header}")
+    logger.setLevel(logging.INFO)
+
+    if key not in _handler_cache:
+        handler = logging.handlers.SysLogHandler(address=(address, port))
+        # Use dynamic timestamp per message
+        formatter = logging.Formatter(f'%(asctime)s {header} %(message)s', datefmt='%b %d %H:%M:%S')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        _handler_cache[key] = handler
+    else:
+        # Ensure the handler is attached (in case logger was recreated)
+        handler = _handler_cache[key]
+        if handler not in logger.handlers:
+            logger.addHandler(handler)
+
+    return logger
+
+def _send_syslog(address: str = config.log_destination_address_default,
+                 port: int = config.log_destination_port_default,
+                 header: str = config.SYSLOG_HEADER_LOG,
+                 message: Optional[str] = None) -> None:
+    """Send a syslog message to the syslog server."""
+    if message is None:
+        return
+    # Ensure single-line message
+    msg = str(message).replace('\n', ' ').replace('\r', ' ')
+    logger = _get_logger(address, port, header)
+    try:
+        logger.info(msg)
+    except Exception:
+        # Best-effort: drop errors silently to avoid crashing callers
+        pass
 
 if __name__ == "__main__":
     # Test basic logging
