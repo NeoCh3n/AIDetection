@@ -11,7 +11,8 @@
       "Bash(rmdir:*)",
       "Bash(true)",
       "Bash(. venv/bin/activate)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }
