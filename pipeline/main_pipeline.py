@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified Ransomware Detection Pipeline
+Unified Threat Detection Pipeline
 Single orchestrator for training and detection modes
 """
 
@@ -81,7 +81,7 @@ class UnifiedPipeline:
             return {
                 "training": {
                     "data_path": "./Training_data",
-                    "model_path": "./model/ransomware_detector.joblib",
+                    "model_path": "./model/threat_detector.joblib",
                     "test_size": 0.2,
                     "random_state": 42
                 },

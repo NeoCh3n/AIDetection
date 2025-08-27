@@ -34,7 +34,7 @@ class AQLDataInserter:
     Specialized inserter for QRadar AQL JSON data in detection-only mode.
     
     Processes QRadar search results formatted as JSON and creates 30-minute
-    sliding windows for ransomware detection without training labels.
+    sliding windows for threat detection without training labels.
     """
     
     def __init__(self, config_path: Optional[str] = None):

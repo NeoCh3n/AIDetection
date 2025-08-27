@@ -29,11 +29,11 @@ def import_pipeline_modules():
         from pipeline.feature_aggregator import aggregate_to_windows
         from pipeline.feature_generator import FeatureGenerator
         from shared_utils.qradar_rule_manager import QRadarRuleManager
-        from model_training.model_training import train_ransomware_detector
+        from model_training.model_training import train_threat_detector
         from system.logging_utils import log_pipeline_event, log_feature_importance
         from system.config import get_config
         
-        return load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_ransomware_detector, log_pipeline_event, log_feature_importance, get_config
+        return load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_threat_detector, log_pipeline_event, log_feature_importance, get_config
     except ImportError as e:
         import traceback
         print(f"Import error: {e}")
@@ -49,7 +49,7 @@ def run_actual_pipeline_test():
     
     # Try to import actual modules
     try:
-        load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_ransomware_detector, log_pipeline_event, log_feature_importance, get_config = import_pipeline_modules()
+        load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_threat_detector, log_pipeline_event, log_feature_importance, get_config = import_pipeline_modules()
     except ImportError as e:
         print(f"Cannot import actual modules: {e}")
         return {'success': False, 'error': f'Import failed: {str(e)}'}
@@ -199,7 +199,7 @@ def run_actual_pipeline_test():
         }
         
         # Train model using real model_training
-        result = train_ransomware_detector(
+        result = train_threat_detector(
             training_config=training_config,
             model_save_path=model_save_path
         )

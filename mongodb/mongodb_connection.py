@@ -1,5 +1,5 @@
 """
-Unified MongoDB Connection Utility for Ransomware Detection Pipeline
+Unified MongoDB Connection Utility for Threat Detection Pipeline
 
 This module provides centralized MongoDB management for the unified data processing pipeline.
 It supports both training and detection modes with consistent data structures and 
@@ -27,7 +27,7 @@ from system import logging_utils
 
 class MongoDBConnectionManager:
     """
-    Unified MongoDB connection manager for ransomware detection pipeline.
+    Unified MongoDB connection manager for threat detection pipeline.
     
     Provides centralized database operations with consistent data structures
     across both training and detection modes as per the unified pipeline architecture.

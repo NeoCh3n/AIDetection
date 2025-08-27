@@ -1,7 +1,7 @@
-# Unified Ransomware Detection Pipeline
+# Unified Threat Detection Pipeline
 
 ## Overview
-Single orchestrator file (`main_pipeline.py`) that manages the entire ransomware detection flow from data acquisition to prediction.
+Single orchestrator file (`main_pipeline.py`) that manages the entire threat detection flow from data acquisition to prediction.
 
 ## Usage
 
@@ -12,7 +12,7 @@ python pipeline/main_pipeline.py train
 - Loads training data from CSV files
 - Aggregates 30-minute windows
 - Trains Random Forest model
-- Saves model to `./model/ransomware_detector.joblib`
+- Saves model to `./model/threat_detector.joblib`
 
 ### Detection Mode
 ```bash
@@ -21,7 +21,7 @@ python pipeline/main_pipeline.py detect
 - Fetches QRadar data via API
 - Stores in MongoDB
 - Runs prediction on 30-minute windows
-- Generates alerts for ransomware detection
+- Generates alerts for threat detection
 
 ## Architecture
 

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class FeatureGenerator:
     """
-    Generates feature vectors from aggregated rule counts for ransomware detection.
+    Generates feature vectors from aggregated rule counts for threat detection.
     Uses QRadarRuleManager with UAT-to-Production rule ID mapping support.
     """
     

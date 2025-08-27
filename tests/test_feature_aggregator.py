@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive test suite for feature_aggregator.py
-Tests 30-minute window aggregation functionality for ransomware detection pipeline
+Tests 30-minute window aggregation functionality for threat detection pipeline
 """
 
 import sys

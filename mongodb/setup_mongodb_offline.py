@@ -597,7 +597,7 @@ class MongoDBOfflineSetup:
                 "timestamp": event_time,
                 "prediction": int(is_anomaly),
                 "confidence": float(np.random.uniform(0.85, 0.99) if is_anomaly else np.random.uniform(0.70, 0.85)),
-                "model_version": "ransomware_detector_v1.0",
+                "model_version": "threat_detector_v1.0",
                 "total_events": sum(real_counts),
                 "unique_rules": len(real_rule_ids)
             }

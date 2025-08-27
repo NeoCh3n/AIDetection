@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def train_ransomware_detector(training_config: Dict, model_save_path: str = "./model/ransomware_detector.joblib") -> Optional[Tuple[RandomForestClassifier, pd.DataFrame, pd.Series]]:
+def train_threat_detector(training_config: Dict, model_save_path: str = "./model/threat_detector.joblib") -> Optional[Tuple[RandomForestClassifier, pd.DataFrame, pd.Series]]:
     """
     Train Random Forest model using the unified data pipeline.
     
@@ -240,7 +240,7 @@ def main():
     parser = argparse.ArgumentParser(description='Train Random Forest model using unified pipeline')
     parser.add_argument('--config', required=True, 
                        help='Path to training configuration JSON file')
-    parser.add_argument('--model-output', default='./model/ransomware_detector.joblib',
+    parser.add_argument('--model-output', default='./model/threat_detector.joblib',
                        help='Path to save trained model')
     parser.add_argument('--evaluate', action='store_true',
                        help='Run model evaluation after training')
@@ -258,7 +258,7 @@ def main():
             logger.setLevel(logging.DEBUG)
         
         # Train the model
-        result = train_ransomware_detector(training_config, args.model_output)
+        result = train_threat_detector(training_config, args.model_output)
         
         if result is None:
             logger.error("Model training failed")

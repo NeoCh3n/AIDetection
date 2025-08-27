@@ -105,7 +105,7 @@ class BaseStandaloneAPITest(unittest.TestCase):
                     "mongodb": {
                         "host": "localhost",
                         "port": 27017,
-                        "db_name": "test_ransomware_detection"
+                        "db_name": "test_threat_detection"
                     },
                     "pipeline": {
                         "mode": "test",
