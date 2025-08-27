@@ -6,10 +6,9 @@ Tests the entire process: Training_data → data_loader → feature_aggregator �
 
 import os
 import sys
-import tempfile
-import shutil
 import numpy as np
 import pandas as pd
+from datetime import datetime
 
 # Add project root to path for all imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,8 +30,10 @@ def import_pipeline_modules():
         from pipeline.feature_generator import FeatureGenerator
         from shared_utils.qradar_rule_manager import QRadarRuleManager
         from model_training.model_training import train_ransomware_detector
+        from system.logging_utils import log_pipeline_event, log_feature_importance
+        from system.config import get_config
         
-        return load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_ransomware_detector
+        return load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_ransomware_detector, log_pipeline_event, log_feature_importance, get_config
     except ImportError as e:
         import traceback
         print(f"Import error: {e}")
@@ -48,12 +49,15 @@ def run_actual_pipeline_test():
     
     # Try to import actual modules
     try:
-        load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_ransomware_detector = import_pipeline_modules()
+        load_data, aggregate_to_windows, FeatureGenerator, QRadarRuleManager, train_ransomware_detector, log_pipeline_event, log_feature_importance, get_config = import_pipeline_modules()
     except ImportError as e:
         print(f"Cannot import actual modules: {e}")
         return {'success': False, 'error': f'Import failed: {str(e)}'}
     
-    # Setup configuration
+    # Get real system configuration
+    system_config = get_config()
+    
+    # Setup configuration using real system paths
     config = {
         'training_data_path': 'Training_data/normal',
         'attack_data_path': 'Training_data/attack',
@@ -62,11 +66,18 @@ def run_actual_pipeline_test():
         'random_state': 42
     }
     
-    # Create temporary directory for test outputs
-    temp_dir = tempfile.mkdtemp()
-    model_save_path = os.path.join(temp_dir, "test_model.joblib")
+    # Use real model directory from system config
+    model_dir = os.path.join(project_root, system_config['paths']['model_dir'])
+    os.makedirs(model_dir, exist_ok=True)
+    model_save_path = os.path.join(model_dir, f"test_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.joblib")
     
     try:
+        # Log pipeline start
+        log_pipeline_event("TEST_START", "Starting complete training pipeline test", {
+            "model_save_path": model_save_path,
+            "timestamp": datetime.now().isoformat()
+        })
+        
         print("1. LOADING TRAINING DATA...")
         
         # Load normal and attack data using real data_loader
@@ -88,6 +99,13 @@ def run_actual_pipeline_test():
                 assert col in df.columns, f"{col} missing from {df_name} data"
         
         print("   ✓ Data loading completed successfully")
+        
+        # Log data loading completion
+        log_pipeline_event("DATA_LOADED", "Training data loaded successfully", {
+            "normal_samples": len(normal_df),
+            "attack_samples": len(attack_df),
+            "timestamp": datetime.now().isoformat()
+        })
         
         print("\n2. PREPARING DATA WITH LABELS...")
         
@@ -123,6 +141,13 @@ def run_actual_pipeline_test():
         
         print("   ✓ Feature aggregation completed")
         
+        # Log feature aggregation
+        log_pipeline_event("FEATURES_AGGREGATED", "Feature aggregation completed", {
+            "aggregated_windows": len(aggregated_df),
+            "window_size_minutes": 30,
+            "timestamp": datetime.now().isoformat()
+        })
+        
         print("\n4. GENERATING FEATURE VECTORS...")
         
         # Initialize feature generator with real rule manager
@@ -152,6 +177,15 @@ def run_actual_pipeline_test():
         assert not pd.isna(y).any(), "No NaN values in labels"
         
         print("   ✓ Feature vector generation completed")
+        
+        # Log feature vector generation
+        log_pipeline_event("FEATURE_VECTORS_GENERATED", "Feature vectors generated", {
+            "feature_matrix_shape": list(X.shape),
+            "labels_shape": list(y.shape),
+            "feature_count": X.shape[1],
+            "sample_count": X.shape[0],
+            "timestamp": datetime.now().isoformat()
+        })
         
         print("\n5. TRAINING MODEL...")
         
@@ -198,9 +232,26 @@ def run_actual_pipeline_test():
         top_features_importance = feature_importance[top_features_idx]
         
         print(f"   Top 10 most important features:")
+        
+        # Create feature importance dictionary for logging
+        feature_importance_dict = {}
         for i, (idx, imp) in enumerate(zip(top_features_idx, top_features_importance)):
             rule_id = rule_list[idx]
+            feature_importance_dict[rule_id] = float(imp)
             print(f"     {i+1}. Rule {rule_id}: {imp:.4f}")
+        
+        # Log feature importance
+        log_feature_importance(feature_importance_dict, top_n=10)
+        
+        # Log model training completion
+        log_pipeline_event("MODEL_TRAINED", "Model training completed successfully", {
+            "model_path": model_save_path,
+            "test_accuracy": accuracy,
+            "normal_test_samples": int(np.sum(y_test == 0)),
+            "attack_test_samples": int(np.sum(y_test == 1)),
+            "top_10_features": feature_importance_dict,
+            "timestamp": datetime.now().isoformat()
+        })
         
         print("\n=== TRAINING PIPELINE TEST COMPLETED SUCCESSFULLY ===")
         
@@ -212,24 +263,32 @@ def run_actual_pipeline_test():
             'feature_count': X.shape[1],
             'model_accuracy': accuracy,
             'model_path': model_save_path,
-            'temp_dir': temp_dir
+            'model_dir': model_dir
         }
         
     except Exception as e:
         print(f"\n❌ ERROR with actual modules: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # Log error
+        log_pipeline_event("TEST_ERROR", f"Pipeline test failed: {str(e)}", {
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        })
+        
         return {'success': False, 'error': str(e)}
-    
-    finally:
-        # Clean up temporary directory
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
 
 
 
 
 if __name__ == "__main__":
+    # Import logging for final summary
+    try:
+        from system.logging_utils import log_pipeline_event
+    except ImportError:
+        log_pipeline_event = None
+    
     # Run with actual pipeline modules
     result = run_actual_pipeline_test()
     
@@ -239,7 +298,27 @@ if __name__ == "__main__":
         print(f"   - Created {result['aggregated_windows']} 30-minute windows")
         print(f"   - Generated {result['feature_count']} features per window")
         print(f"   - Achieved {result['model_accuracy']:.3f} model accuracy")
+        print(f"   - Model saved to: {result['model_path']}")
+        
+        # Log final success
+        if log_pipeline_event:
+            log_pipeline_event("TEST_COMPLETED", "Training pipeline test completed successfully", {
+                "success": True,
+                "normal_samples": result['normal_samples'],
+                "attack_samples": result['attack_samples'],
+                "aggregated_windows": result['aggregated_windows'],
+                "feature_count": result['feature_count'],
+                "model_accuracy": result['model_accuracy'],
+                "model_path": result['model_path'],
+                "timestamp": datetime.now().isoformat()
+            })
     else:
         print(f"\nFAILED: {result.get('error', 'Unknown error')}")
-        # Optionally run fallback
-        # run_fallback_pipeline_test()
+        
+        # Log final failure
+        if log_pipeline_event:
+            log_pipeline_event("TEST_FAILED", "Training pipeline test failed", {
+                "success": False,
+                "error": result.get('error', 'Unknown error'),
+                "timestamp": datetime.now().isoformat()
+            })
