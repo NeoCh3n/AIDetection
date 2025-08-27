@@ -18,6 +18,8 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'pipeline'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'system'))
+from system import logging_utils
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier

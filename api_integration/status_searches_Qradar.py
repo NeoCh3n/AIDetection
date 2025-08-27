@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from system import run_log
+from system import logging_utils
 import requests
 import urllib3
 urllib3.disable_warnings()
@@ -30,19 +30,19 @@ def status_searches_Qradar(Qradar_address=Qradar_address_default, search_id=sear
         get_request_ariel_searches = requests.get(request_URI, headers=request_header, verify=False)
         # Parse the JSON response
         get_response_ariel_searches = get_request_ariel_searches.json()
-        run_log.run_log("INFO", "5. GET Request sent to Qradar: getting ariel searches status information -- Response Code: " + str(get_request_ariel_searches))
+        logging_utils.run_log("INFO", "5. GET Request sent to Qradar: getting ariel searches status information -- Response Code: " + str(get_request_ariel_searches))
     except:
-        run_log.run_log("ERROR", "Failed to send GET Request to Qradar")
+        logging_utils.run_log("ERROR", "Failed to send GET Request to Qradar")
         return
     # return information from the response
     try:
         status = str(get_response_ariel_searches['status'])
         progress = str(get_response_ariel_searches['progress'])
         query_execution_time = str(get_response_ariel_searches['query_execution_time']/1000)
-        run_log.run_log("INFO", "6. Response received from Qradar: retrieved ariel searches status information -- status:" + status + ", progress:" + progress + "%," + "query_execution_time:" + query_execution_time)
+        logging_utils.run_log("INFO", "6. Response received from Qradar: retrieved ariel searches status information -- status:" + status + ", progress:" + progress + "%," + "query_execution_time:" + query_execution_time)
         return(get_response_ariel_searches)
     except:
-        run_log.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(get_response_ariel_searches))
+        logging_utils.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(get_response_ariel_searches))
         return
 
 if __name__ == "__main__":

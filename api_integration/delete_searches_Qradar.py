@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from system import run_log
+from system import logging_utils
 import requests
 import urllib3
 urllib3.disable_warnings()
@@ -31,19 +31,19 @@ def delete_searches_Qradar(Qradar_address = Qradar_address_default, search_id = 
         delete_request_ariel_searches = requests.delete(request_URI, headers = request_header, verify=False)
         # Parse the JSON responses
         delete_response_ariel_searches = delete_request_ariel_searches.json()
-        run_log.run_log("INFO", "10. DELETE Request sent to Qradar: deleting finished ariel searches -- Response Code:" + str(delete_request_ariel_searches))
+        logging_utils.run_log("INFO", "10. DELETE Request sent to Qradar: deleting finished ariel searches -- Response Code:" + str(delete_request_ariel_searches))
         
     except:
-        run_log.run_log("ERROR", "failed to send DELETE Request to Qradar")
+        logging_utils.run_log("ERROR", "failed to send DELETE Request to Qradar")
         return
 
     # Return the response indicating the deletion result
     try:
         status = delete_response_ariel_searches["status"]
-        run_log.run_log("INFO", "11. Response received from Qradar: deleted search -- status:" + str(status))
+        logging_utils.run_log("INFO", "11. Response received from Qradar: deleted search -- status:" + str(status))
         
     except:
-        run_log.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(delete_response_ariel_searches))
+        logging_utils.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(delete_response_ariel_searches))
         return
 
 if __name__ == "__main__":

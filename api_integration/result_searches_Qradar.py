@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from system import run_log
+from system import logging_utils
 import requests
 import urllib3
 urllib3.disable_warnings()
@@ -29,17 +29,17 @@ def result_searches_Qradar(Qradar_address = Qradar_address_default , search_id =
         get_request_ariel_searches_results = requests.get(request_URI, headers = request_header, verify =False)
         ## Parse the JSON response
         get_response_ariel_searches_results = get_request_ariel_searches_results.json()
-        run_log.run_log("INFO" , "7. GET Request sent to Qradar: getting ariel searches results -- Response Code:" + str(get_request_ariel_searches_results))
+        logging_utils.run_log("INFO" , "7. GET Request sent to Qradar: getting ariel searches results -- Response Code:" + str(get_request_ariel_searches_results))
     except:
-        run_log.run_log("ERROR" , "Failed to send GET Request to Qradar")
+        logging_utils.run_log("ERROR" , "Failed to send GET Request to Qradar")
         return
     ## return the results
     try:
         record_count = len(get_response_ariel_searches_results['events'])
-        run_log.run_log("INFO" , "8. Response received from Qradar: downloaded ariel search results -- record_count:" + str(record_count) )
+        logging_utils.run_log("INFO" , "8. Response received from Qradar: downloaded ariel search results -- record_count:" + str(record_count) )
         return(get_response_ariel_searches_results)
     except:
-        run_log.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(get_response_ariel_searches_results) )
+        logging_utils.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(get_response_ariel_searches_results) )
         return
 
 #### default

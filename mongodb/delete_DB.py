@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-from system import run_log
+from system import logging_utils
 
 # Configuration
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
@@ -49,10 +49,10 @@ class DetectionDataCleanup:
             with open(self.config_path, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            run_log.run_log("ERROR", f"Config file not found: {self.config_path}")
+            logging_utils.run_log("ERROR", f"Config file not found: {self.config_path}")
             return self._create_default_config()
         except json.JSONDecodeError as e:
-            run_log.run_log("ERROR", f"Invalid JSON in config: {e}")
+            logging_utils.run_log("ERROR", f"Invalid JSON in config: {e}")
             return self._create_default_config()
     
     def _create_default_config(self) -> Dict[str, Any]:
@@ -84,14 +84,14 @@ class DetectionDataCleanup:
             
             # Test connection
             self.client.admin.command('ping')
-            run_log.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (detection mode)")
+            logging_utils.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (detection mode)")
             return True
             
         except ConnectionFailure as e:
-            run_log.run_log("ERROR", f"MongoDB connection failed: {e}")
+            logging_utils.run_log("ERROR", f"MongoDB connection failed: {e}")
             return False
         except Exception as e:
-            run_log.run_log("ERROR", f"Connection error: {e}")
+            logging_utils.run_log("ERROR", f"Connection error: {e}")
             return False
     
     def cleanup_detection_data(self, retention_days: int = 7) -> Dict[str, Any]:
@@ -105,7 +105,7 @@ class DetectionDataCleanup:
             Dictionary with cleanup results by collection
         """
         if self.db is None:
-            run_log.run_log("ERROR", "Database not connected")
+            logging_utils.run_log("ERROR", "Database not connected")
             return {}
         
         collections_to_clean = [
@@ -146,15 +146,15 @@ class DetectionDataCleanup:
                     result = collection.delete_many(query)
                     deleted_count = result.deleted_count
                     results[collection_name] = deleted_count
-                    run_log.run_log("INFO", f"🗑️  Deleted {deleted_count} documents from {collection_name}")
+                    logging_utils.run_log("INFO", f"🗑️  Deleted {deleted_count} documents from {collection_name}")
                 else:
                     results[collection_name] = 0
-                    run_log.run_log("INFO", f"No old documents to delete from {collection_name}")
+                    logging_utils.run_log("INFO", f"No old documents to delete from {collection_name}")
             
             return results
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Cleanup error: {e}")
+            logging_utils.run_log("ERROR", f"Cleanup error: {e}")
             return {"error": str(e)}
     
     def cleanup_by_window_range(self, start_time: datetime, end_time: datetime) -> Dict[str, Any]:
@@ -199,12 +199,12 @@ class DetectionDataCleanup:
                 if count > 0:
                     result = collection.delete_many(query)
                     results[collection_name] = result.deleted_count
-                    run_log.run_log("INFO", f"Deleted {result.deleted_count} documents from {collection_name}")
+                    logging_utils.run_log("INFO", f"Deleted {result.deleted_count} documents from {collection_name}")
                 else:
                     results[collection_name] = 0
                     
         except Exception as e:
-            run_log.run_log("ERROR", f"Range cleanup error: {e}")
+            logging_utils.run_log("ERROR", f"Range cleanup error: {e}")
             results["error"] = str(e)
         
         return results
@@ -256,7 +256,7 @@ class DetectionDataCleanup:
                     }
         
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to get summary: {e}")
+            logging_utils.run_log("ERROR", f"Failed to get summary: {e}")
             summary["error"] = str(e)
         
         return summary
@@ -296,13 +296,13 @@ class DetectionDataCleanup:
             would_delete = {}
             
             if self.db is None:
-                run_log.run_log("ERROR", "Database not connected")
+                logging_utils.run_log("ERROR", "Database not connected")
                 return {"error": "Database not connected"}
             
             try:
                 available_collections = self.db.list_collection_names()
             except Exception as e:
-                run_log.run_log("ERROR", f"Failed to list collections: {e}")
+                logging_utils.run_log("ERROR", f"Failed to list collections: {e}")
                 return {"error": str(e)}
             
             for collection_name in collections:
@@ -319,12 +319,12 @@ class DetectionDataCleanup:
                     count = collection.count_documents(query)
                     would_delete[collection_name] = count
                 except Exception as e:
-                    run_log.run_log("ERROR", f"Failed to count documents in {collection_name}: {e}")
+                    logging_utils.run_log("ERROR", f"Failed to count documents in {collection_name}: {e}")
                     would_delete[collection_name] = 0
             
             results["would_delete"] = would_delete
             total_would_delete = sum(would_delete.values())
-            run_log.run_log("INFO", f"Dry run: would delete {total_would_delete} AQL documents")
+            logging_utils.run_log("INFO", f"Dry run: would delete {total_would_delete} AQL documents")
             
         else:
             # Execute actual cleanup

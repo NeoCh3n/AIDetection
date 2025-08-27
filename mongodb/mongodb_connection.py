@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared_utils.time_utils import parse_qradar_timestamp, get_window_id, get_window_start_end
 from shared_utils.qradar_rule_manager import get_rule_list
-from system import run_log
+from system import logging_utils
 
 
 class MongoDBConnectionManager:
@@ -67,10 +67,10 @@ class MongoDBConnectionManager:
                 config = json.load(f)
             return config
         except FileNotFoundError:
-            run_log.run_log("ERROR", f"Config file not found: {self.config_path}")
+            logging_utils.run_log("ERROR", f"Config file not found: {self.config_path}")
             raise
         except json.JSONDecodeError as e:
-            run_log.run_log("ERROR", f"Invalid JSON in config file: {e}")
+            logging_utils.run_log("ERROR", f"Invalid JSON in config file: {e}")
             raise
     
     def connect(self) -> bool:
@@ -96,11 +96,11 @@ class MongoDBConnectionManager:
             
             # Test connection
             self.client.admin.command('ping')
-            run_log.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']}")
+            logging_utils.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']}")
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to connect to MongoDB: {e}")
+            logging_utils.run_log("ERROR", f"Failed to connect to MongoDB: {e}")
             return False
     
     def create_indexes(self) -> bool:
@@ -112,7 +112,7 @@ class MongoDBConnectionManager:
         """
         try:
             if not self.db and not self.connect():
-                run_log.run_log("ERROR", "Cannot create indexes: MongoDB not connected")
+                logging_utils.run_log("ERROR", "Cannot create indexes: MongoDB not connected")
                 return False
 
             # Events collection indexes (raw QRadar events)
@@ -147,33 +147,33 @@ class MongoDBConnectionManager:
                     try:
                         self.events_collection.create_index(index_spec, name=index_name)
                     except Exception as e:
-                        run_log.run_log("WARNING", f"Failed to create events index {index_name}: {e}")
+                        logging_utils.run_log("WARNING", f"Failed to create events index {index_name}: {e}")
             
             if self.windows_collection:
                 for index_spec, index_name in windows_indexes:
                     try:
                         self.windows_collection.create_index(index_spec, name=index_name)
                     except Exception as e:
-                        run_log.run_log("WARNING", f"Failed to create windows index {index_name}: {e}")
+                        logging_utils.run_log("WARNING", f"Failed to create windows index {index_name}: {e}")
                 
                 try:
                     # Create unique index on window_id for windows collection
                     self.windows_collection.create_index([('window_id', 1)], unique=True)
                 except Exception as e:
-                    run_log.run_log("WARNING", f"Failed to create unique window_id index: {e}")
+                    logging_utils.run_log("WARNING", f"Failed to create unique window_id index: {e}")
             
             if self.predictions_collection:
                 for index_spec, index_name in predictions_indexes:
                     try:
                         self.predictions_collection.create_index(index_spec, name=index_name)
                     except Exception as e:
-                        run_log.run_log("WARNING", f"Failed to create predictions index {index_name}: {e}")
+                        logging_utils.run_log("WARNING", f"Failed to create predictions index {index_name}: {e}")
             
-            run_log.run_log("INFO", "MongoDB indexes created successfully for unified pipeline")
+            logging_utils.run_log("INFO", "MongoDB indexes created successfully for unified pipeline")
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to create indexes: {e}")
+            logging_utils.run_log("ERROR", f"Failed to create indexes: {e}")
             return False
     
     def insert_event(self, event_data: Dict[str, Any]) -> bool:
@@ -188,11 +188,11 @@ class MongoDBConnectionManager:
         """
         try:
             if not self.db and not self.connect():
-                run_log.run_log("ERROR", "Cannot insert event: MongoDB not connected")
+                logging_utils.run_log("ERROR", "Cannot insert event: MongoDB not connected")
                 return False
             
             if not self.events_collection:
-                run_log.run_log("ERROR", "Events collection not initialized")
+                logging_utils.run_log("ERROR", "Events collection not initialized")
                 return False
             
             # Ensure proper timestamp parsing using time_utils
@@ -207,7 +207,7 @@ class MongoDBConnectionManager:
             required_fields = ['hostname', 'rule_id', 'timestamp', 'count']
             for field in required_fields:
                 if field not in event_data:
-                    run_log.run_log("ERROR", f"Missing required field: {field}")
+                    logging_utils.run_log("ERROR", f"Missing required field: {field}")
                     return False
             
             # Ensure correct data types
@@ -229,7 +229,7 @@ class MongoDBConnectionManager:
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to insert event: {e}")
+            logging_utils.run_log("ERROR", f"Failed to insert event: {e}")
             return False
     
     def batch_insert_events(self, events: List[Dict[str, Any]], 
@@ -245,11 +245,11 @@ class MongoDBConnectionManager:
             Number of documents successfully inserted
         """
         if not self.db and not self.connect():
-            run_log.run_log("ERROR", "Cannot batch insert events: MongoDB not connected")
+            logging_utils.run_log("ERROR", "Cannot batch insert events: MongoDB not connected")
             return 0
         
         if not self.events_collection:
-            run_log.run_log("ERROR", "Events collection not initialized")
+            logging_utils.run_log("ERROR", "Events collection not initialized")
             return 0
         
         if not events:
@@ -293,13 +293,13 @@ class MongoDBConnectionManager:
                     total_inserted += result.upserted_count + result.modified_count
                     
                     if i % (batch_size * 10) == 0:
-                        run_log.run_log("INFO", f"Processed {i + len(batch)} events...")
+                        logging_utils.run_log("INFO", f"Processed {i + len(batch)} events...")
             
-            run_log.run_log("INFO", f"Batch insert completed: {total_inserted} events")
+            logging_utils.run_log("INFO", f"Batch insert completed: {total_inserted} events")
             return total_inserted
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed batch insert events: {e}")
+            logging_utils.run_log("ERROR", f"Failed batch insert events: {e}")
             return total_inserted
     
     def insert_window(self, window_data: Dict[str, Any]) -> bool:
@@ -314,11 +314,11 @@ class MongoDBConnectionManager:
         """
         try:
             if not self.db and not self.connect():
-                run_log.run_log("ERROR", "Cannot insert window: MongoDB not connected")
+                logging_utils.run_log("ERROR", "Cannot insert window: MongoDB not connected")
                 return False
             
             if not self.windows_collection:
-                run_log.run_log("ERROR", "Windows collection not initialized")
+                logging_utils.run_log("ERROR", "Windows collection not initialized")
                 return False
             
             # Ensure window boundaries using time_utils
@@ -333,7 +333,7 @@ class MongoDBConnectionManager:
             required_fields = ['window_id', 'window_start', 'window_end', 'hostname']
             for field in required_fields:
                 if field not in window_data:
-                    run_log.run_log("ERROR", f"Missing required field: {field}")
+                    logging_utils.run_log("ERROR", f"Missing required field: {field}")
                     return False
             
             # Ensure features dict exists
@@ -350,7 +350,7 @@ class MongoDBConnectionManager:
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to insert window: {e}")
+            logging_utils.run_log("ERROR", f"Failed to insert window: {e}")
             return False
     
     def cleanup_old_data(self, retention_days: int = 7) -> int:
@@ -364,7 +364,7 @@ class MongoDBConnectionManager:
             Number of documents deleted
         """
         if not self.db and not self.connect():
-            run_log.run_log("ERROR", "Cannot cleanup old data: MongoDB not connected")
+            logging_utils.run_log("ERROR", "Cannot cleanup old data: MongoDB not connected")
             return 0
         
         try:
@@ -378,7 +378,7 @@ class MongoDBConnectionManager:
                 if events_count > 0:
                     events_result = self.events_collection.delete_many(events_query)
                     total_deleted += events_result.deleted_count
-                    run_log.run_log("INFO", f"Deleted {events_result.deleted_count} old events")
+                    logging_utils.run_log("INFO", f"Deleted {events_result.deleted_count} old events")
             
             # Clean windows
             if self.windows_collection:
@@ -387,7 +387,7 @@ class MongoDBConnectionManager:
                 if windows_count > 0:
                     windows_result = self.windows_collection.delete_many(windows_query)
                     total_deleted += windows_result.deleted_count
-                    run_log.run_log("INFO", f"Deleted {windows_result.deleted_count} old windows")
+                    logging_utils.run_log("INFO", f"Deleted {windows_result.deleted_count} old windows")
             
             # Clean old predictions (keep last 30 days)
             if self.predictions_collection:
@@ -397,15 +397,15 @@ class MongoDBConnectionManager:
                 if predictions_count > 0:
                     predictions_result = self.predictions_collection.delete_many(predictions_query)
                     total_deleted += predictions_result.deleted_count
-                    run_log.run_log("INFO", f"Deleted {predictions_result.deleted_count} old predictions")
+                    logging_utils.run_log("INFO", f"Deleted {predictions_result.deleted_count} old predictions")
             
             if total_deleted == 0:
-                run_log.run_log("INFO", "No old data found to delete")
+                logging_utils.run_log("INFO", "No old data found to delete")
             
             return total_deleted
                 
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to cleanup old data: {e}")
+            logging_utils.run_log("ERROR", f"Failed to cleanup old data: {e}")
             return 0
     
     def get_events_for_window(self, window_start: datetime, window_end: datetime, 
@@ -422,11 +422,11 @@ class MongoDBConnectionManager:
             List of events
         """
         if not self.db and not self.connect():
-            run_log.run_log("ERROR", "Cannot retrieve events: MongoDB not connected")
+            logging_utils.run_log("ERROR", "Cannot retrieve events: MongoDB not connected")
             return []
         
         if not self.events_collection:
-            run_log.run_log("ERROR", "Events collection not initialized")
+            logging_utils.run_log("ERROR", "Events collection not initialized")
             return []
         
         try:
@@ -445,7 +445,7 @@ class MongoDBConnectionManager:
             return events
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to retrieve events: {e}")
+            logging_utils.run_log("ERROR", f"Failed to retrieve events: {e}")
             return []
     
     def get_windows_for_training(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
@@ -460,11 +460,11 @@ class MongoDBConnectionManager:
             List of windows with labels
         """
         if not self.db and not self.connect():
-            run_log.run_log("ERROR", "Cannot retrieve training windows: MongoDB not connected")
+            logging_utils.run_log("ERROR", "Cannot retrieve training windows: MongoDB not connected")
             return []
         
         if not self.windows_collection:
-            run_log.run_log("ERROR", "Windows collection not initialized")
+            logging_utils.run_log("ERROR", "Windows collection not initialized")
             return []
         
         try:
@@ -478,7 +478,7 @@ class MongoDBConnectionManager:
             return windows
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to retrieve training windows: {e}")
+            logging_utils.run_log("ERROR", f"Failed to retrieve training windows: {e}")
             return []
     
     def get_unlabeled_windows(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
@@ -493,11 +493,11 @@ class MongoDBConnectionManager:
             List of windows without labels
         """
         if not self.db and not self.connect():
-            run_log.run_log("ERROR", "Cannot retrieve unlabeled windows: MongoDB not connected")
+            logging_utils.run_log("ERROR", "Cannot retrieve unlabeled windows: MongoDB not connected")
             return []
         
         if not self.windows_collection:
-            run_log.run_log("ERROR", "Windows collection not initialized")
+            logging_utils.run_log("ERROR", "Windows collection not initialized")
             return []
         
         try:
@@ -511,7 +511,7 @@ class MongoDBConnectionManager:
             return windows
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to retrieve unlabeled windows: {e}")
+            logging_utils.run_log("ERROR", f"Failed to retrieve unlabeled windows: {e}")
             return []
     
     def insert_prediction(self, prediction_data: Dict[str, Any]) -> bool:
@@ -526,18 +526,18 @@ class MongoDBConnectionManager:
         """
         try:
             if not self.db and not self.connect():
-                run_log.run_log("ERROR", "Cannot insert prediction: MongoDB not connected")
+                logging_utils.run_log("ERROR", "Cannot insert prediction: MongoDB not connected")
                 return False
             
             if not self.predictions_collection:
-                run_log.run_log("ERROR", "Predictions collection not initialized")
+                logging_utils.run_log("ERROR", "Predictions collection not initialized")
                 return False
             
             # Ensure required fields
             required_fields = ['window_id', 'hostname', 'predicted_label', 'confidence']
             for field in required_fields:
                 if field not in prediction_data:
-                    run_log.run_log("ERROR", f"Missing required field: {field}")
+                    logging_utils.run_log("ERROR", f"Missing required field: {field}")
                     return False
             
             # Add prediction timestamp
@@ -553,7 +553,7 @@ class MongoDBConnectionManager:
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to insert prediction: {e}")
+            logging_utils.run_log("ERROR", f"Failed to insert prediction: {e}")
             return False
     
     def get_data_summary(self) -> Dict[str, Any]:
@@ -564,7 +564,7 @@ class MongoDBConnectionManager:
             Dictionary with data statistics for all collections
         """
         if not self.db and not self.connect():
-            run_log.run_log("ERROR", "Cannot get data summary: MongoDB not connected")
+            logging_utils.run_log("ERROR", "Cannot get data summary: MongoDB not connected")
             return {}
 
         try:
@@ -596,7 +596,7 @@ class MongoDBConnectionManager:
                             "time_range": events_time_range[0] if events_time_range else {}
                         }
                 except Exception as e:
-                    run_log.run_log("ERROR", f"Failed to get events summary: {e}")
+                    logging_utils.run_log("ERROR", f"Failed to get events summary: {e}")
 
             # Windows collection
             if self.windows_collection:
@@ -625,7 +625,7 @@ class MongoDBConnectionManager:
                             "time_range": windows_time_range[0] if windows_time_range else {}
                         }
                 except Exception as e:
-                    run_log.run_log("ERROR", f"Failed to get windows summary: {e}")
+                    logging_utils.run_log("ERROR", f"Failed to get windows summary: {e}")
 
             # Predictions collection
             if self.predictions_collection:
@@ -638,7 +638,7 @@ class MongoDBConnectionManager:
                             "unique_hosts": unique_hosts_predictions
                         }
                 except Exception as e:
-                    run_log.run_log("ERROR", f"Failed to get predictions summary: {e}")
+                    logging_utils.run_log("ERROR", f"Failed to get predictions summary: {e}")
 
             summary = {
                 "events_collection": events_result,
@@ -653,14 +653,14 @@ class MongoDBConnectionManager:
             return summary
 
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to get data summary: {e}")
+            logging_utils.run_log("ERROR", f"Failed to get data summary: {e}")
             return {}
     
     def close(self):
         """Close MongoDB connection."""
         if self.client:
             self.client.close()
-            run_log.run_log("INFO", "MongoDB connection closed")
+            logging_utils.run_log("INFO", "MongoDB connection closed")
     
     def __enter__(self):
         """Context manager entry."""

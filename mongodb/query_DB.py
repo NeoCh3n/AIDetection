@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import get_DB
-from system import run_log
+from system import logging_utils
 
 # Configuration
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
@@ -32,7 +32,7 @@ def load_config():
         with open(CONFIG_PATH, 'r') as f:
             return json.load(f)
     except Exception as e:
-        run_log.run_log("ERROR", f"Failed to load config: {str(e)}")
+        logging_utils.run_log("ERROR", f"Failed to load config: {str(e)}")
         return None
 
 # Load configuration
@@ -71,7 +71,7 @@ class AQLQueryManager:
             with open(self.config_path, 'r') as f:
                 return json.load(f)
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to load config: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to load config: {str(e)}")
             return {}
     
     def connect(self) -> bool:
@@ -79,11 +79,11 @@ class AQLQueryManager:
         try:
             self.db = get_DB.get_database(self.config_path)
             if self.db is None:
-                run_log.run_log("ERROR", "Failed to connect to MongoDB")
+                logging_utils.run_log("ERROR", "Failed to connect to MongoDB")
                 return False
             return True
         except Exception as e:
-            run_log.run_log("ERROR", f"Connection error: {str(e)}")
+            logging_utils.run_log("ERROR", f"Connection error: {str(e)}")
             return False
     
     def query_detection_windows(self, 
@@ -124,11 +124,11 @@ class AQLQueryManager:
             cursor = collection.find(query).sort('window_start', -1).limit(limit)
             results = list(cursor)
             
-            run_log.run_log("INFO", f"Queried {len(results)} detection windows")
+            logging_utils.run_log("INFO", f"Queried {len(results)} detection windows")
             return results
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to query detection windows: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to query detection windows: {str(e)}")
             return []
     
     def query_detection_results(self,
@@ -173,11 +173,11 @@ class AQLQueryManager:
             cursor = collection.find(query).sort('timestamp', -1)
             results = list(cursor)
             
-            run_log.run_log("INFO", f"Queried {len(results)} detection results")
+            logging_utils.run_log("INFO", f"Queried {len(results)} detection results")
             return results
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to query detection results: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to query detection results: {str(e)}")
             return []
     
     def query_aql_events(self,
@@ -224,11 +224,11 @@ class AQLQueryManager:
             cursor = collection.find(query).sort('timestamp', -1).limit(limit)
             results = list(cursor)
             
-            run_log.run_log("INFO", f"Queried {len(results)} AQL events")
+            logging_utils.run_log("INFO", f"Queried {len(results)} AQL events")
             return results
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to query AQL events: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to query AQL events: {str(e)}")
             return []
     
     def get_latest_window(self) -> Optional[Dict[str, Any]]:
@@ -242,7 +242,7 @@ class AQLQueryManager:
             return result
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to get latest window: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to get latest window: {str(e)}")
             return None
     
     def get_window_by_id(self, window_id: str) -> Optional[Dict[str, Any]]:
@@ -256,7 +256,7 @@ class AQLQueryManager:
             return result
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to get window by ID: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to get window by ID: {str(e)}")
             return None
     
     def get_detection_summary(self, hours_back: int = 24) -> Dict[str, Any]:
@@ -317,7 +317,7 @@ class AQLQueryManager:
             return summary
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to get detection summary: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to get detection summary: {str(e)}")
             return {}
     
     def close(self):
@@ -361,12 +361,12 @@ def query_database(collection_name: str = DETECTION_WINDOWS,
                 else:
                     results = []
             
-            run_log.run_log("INFO", f"Queried {len(results)} documents from {collection_name}")
+            logging_utils.run_log("INFO", f"Queried {len(results)} documents from {collection_name}")
             return results
         else:
             return []
     except Exception as e:
-        run_log.run_log("ERROR", f"Query failed: {str(e)}")
+        logging_utils.run_log("ERROR", f"Query failed: {str(e)}")
         return []
     finally:
         manager.close()

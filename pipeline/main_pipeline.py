@@ -11,6 +11,10 @@ import json
 from datetime import datetime, timedelta
 import logging
 
+# Add system to path for logging
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'system'))
+from system import logging_utils
+
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api_integration'))
@@ -330,10 +334,10 @@ def main():
     result = pipeline.execute()
     
     if result:
-        print(f"Pipeline completed successfully in {args.mode} mode")
+        logging_utils.run_log("INFO", f"Pipeline completed successfully in {args.mode} mode")
         sys.exit(0)
     else:
-        print(f"Pipeline failed in {args.mode} mode")
+        logging_utils.run_log("ERROR", f"Pipeline failed in {args.mode} mode")
         sys.exit(1)
 
 

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # Import the unified MongoDB manager
 try:
     from mongodb_connection import MongoDBConnectionManager
-    from system import run_log
+    from system import logging_utils
 except ImportError as e:
     # Fallback to pymongo for backward compatibility
     from pymongo import MongoClient
@@ -53,7 +53,7 @@ def get_database(config_path: Optional[str] = None) -> Optional[Any]:
             return manager.db
         else:
             if run_log:
-                run_log.run_log("ERROR", "Failed to connect to MongoDB for AQL detection")
+                logging_utils.run_log("ERROR", "Failed to connect to MongoDB for AQL detection")
             return None
             
     except Exception as e:
@@ -70,12 +70,12 @@ def get_database(config_path: Optional[str] = None) -> Optional[Any]:
             client.admin.command('ping')
             
             if run_log:
-                run_log.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (AQL detection)")
+                logging_utils.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (AQL detection)")
             return db
             
         except Exception as fallback_error:
             if run_log:
-                run_log.run_log("ERROR", f"Failed to connect to MongoDB: {str(fallback_error)}")
+                logging_utils.run_log("ERROR", f"Failed to connect to MongoDB: {str(fallback_error)}")
             return None
 
 def get_aql_database(config_path: Optional[str] = None) -> Optional[Any]:
@@ -110,7 +110,7 @@ def get_mongodb_manager(config_path: Optional[str] = None) -> Optional[MongoDBCo
         return None
     except Exception as e:
         if run_log:
-            run_log.run_log("ERROR", f"Failed to create MongoDB manager: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to create MongoDB manager: {str(e)}")
         return None
 
 def get_aql_collections(config_path: Optional[str] = None) -> Dict[str, str]:
@@ -138,7 +138,7 @@ def get_aql_collections(config_path: Optional[str] = None) -> Dict[str, str]:
         }
     except Exception as e:
         if run_log:
-            run_log.run_log("ERROR", f"Failed to load collection names: {str(e)}")
+            logging_utils.run_log("ERROR", f"Failed to load collection names: {str(e)}")
         return {
             'detection_windows': 'qradar_sliding_windows',
             'detection_results': 'detection_results',

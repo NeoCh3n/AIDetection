@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from system import run_log
+from system import logging_utils
 import requests
 import urllib3
 urllib3.disable_warnings()
@@ -30,18 +30,18 @@ def create_searches_Qradar(qradar_address = Qradar_address_default, AQL = AQL_de
         post_request_ariel_searches = requests.post(request_URI, headers = request_header, verify=False)
         # Parse the JSON response
         post_response_ariel_searches = post_request_ariel_searches.json()
-        run_log.run_log("INFO", "2. POST Request sent to Qradar: ariel searches with AQL -- Response Code:" + str(post_request_ariel_searches))
+        logging_utils.run_log("INFO", "2. POST Request sent to Qradar: ariel searches with AQL -- Response Code:" + str(post_request_ariel_searches))
     except:
-        run_log.run_log("ERROR", "Failed to send POST Request to Qradar")
+        logging_utils.run_log("ERROR", "Failed to send POST Request to Qradar")
         return
 
     try:
         # Return search_id from the response
         ariel_search_id = post_response_ariel_searches["search_id"]
-        run_log.run_log("INFO", "3. Response received from Qradar: created ariel searches -- ariel_search_id:" + str(ariel_search_id))
+        logging_utils.run_log("INFO", "3. Response received from Qradar: created ariel searches -- ariel_search_id:" + str(ariel_search_id))
         return post_response_ariel_searches
     except:
-        run_log.run_log("ERROR", "Response received from Qradar: error message ~ body:" + str(post_response_ariel_searches))
+        logging_utils.run_log("ERROR", "Response received from Qradar: error message ~ body:" + str(post_response_ariel_searches))
         return
 
 if __name__ == "__main__":

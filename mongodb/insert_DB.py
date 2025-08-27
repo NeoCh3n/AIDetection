@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-from system import run_log
+from system import logging_utils
 
 # Configuration
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'mongodb_config.json')
@@ -50,10 +50,10 @@ class AQLDataInserter:
             with open(self.config_path, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            run_log.run_log("ERROR", f"Config file not found: {self.config_path}")
+            logging_utils.run_log("ERROR", f"Config file not found: {self.config_path}")
             return self._create_default_config()
         except json.JSONDecodeError as e:
-            run_log.run_log("ERROR", f"Invalid JSON in config: {e}")
+            logging_utils.run_log("ERROR", f"Invalid JSON in config: {e}")
             return self._create_default_config()
     
     def _create_default_config(self) -> Dict[str, Any]:
@@ -85,14 +85,14 @@ class AQLDataInserter:
             
             # Test connection
             self.client.admin.command('ping')
-            run_log.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (AQL detection)")
+            logging_utils.run_log("INFO", f"Connected to MongoDB: {mongo_config['db_name']} (AQL detection)")
             return True
             
         except ConnectionFailure as e:
-            run_log.run_log("ERROR", f"MongoDB connection failed: {e}")
+            logging_utils.run_log("ERROR", f"MongoDB connection failed: {e}")
             return False
         except Exception as e:
-            run_log.run_log("ERROR", f"Connection error: {e}")
+            logging_utils.run_log("ERROR", f"Connection error: {e}")
             return False
     
     def create_indexes(self) -> bool:
@@ -116,7 +116,7 @@ class AQLDataInserter:
                 try:
                     windows_collection.create_index(index_spec)
                 except Exception as e:
-                    run_log.run_log("WARNING", f"Index creation warning: {e}")
+                    logging_utils.run_log("WARNING", f"Index creation warning: {e}")
             
             # Indexes for aql_events collection
             events_collection = self.db['aql_events']
@@ -131,13 +131,13 @@ class AQLDataInserter:
                 try:
                     events_collection.create_index(index_spec)
                 except Exception as e:
-                    run_log.run_log("WARNING", f"Index creation warning: {e}")
+                    logging_utils.run_log("WARNING", f"Index creation warning: {e}")
             
-            run_log.run_log("INFO", "AQL detection indexes created successfully")
+            logging_utils.run_log("INFO", "AQL detection indexes created successfully")
             return True
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Index creation failed: {e}")
+            logging_utils.run_log("ERROR", f"Index creation failed: {e}")
             return False
     
     def parse_aql_timestamp(self, timestamp_str: str) -> Optional[datetime]:
@@ -149,7 +149,7 @@ class AQLDataInserter:
             try:
                 return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
             except ValueError:
-                run_log.run_log("WARNING", f"Failed to parse timestamp: {timestamp_str}")
+                logging_utils.run_log("WARNING", f"Failed to parse timestamp: {timestamp_str}")
                 return None
     
     def get_window_boundaries(self, timestamp: datetime) -> tuple:
@@ -176,11 +176,11 @@ class AQLDataInserter:
             List of detection window documents
         """
         if 'events' not in result_data:
-            run_log.run_log("WARNING", "No events found in AQL result")
+            logging_utils.run_log("WARNING", "No events found in AQL result")
             return []
         
         events = result_data['events']
-        run_log.run_log("INFO", f"Processing {len(events)} AQL events")
+        logging_utils.run_log("INFO", f"Processing {len(events)} AQL events")
         
         # Group events by 30-minute windows
         window_groups = {}
@@ -245,11 +245,11 @@ class AQLDataInserter:
                 )
                 
             except Exception as e:
-                run_log.run_log("WARNING", f"Failed to parse AQL event: {e}")
+                logging_utils.run_log("WARNING", f"Failed to parse AQL event: {e}")
                 continue
         
         documents = list(window_groups.values())
-        run_log.run_log("INFO", f"Created {len(documents)} detection windows from AQL data")
+        logging_utils.run_log("INFO", f"Created {len(documents)} detection windows from AQL data")
         return documents
     
     def insert_detection_windows(self, documents: List[Dict[str, Any]], 
@@ -290,13 +290,13 @@ class AQLDataInserter:
                     total_inserted += result.upserted_count + result.modified_count
                     
                     if i % (batch_size * 5) == 0:
-                        run_log.run_log("INFO", f"Processed {i + len(batch)} detection windows...")
+                        logging_utils.run_log("INFO", f"Processed {i + len(batch)} detection windows...")
             
-            run_log.run_log("INFO", f"AQL insertion completed: {total_inserted} detection windows")
+            logging_utils.run_log("INFO", f"AQL insertion completed: {total_inserted} detection windows")
             return total_inserted
             
         except Exception as e:
-            run_log.run_log("ERROR", f"AQL insertion failed: {e}")
+            logging_utils.run_log("ERROR", f"AQL insertion failed: {e}")
             return total_inserted
     
     def process_aql_json_files(self, json_files: List[str]) -> int:
@@ -310,7 +310,7 @@ class AQLDataInserter:
             Total number of detection windows inserted
         """
         if not json_files:
-            run_log.run_log("ERROR", "No AQL JSON files provided")
+            logging_utils.run_log("ERROR", "No AQL JSON files provided")
             return 0
         
         if not self.connect():
@@ -324,10 +324,10 @@ class AQLDataInserter:
         try:
             for json_file in json_files:
                 if not os.path.exists(json_file):
-                    run_log.run_log("WARNING", f"AQL file not found: {json_file}")
+                    logging_utils.run_log("WARNING", f"AQL file not found: {json_file}")
                     continue
                 
-                run_log.run_log("INFO", f"Processing AQL file: {json_file}")
+                logging_utils.run_log("INFO", f"Processing AQL file: {json_file}")
                 
                 with open(json_file, 'r') as f:
                     result_data = json.load(f)
@@ -337,12 +337,12 @@ class AQLDataInserter:
                 if documents:
                     inserted = self.insert_detection_windows(documents)
                     total_windows += inserted
-                    run_log.run_log("INFO", f"Inserted {inserted} detection windows from {json_file}")
+                    logging_utils.run_log("INFO", f"Inserted {inserted} detection windows from {json_file}")
             
             return total_windows
             
         except Exception as e:
-            run_log.run_log("ERROR", f"AQL processing failed: {e}")
+            logging_utils.run_log("ERROR", f"AQL processing failed: {e}")
             return total_windows
         finally:
             self.close()
@@ -381,7 +381,7 @@ class AQLDataInserter:
             return summary
             
         except Exception as e:
-            run_log.run_log("ERROR", f"Failed to get insertion summary: {e}")
+            logging_utils.run_log("ERROR", f"Failed to get insertion summary: {e}")
             return {"error": str(e)}
     
     def close(self):
