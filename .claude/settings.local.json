@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "Bash(mv:*)",
+      "Bash(/usr/local/bin/python3.6:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(find:*)",
+      "Bash(rmdir:*)",
+      "Bash(true)",
+      "Bash(. venv/bin/activate)",
+      "Bash(python:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": []
+  }
+}

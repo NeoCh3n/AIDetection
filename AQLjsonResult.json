@@ -1,0 +1,568 @@
+{
+  "events": [
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100227,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:59 AM",
+      "Count": 211656
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100221,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:59 AM",
+      "Count": 211656
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100272,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:59 AM",
+      "Count": 210870
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100277,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:59 AM",
+      "Count": 210838
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100101,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:59 AM",
+      "Count": 210776
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100216,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:59 AM",
+      "Count": 210774
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100227,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6561
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100215,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6561
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100225,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6561
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100221,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6561
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100218,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6561
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100265,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6561
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100272,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 6512
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100227,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 5610
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100221,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 5610
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100225,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 5609
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100215,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 5526
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100218,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 5520
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100265,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 4718
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100005,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 4670
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100272,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 3150
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100634,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:15 AM",
+      "Count": 2595
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100118,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:15 AM",
+      "Count": 2330
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100097,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:15 AM",
+      "Count": 2330
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100119,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:55 AM",
+      "Count": 1873
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100273,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:54 AM",
+      "Count": 1838
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100636,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:15 AM",
+      "Count": 1778
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100215,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:08 AM",
+      "Count": 818
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100276,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 729
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100601,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 618
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100560,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:20:56 AM",
+      "Count": 604
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100225,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:28 AM",
+      "Count": 433
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100218,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:28 AM",
+      "Count": 427
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100425,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:51 AM",
+      "Count": 166
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100702,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:19 AM",
+      "Count": 150
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100717,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:54 AM",
+      "Count": 117
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100607,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:54 AM",
+      "Count": 93
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100395,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:06 AM",
+      "Count": 90
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100103,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:06 AM",
+      "Count": 90
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100297,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:06 AM",
+      "Count": 83
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100216,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:06 AM",
+      "Count": 83
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100711,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:12 AM",
+      "Count": 72
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100030,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:06 AM",
+      "Count": 69
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100712,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:12 AM",
+      "Count": 69
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100223,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:25:18 AM",
+      "Count": 64
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100217,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:25:18 AM",
+      "Count": 62
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100117,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:16 AM",
+      "Count": 20
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100117,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:28 AM",
+      "Count": 20
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100097,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:28 AM",
+      "Count": 20
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100277,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:07 AM",
+      "Count": 19
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100101,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:21:07 AM",
+      "Count": 18
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100633,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:22 AM",
+      "Count": 15
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100013,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:47 AM",
+      "Count": 14
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100104,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:49 AM",
+      "Count": 10
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100630,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 7
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100544,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:18 AM",
+      "Count": 7
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100196,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:19 AM",
+      "Count": 6
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100625,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:38 AM",
+      "Count": 5
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100520,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:38 AM",
+      "Count": 5
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100518,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:38 AM",
+      "Count": 5
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100563,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:11 AM",
+      "Count": 5
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100520,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:49 AM",
+      "Count": 5
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100518,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:49 AM",
+      "Count": 5
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100402,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:40 AM",
+      "Count": 4
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100421,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:40 AM",
+      "Count": 4
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100714,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:40 AM",
+      "Count": 4
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100721,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:48:56 AM",
+      "Count": 4
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100276,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 4
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100421,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:47 AM",
+      "Count": 4
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100402,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:47 AM",
+      "Count": 3
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100628,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:45:53 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100618,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100526,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:34:55 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100601,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100456,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:26 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100455,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:26 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100618,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:28 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100456,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:37 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100271,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:41:08 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100164,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:37 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": null,
+      "Custom Rule": 100146,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:37 AM",
+      "Count": 2
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100217,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:35:20 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100223,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:35:20 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100146,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:49:03 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100164,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:49:03 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100629,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:46:10 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100578,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:45:50 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100616,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:46:53 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100627,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:46:12 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "DESKTOP-64-EDR",
+      "Custom Rule": 100547,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:23:15 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100098,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100099,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100566,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:20 AM",
+      "Count": 1
+    },
+    {
+      "sysmon_hostname (custom)": "192.168.153.166",
+      "Custom Rule": 100567,
+      "Log Source Time (Minimum)": "Aug 08, 2025, 10:22:22 AM",
+      "Count": 1
+    }
+  ]
+}

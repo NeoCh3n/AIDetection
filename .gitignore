@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+
+# Python-related ignores
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# VS Code settings
+.vscode/
+
+# macOS system files
+.DS_Store
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Logs & caches
+*.log
+.cache/
