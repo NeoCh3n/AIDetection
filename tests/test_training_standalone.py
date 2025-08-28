@@ -9,6 +9,22 @@ import sys
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import warnings
+
+# Ensure we are training under the expected scikit-learn version
+try:
+    import sklearn  # type: ignore
+except Exception as e:
+    raise RuntimeError(f"scikit-learn is required to run this test: {e}")
+
+EXPECTED_SKLEARN_VERSION = "0.24.2"
+RUNNING_SKLEARN_VERSION = getattr(sklearn, "__version__", "unknown")
+
+if RUNNING_SKLEARN_VERSION != EXPECTED_SKLEARN_VERSION:
+    raise AssertionError(
+        f"scikit-learn version mismatch: expected {EXPECTED_SKLEARN_VERSION}, "
+        f"found {RUNNING_SKLEARN_VERSION}. Aborting retraining to prevent incompatible artifacts."
+    )
 
 # Add project root to path for all imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,7 +85,12 @@ def run_actual_pipeline_test():
     # Use real model directory from system config
     model_dir = os.path.join(project_root, system_config['paths']['model_dir'])
     os.makedirs(model_dir, exist_ok=True)
-    model_save_path = os.path.join(model_dir, f"test_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.joblib")
+    # Include sklearn version in artifact name for clarity
+    version_tag = RUNNING_SKLEARN_VERSION.replace('.', '')
+    model_save_path = os.path.join(
+        model_dir,
+        f"test_model_skl{version_tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.joblib",
+    )
     
     try:
         # Log pipeline start
@@ -77,6 +98,15 @@ def run_actual_pipeline_test():
             "model_save_path": model_save_path,
             "timestamp": datetime.now().isoformat()
         })
+        # Log environment details inc. sklearn version
+        log_pipeline_event("ENVIRONMENT", "Library versions for training run", {
+            "sklearn_version": RUNNING_SKLEARN_VERSION,
+            "expected_sklearn_version": EXPECTED_SKLEARN_VERSION,
+            "python_version": sys.version,
+            "timestamp": datetime.now().isoformat(),
+        })
+
+        print(f"scikit-learn version: {RUNNING_SKLEARN_VERSION} (expected {EXPECTED_SKLEARN_VERSION})")
         
         print("1. LOADING TRAINING DATA...")
         
