@@ -239,7 +239,7 @@ Prevent any risk of model performance degradation caused by inconsistencies betw
 |  • Calculates metrics (confusion |                               |
 |    matrix, classification report)|                               V (Malicious?)
 |  • Extracts feature importance   |                      +---------------------------------------+
-| Main Function: evaluate_model(...)|                     | IF result == 'malicious':             |
+| Main Function: evaluate_model.   |                     | IF result == 'malicious':             |
 +----------------------------------+                      |   +--------------------------+        |
                                                           |   |   shap_explainer.py      |        | 
                                                           |   |    • Explains prediction   |      |
