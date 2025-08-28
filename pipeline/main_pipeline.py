@@ -24,22 +24,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils')
 # Import existing pipeline modules
 from data_loader import load_data
 from feature_aggregator import aggregate_to_windows
-from pipeline.feature_generator import FeatureGenerator
-from model_training import train_model
-from model_evaluation import evaluate_model
-from model_predictor import Predictor
+from feature_generator import FeatureGenerator
 
-# Import existing API/MongoDB modules
+# Training/Evaluation from model_training package
+from model_training.model_training import train_threat_detector, evaluate_and_report
+
+# Predictor is only needed in detection; import at callsite to avoid training-only failures.
+
+# Import existing API/MongoDB modules (use package-qualified paths for IDEs)
 try:
-    from create_searches_Qradar import create_searches_Qradar
-    from status_searches_Qradar import status_searches_Qradar
-    from result_searches_Qradar import result_searches_Qradar
-    from insert_DB import insert_DB
-    from delete_searches_Qradar import delete_searches_Qradar
-    from delete_DB import delete_old_rule_triggers
-    from query_DB import query_DB
+    from api_integration.create_searches_Qradar import create_searches_Qradar
+    from api_integration.status_searches_Qradar import status_searches_Qradar
+    from api_integration.result_searches_Qradar import result_searches_Qradar
+    from api_integration.delete_searches_Qradar import delete_searches_Qradar
+    # MongoDB utilities
+    # Align with available functions in mongodb/delete_DB.py
+    from mongodb.delete_DB import cleanup_old_data as delete_old_rule_triggers
+    # Removed unused and nonexistent import of query_DB
+    # AQL JSON inserter (from mongodb/insert_DB.py)
+    from mongodb.insert_DB import AQLDataInserter  # type: ignore
 except ImportError as e:
-    logging.warning(f"API/MongoDB modules not found: {e}")
+    logging.warning(f"API/MongoDB modules not fully available: {e}")
+    AQLDataInserter = None  # type: ignore
 
 # Import shared utilities
 from shared_utils.qradar_rule_manager import QRadarRuleManager
@@ -69,15 +75,15 @@ class UnifiedPipeline:
         self.logger = logging.getLogger('UnifiedPipeline')
         
     def load_config(self, config_path=None):
-        """Load unified configuration"""
+        """Load unified configuration (JSON). Defaults to pipeline/config.json."""
         if config_path is None:
-            config_path = os.path.join(os.path.dirname(__file__), 'config.py')
-        
+            config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+
         try:
             with open(config_path, 'r') as f:
                 return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            # Default configuration
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logging.warning(f"Failed to load {config_path}: {e}. Falling back to defaults.")
             return {
                 "training": {
                     "data_path": "./Training_data",
@@ -87,9 +93,9 @@ class UnifiedPipeline:
                 },
                 "detection": {
                     "qradar_config": {
-                        "host": "192.168.153.123",
-                        "token": "677f60e2-3d58-4275-a1f0-c13d1975fdbe",
-                        "query_30min": """SELECT "qidEventId" as rule_id, "sysmon_hostname" as hostname, "startTime" as timestamp, COUNT(*) as count FROM events WHERE "startTime" >= '{start_time}' AND "startTime" < '{end_time}' GROUP BY rule_id, hostname, timestamp"""
+                        "host": os.getenv("QRADAR_ADDRESS", "192.168.153.123"),
+                        "token": os.getenv("QRADAR_API_TOKEN", "REPLACE_WITH_TOKEN"),
+                        "query_30min": "SELECT \"qidEventId\" as rule_id, \"sysmon_hostname\" as hostname, \"startTime\" as timestamp, COUNT(*) as count FROM events WHERE \"startTime\" >= '{start_time}' AND \"startTime\" < '{end_time}' GROUP BY rule_id, hostname, timestamp"
                     },
                     "mongodb_config": {
                         "connection_string": "mongodb://localhost:27017/",
@@ -98,51 +104,42 @@ class UnifiedPipeline:
                     },
                     "retention_days": 7,
                     "alert_threshold": 0.8
+                },
+                "rule_manager": {
+                    "mode": "file",
+                    "api_config": {}
                 }
             }
     
     def run_training(self):
-        """Training mode: CSV → Model"""
+        """Training mode: CSV → Model (delegates to model_training exports)."""
         self.logger.info("Starting training pipeline...")
-        
+
         try:
-            # Load training data
-            self.logger.info("Loading training data...")
-            df = load_data('train', self.config['training'])
-            self.logger.info(f"Loaded {len(df)} training records")
-            
-            # Aggregate to 30-minute windows
-            self.logger.info("Aggregating to 30-minute windows...")
-            df_agg = aggregate_to_windows(df)
-            self.logger.info(f"Created {len(df_agg)} aggregated windows")
-            
-            # Generate feature vectors
-            self.logger.info("Generating feature vectors...")
-            feature_gen = FeatureGenerator()
-            feature_gen.initialize_rules()
-            X, y = feature_gen.generate_feature_vectors(df_agg, mode='train')
-            self.logger.info(f"Feature matrix shape: {X.shape}")
-            
-            # Train model
-            self.logger.info("Training model...")
-            model = train_model(X, y, self.config['training'])
-            
+            training_cfg = self.config.get('training', {})
+            model_path = training_cfg.get('model_path', './model/threat_detector.joblib')
+
+            # Delegate training to integrated trainer
+            self.logger.info("Training via train_threat_detector...")
+            result = train_threat_detector(training_cfg, model_path)
+            if result is None:
+                raise RuntimeError("train_threat_detector returned None")
+
+            model, X_test, y_test = result
+
             # Evaluate model
-            self.logger.info("Evaluating model...")
+            self.logger.info("Evaluating via evaluate_and_report...")
+            rm_cfg = self.config.get('rule_manager', {})
             rule_manager = QRadarRuleManager(
-                mode=self.config['rule_manager']['mode'],
-                config=self.config['rule_manager']['api_config']
+                mode=rm_cfg.get('mode', 'file'),
+                config=rm_cfg.get('api_config', {}),
             )
             rule_list = rule_manager.get_rule_list()
-            evaluate_model(
-                model_path=self.config['training']['model_path'],
-                test_data_path=None,  # Use split from training
-                rule_list=rule_list
-            )
-            
+            _report = evaluate_and_report(model, X_test, y_test, rule_list, model_path)
+
             self.logger.info("Training pipeline completed successfully")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Training pipeline failed: {str(e)}")
             return False
@@ -177,13 +174,13 @@ class UnifiedPipeline:
             time.sleep(10)  # Wait for search completion
             
             result_data = result_searches_Qradar(
-                qradar_address=self.config['detection']['qradar_config']['host'],
+                Qradar_address=self.config['detection']['qradar_config']['host'],
                 search_id=search_id
             )
             
             # Cleanup search
             delete_searches_Qradar(
-                qradar_address=self.config['detection']['qradar_config']['host'],
+                Qradar_address=self.config['detection']['qradar_config']['host'],
                 search_id=search_id
             )
             
@@ -198,31 +195,21 @@ class UnifiedPipeline:
         self.logger.info("Storing detection data in MongoDB...")
         
         try:
-            # Process data into MongoDB format
-            documents = []
-            if data and 'events' in data:
-                for event in data['events']:
-                    doc = {
-                        'rule_id': str(event.get('rule_id', '')),
-                        'hostname': str(event.get('hostname', 'unknown')),
-                        'timestamp': event.get('timestamp'),
-                        'count': int(event.get('count', 0)),
-                        'window_start': start_time.isoformat(),
-                        'window_end': end_time.isoformat(),
-                        'inserted_at': datetime.now().isoformat()
-                    }
-                    documents.append(doc)
-            
-            # Insert into MongoDB
-            if documents:
-                insert_DB.insert_documents(
-                    documents,
-                    connection_string=self.config['detection']['mongodb_config']['connection_string'],
-                    db_name=self.config['detection']['mongodb_config']['database'],
-                    collection_name=self.config['detection']['mongodb_config']['collection']
-                )
-                self.logger.info(f"Inserted {len(documents)} documents")
-            
+            if AQLDataInserter is None:
+                self.logger.error("AQLDataInserter not available; cannot store detection data")
+                return []
+
+            inserter = AQLDataInserter()
+            if not inserter.connect():
+                self.logger.error("Failed to connect to MongoDB for AQL insertion")
+                return []
+
+            # Transform AQL JSON results into detection windows and insert
+            documents = inserter.parse_aql_json_result(data) if data else []
+            inserted = inserter.insert_detection_windows(documents) if documents else 0
+            inserter.close()
+
+            self.logger.info(f"Inserted {inserted} detection windows")
             return documents
             
         except Exception as e:
@@ -283,7 +270,13 @@ class UnifiedPipeline:
             X = feature_gen.generate_feature_vectors(df_agg, mode='detect')
             
             # Make predictions
-            predictor = Predictor(self.config['training']['model_path'])
+            try:
+                from model_predictor import Predictor as ModelPredictor
+            except Exception as e:
+                self.logger.error(f"Predictor not available: {e}. Ensure model_predictor.py exists and the model path is correct.")
+                return None
+
+            predictor = ModelPredictor(self.config['training']['model_path'])
             predictions = predictor.predict(X)
             
             # Process results
