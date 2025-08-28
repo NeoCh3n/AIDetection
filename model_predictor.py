@@ -64,7 +64,7 @@ class Predictor:
         if hasattr(self.model, "predict_proba"):
             proba = self.model.predict_proba(X_arr)
             # Ensure numpy array for consistent handling
-            proba = np.asarray(proba)
+            proba = np.array(proba, copy=False)
             # Assume binary classification; take probability of class 1 if available
             if proba.ndim == 2 and proba.shape[1] >= 2:
                 p1 = proba[:, 1]
@@ -82,7 +82,7 @@ class Predictor:
         """Best-effort conversion to numpy array.
         - Uses pandas .to_numpy() if X is a DataFrame/Series.
         - Returns as-is if already an ndarray.
-        - Falls back to np.asarray(X), and if that fails, np.asarray(list(X)).
+        - Falls back to np.array(X, copy=False), and if that fails, np.array(list(X), copy=False).
         """
         # Unwrap (X, y) style inputs
         if isinstance(X, tuple) and len(X) >= 1:
@@ -100,6 +100,6 @@ class Predictor:
             return X
 
         try:
-            return np.asarray(X)
+            return np.array(X, copy=False)
         except Exception:
-            return np.asarray(list(X))
+            return np.array(list(X), copy=False)
