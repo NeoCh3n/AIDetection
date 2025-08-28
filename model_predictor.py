@@ -7,10 +7,12 @@ predict(X) API that returns (label, probability) tuples.
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple, Union, TYPE_CHECKING
+from typing import Any, List, Tuple, Union, TYPE_CHECKING, cast
 
 import joblib
 import numpy as np
+# Make numpy module typed as Any to avoid Pylance attribute warnings without stubs
+np = cast(Any, np)
 
 # Optional pandas import for DataFrame/Series detection without a hard dependency
 try:  # pragma: no cover - optional import
@@ -18,11 +20,18 @@ try:  # pragma: no cover - optional import
 except Exception:  # pragma: no cover
     pd = None  # type: ignore
 
-
+# Typing-only imports to avoid hard dependencies
 if TYPE_CHECKING:
-    # For type checkers only; avoids importing pandas at runtime if unavailable
-    from numpy.typing import NDArray
-    import pandas as _pd
+    # NumPy typing
+    try:
+        from numpy.typing import NDArray  # type: ignore[reportMissingImports]
+    except Exception:
+        from typing import Any as NDArray  # Fallback for analysis envs
+    # Pandas types
+    try:
+        import pandas as _pd  # type: ignore[reportMissingImports]
+    except Exception:
+        pass
 
 
 class Predictor:
@@ -35,13 +44,27 @@ class Predictor:
         Return list of (predicted_label, probability_of_positive_class).
         Falls back to 0.5 probabilities if the model lacks predict_proba.
         """
+        # Accept (X, y) tuples from generators by extracting X
+        if isinstance(X, tuple) and len(X) >= 1:
+            X = X[0]
+
         # Convert inputs to a NumPy array robustly
         X_arr = self._to_numpy(X)
+
+        # Handle empty inputs early
+        if X_arr.size == 0:
+            return []
+
+        # Ensure 2D shape for scikit-learn estimators
+        if X_arr.ndim == 1:
+            X_arr = X_arr.reshape(1, -1)
 
         y_pred = self.model.predict(X_arr)
 
         if hasattr(self.model, "predict_proba"):
             proba = self.model.predict_proba(X_arr)
+            # Ensure numpy array for consistent handling
+            proba = np.asarray(proba)
             # Assume binary classification; take probability of class 1 if available
             if proba.ndim == 2 and proba.shape[1] >= 2:
                 p1 = proba[:, 1]
@@ -61,6 +84,10 @@ class Predictor:
         - Returns as-is if already an ndarray.
         - Falls back to np.asarray(X), and if that fails, np.asarray(list(X)).
         """
+        # Unwrap (X, y) style inputs
+        if isinstance(X, tuple) and len(X) >= 1:
+            X = X[0]
+
         # Use pandas-aware conversion when available
         if pd is not None:
             try:
