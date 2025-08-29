@@ -1,201 +1,189 @@
-# AIDetection - Threat Detection System
+# AIDetection – Unified Threat Detection Pipeline
 
-A supervised machine learning system designed to detect various security threats and malicious activities using QRadar rule trigger frequencies. Built for enterprise-scale detection with support for both offline deployment and production environments.
+Supervised threat detection using QRadar rule trigger frequencies. The project trains a Random Forest classifier on Picus BAS–labeled data and reuses the exact same processing path for detection to eliminate training–serving skew.
 
-## 🎯 Project Overview
+## Overview
 
-This system leverages labeled datasets from Picus Breach and Attack Simulation (BAS) to train a Random Forest classifier that distinguishes between normal operational behavior and security threat patterns using QRadar rule trigger frequencies as primary features.
+- Primary model: `RandomForestClassifier` (sklearn) on tabular features (2898 QRadar Rule IDs)
+- Windowing: 30-minute aggregated windows; event-level `log1p(count)` before aggregation
+- Python 3.6.8 compatible; pinned dependencies for reproducibility
+- Single orchestrator: `pipeline/main_pipeline.py` with `--mode train|detect`
 
-**Key Features:**
-- **30-minute sliding windows** with 15-minute query frequency
-- **Detection-only mode** for production environments
-- **Host-level breakdown** for precise threat response
-- **Cross-platform support** (RHEL 7.9, macOS ARM)
-- **Unified MongoDB architecture** for consistent data processing
+## Architecture
 
-## 🏗️ Architecture
+Data path (both modes share modules):
 
-### Detection Pipeline
 ```
-QRadar AQL Queries → MongoDB Storage → ML Processing → Threat Detection
-```
-
-### Key Components
-- **MongoDB Connection Utility** (`mongodb/mongodb_connection.py`) - Unified database operations
-- **Time Utils** (`shared_utils/time_utils.py`) - Consistent timestamp processing
-- **Data Processing** (`mongodb/insert_DB.py`) - QRadar data ingestion
-- **ML Model** - Random Forest classifier for threat detection
-
-## 📊 Data Schema
-
-### Detection Windows (30-minute periods)
-```json
-{
-  "_id": "2025-08-08_10-00-00_W0",
-  "window_start": "2025-08-08T10:00:00Z",
-  "window_end": "2025-08-08T10:30:00Z",
-  "feature_vector": {"rule_id": count, ...},
-  "host_triggers": {
-    "hostname": {"total_triggers": int, "rules": {...}}
-  }
-}
+data_loader.py → feature_aggregator.py → feature_generator.py →
+  ├─ train: model_training (save .joblib, evaluate)
+  └─ detect: model_predictor (inference, optional SHAP explain)
 ```
 
-## 🚀 Quick Start
+Key modules:
+- `pipeline/data_loader.py`: Unified ingestion
+  - train: CSVs from `Training_data/normal` and `Training_data/attack`
+  - detect: MongoDB via `mongodb/mongodb_connection.py` (last N minutes)
+  - Output schema: `['hostname','rule_id','timestamp','count','source_label']`
+- `pipeline/feature_aggregator.py`: 30-min windows, applies `np.log1p(count)` pre-aggregation, outputs `aggregated_rules` (alias `aggregated_rules_dict`).
+- `pipeline/feature_generator.py`: Dense vectors from rule IDs using `shared_utils/qradar_rule_manager.py`.
+- `model_training/model_training.py`: `train_threat_detector(...)` and `evaluate_and_report(...)`.
+- `model_predictor.py`: Loads `.joblib` and returns `(label, probability)` per row.
+- `pipeline/main_pipeline.py`: UnifiedPipeline orchestrator (train/detect).
 
-### Prerequisites
+MongoDB & QRadar (detection ingestion):
+- `mongodb/insert_DB.py` (`AQLDataInserter`): Insert AQL JSON results as detection windows.
+- `mongodb/mongodb_connection.py`: Centralized manager used by `data_loader.py`.
+
+## Environment Setup
+
+Always use the local venv via the Makefile.
+
 ```bash
-# Python 3.6.8 (required)
+# Verify Python version (expect 3.6.8)
 python --version
 
-# Install dependencies
-pip install pandas==1.1.5 numpy==1.19.5 scikit-learn==0.24.2 \
-             joblib==1.0.1 pymongo==3.11.0 matplotlib==3.3.4 pytz
+# Create venv and install pinned deps
+make install
+
+# Run lightweight tests
+make test
 ```
 
-### MongoDB Setup
+Pinned dependencies (Python 3.6.8): pandas==1.1.5, numpy==1.19.5, scikit-learn==0.24.2, joblib==1.0.1, pymongo==3.11.0, matplotlib==3.3.4.
+
+## Training
+
+Prepare CSVs:
+- Place normal data under `Training_data/normal/`
+- Place Picus attack data under `Training_data/attack/`
+
+Run training (saves model and evaluation):
+
 ```bash
-# Run offline setup (supports RHEL 7.9 and macOS ARM)
-cd mongodb
-python setup_mongodb_offline.py
-
-# Or use unified connection utility
-python mongodb_connection.py
+venv/bin/python pipeline/main_pipeline.py train --config pipeline/config.json
 ```
 
-### Processing QRadar Data
-```python
-from mongodb.insert_DB import process_qradar_data
+Outputs:
+- Model: `model/threat_detector.joblib`
+- Reports: `model/threat_detector_evaluation_report.json`, `model/threat_detector_top_20_features.csv`
 
-# Process QRadar search results
-process_qradar_data(
-    json_files=["path/to/qradar_results.json"],
-    auto_cleanup=True,
-    retention_days=7
-)
+Evaluation highlights:
+- Confusion matrix, classification report (precision/recall/F1 for class 1), ROC AUC
+- Top 20 most important Rule IDs (feature importances)
+
+## Detection
+
+Online path (scheduled): QRadar API → `mongodb/insert_DB.py` → MongoDB → unified pipeline → predictions.
+
+Run detection pipeline:
+
+```bash
+venv/bin/python pipeline/main_pipeline.py detect --config pipeline/config.json
 ```
 
-## 🔧 Configuration
+Offline AQL JSON insertion (optional for testing):
 
-### MongoDB Settings (`mongodb/mongodb_config.json`)
-```json
-{
-  "mongodb": {
-    "db_name": "qradar_detection",
-    "connection_string": "mongodb://localhost:27017/"
-  },
-  "pipeline": {
-    "mode": "detection_only",
-    "query_frequency_minutes": 15,
-    "window_size": "30min",
-    "timezone": "HKT"
-  }
-}
+```bash
+# Insert AQL JSON results into MongoDB
+venv/bin/python mongodb/insert_DB.py AQLjsonResult.json
+
+# Then run detection
+venv/bin/python pipeline/main_pipeline.py detect --config pipeline/config.json
 ```
 
-## 📁 Project Structure
+Predictions return alerts when probability exceeds the configured threshold (`detection.alert_threshold`).
+
+## MongoDB Utilities
+
+- `mongodb/mongodb_connection.py`: Central connection manager used by the pipeline and data loader.
+  - Key methods: `connect()`, `create_indexes()`, `get_unlabeled_windows()`, `get_events_for_window()`, `insert_window()`, `insert_prediction()`, `cleanup_old_data()`.
+- `mongodb/insert_DB.py`: AQL JSON → detection windows inserter.
+  - Class: `AQLDataInserter`; CLI: `venv/bin/python mongodb/insert_DB.py AQLjsonResult.json`.
+- `mongodb/query_DB.py`: Detection-only query helpers for windows/results/events.
+  - Class: `AQLQueryManager`; CLI available via `--help`.
+- `mongodb/delete_DB.py`: Detection-only cleanup utilities (apply retention).
+  - Class: `DetectionDataCleanup`.
+- `mongodb/get_DB.py`: Thin helpers to fetch DB/manager for AQL flows.
+  - Functions: `get_database()`, `get_mongodb_manager()`, `get_aql_collections()`.
+- `mongodb/setup_mongodb_offline.py`: Bootstrap MongoDB locally (collections, indexes, validation).
+- `mongodb/mongodb_config.json`: Connection and collection names for detection mode.
+
+## Configuration
+
+- Pipeline config: `pipeline/config.json`
+  - `training.model_path`, `training.test_size`, `training.random_state`
+  - `detection.qradar_config` (AQL), `detection.mongodb_config`, `alert_threshold`, `window_size_minutes`
+  - `rule_manager`: rule source (`file` or `api`)
+- MongoDB config (AQL inserter): `mongodb/mongodb_config.json`
+
+## Data Schema
+
+Unified loader output (row-level):
+
+```
+hostname (str), rule_id (int), timestamp (datetime), count (int), source_label (str)
+```
+
+Aggregated windows (feature_aggregator):
+- Columns: `window_id`, `hostname`, `aggregated_rules` (dict of `{rule_id: value}`), optional label in train mode.
+- Note: `np.log1p(count)` is applied before aggregation in both modes.
+
+## Project Structure
 
 ```
 AIDetection/
-├── mongodb/                    # Database layer
-│   ├── mongodb_connection.py   # Unified MongoDB operations
-│   ├── insert_DB.py           # QRadar data processing
-│   ├── setup_mongodb_offline.py # Cross-platform setup
-│   └── mongodb_config.json    # Configuration
-├── shared_utils/              # Shared utilities
-│   ├── time_utils.py         # Timestamp processing
-│   └── rule_manager.py       # Rule ID management
-├── tests/                    # Test files
-├── Qradar_rule/              # QRadar rule definitions
-├── Training_data/            # CSV training datasets
-└── system/                   # System utilities
+├── pipeline/
+│   ├── main_pipeline.py        # Orchestrator (train/detect)
+│   ├── data_loader.py          # Unified ingestion
+│   ├── feature_aggregator.py   # 30-min aggregation + log1p
+│   └── feature_generator.py    # Dense vectors via rule manager
+├── model_training/
+│   ├── model_training.py       # Train + evaluate + reports
+│   └── model_evaluation.py     # (helpers/standalone evaluation)
+├── model_predictor.py          # Inference wrapper
+├── mongodb/
+│   ├── mongodb_connection.py   # Central manager (connect/query/insert/cleanup)
+│   ├── insert_DB.py            # AQL JSON inserter (AQLDataInserter)
+│   ├── query_DB.py             # Query helpers for detection windows/events (AQLQueryManager)
+│   ├── delete_DB.py            # Cleanup utilities (retention policies)
+│   ├── get_DB.py               # Thin DB/manager accessor for AQL flows
+│   ├── setup_mongodb_offline.py# Offline setup: create collections/indexes
+│   └── mongodb_config.json     # MongoDB config for detection mode
+├── shared_utils/
+│   ├── time_utils.py           # Timestamp parsing/window ids
+│   └── qradar_rule_manager.py  # Rule list + index mapping
+├── Training_data/              # CSVs: normal/ and attack/
+├── Qradar_rule/                # Rule definitions (file mode)
+├── Makefile                    # venv + tests
+└── requirements.txt            # Pinned deps (Py 3.6.8)
 ```
 
-## 🔍 Usage Examples
+## Testing
 
-### 1. Setup Detection Environment
+Run the lightweight suite:
+
 ```bash
-# Install and configure MongoDB
-python mongodb/setup_mongodb_offline.py
-
-# Verify MongoDB connection
-python mongodb/mongodb_connection.py
+make test
 ```
 
-### 2. Process QRadar Results
-```bash
-# Process AQL search results
-python mongodb/insert_DB.py
+Common focused tests:
+- `tests/test_data_loader_detailed.py`
+- `tests/test_feature_aggregator.py`
+- `tests/test_pipeline_simple.py`
 
-# Check data summary
-python -c "from mongodb.mongodb_connection import get_mongodb_manager; print(get_mongodb_manager().get_data_summary())"
-```
+## Security Notes
 
-### 3. Manual Data Processing
-```python
-from mongodb.mongodb_connection import get_mongodb_manager
+- Uses simulated Picus BAS attack data for training
+- Internal data only; follow enterprise data handling policies
+- Unified preprocessing prevents training–serving skew
 
-with get_mongodb_manager() as db:
-    # Get detection windows for specific time range
-    windows = db.get_detection_windows(
-        start_time=datetime(2025, 8, 1),
-        end_time=datetime(2025, 8, 8)
-    )
-```
+## Troubleshooting
 
-## 🧪 Testing
-
-Run the test suite to verify functionality:
-```bash
-# Test complete pipeline
-python tests/test_complete_pipeline.py
-
-# Test data processing
-python tests/test_pipeline_simple.py
-
-# Test MongoDB operations
-python tests/test_data_loader_detailed.py
-```
-
-## 📈 Performance
-
-- **Detection Windows**: 30-minute sliding windows
-- **Query Frequency**: 15 minutes for real-time detection
-- **Data Retention**: 7 days for ML training data
-- **Cross-platform**: Supports RHEL 7.9 and macOS ARM
-
-## 🔒 Security Notes
-
-- Uses simulated attack data from trusted Picus BAS platform
-- Detection-only mode prevents training data storage in production
-- Host-level tracking for precise threat response
-- All data processing follows enterprise security standards
-
-## 🐛 Troubleshooting
-
-### Common Issues
-1. **MongoDB Connection**: Ensure MongoDB is running on localhost:27017
-2. **Timezone Issues**: Verify HKT timezone configuration in time_utils.py
-3. **Rule Processing**: Check Qradar_rule folder for rule definitions
-4. **Data Validation**: Use time_utils.py for consistent timestamp handling
-
-### Debug Commands
-```bash
-# Check MongoDB status
-python -c "from pymongo import MongoClient; MongoClient().admin.command('ping')"
-
-# Validate timestamps
-python -c "from shared_utils.time_utils import parse_qradar_timestamp; print(parse_qradar_timestamp('Aug 08, 2025, 10:20:59 AM'))"
-```
-
-## 🤝 Contributing
-
-This is a defensive security tool designed for threat detection. Contributions should focus on improving detection accuracy and system reliability.
-
-## 📄 License
-
-Enterprise security tool - follow internal data security policies for deployment and usage.
+- MongoDB connection: ensure local instance reachable (`mongodb://localhost:27017/`)
+- Imports: keep `mongodb/__init__.py` to avoid namespace/package import issues
+- Version mismatch: ensure pinned sklearn/joblib when loading models
+- Timestamp parsing: see `shared_utils/time_utils.parse_qradar_timestamp`
 
 ---
 
-**Built with** Python 3.6.8, MongoDB, scikit-learn, and enterprise-grade security practices.
+Built with Python 3.6.8, MongoDB, and scikit-learn (Random Forest).
