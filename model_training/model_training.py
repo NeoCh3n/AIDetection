@@ -134,6 +134,62 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
         return None
 
 
+def train_threat_detector_from_csv(feature_data_path: str, model_save_path: str) -> str:
+    """
+    Convenience training entrypoint for labeled CSVs.
+
+    Loads a labeled feature CSV (columns are rule IDs + 'is_attack' or 'label'),
+    splits with stratification, trains a RandomForestClassifier, and saves the model.
+
+    Parameters:
+    - feature_data_path: path to CSV containing features and 'is_attack' (or 'label')
+    - model_save_path: path to save the trained model (.joblib)
+
+    Returns:
+    - Path to the saved model
+    """
+    # Lazy imports to reuse existing dependencies
+    import pandas as _pd
+
+    if not os.path.exists(feature_data_path):
+        raise FileNotFoundError(f"Feature CSV not found: {feature_data_path}")
+
+    logger.info(f"Loading labeled features from {feature_data_path}")
+    df = _pd.read_csv(feature_data_path)
+
+    # Determine label column
+    label_col = 'is_attack' if 'is_attack' in df.columns else ('label' if 'label' in df.columns else None)
+    if label_col is None:
+        raise ValueError("Input CSV must contain 'is_attack' or 'label' column")
+
+    y = df[label_col].astype(int)
+    drop_cols = {label_col, 'window_id', 'hostname', 'total_events', 'unique_rules', 'window_start', 'window_end', 'source_label'}
+    feature_cols = [c for c in df.columns if c not in drop_cols]
+    X = df[feature_cols].apply(_pd.to_numeric, errors='coerce').fillna(0.0)
+
+    logger.info("Splitting dataset (stratified)")
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    logger.info("Training RandomForestClassifier (n_estimators=200, class_weight=balanced_subsample)")
+    rf_model = RandomForestClassifier(
+        n_estimators=200,
+        class_weight='balanced_subsample',
+        max_features='sqrt',
+        random_state=42,
+        n_jobs=-1
+    )
+    rf_model.fit(X_train, y_train)
+
+    model_dir = os.path.dirname(model_save_path)
+    if model_dir:
+        os.makedirs(model_dir, exist_ok=True)
+    joblib.dump(rf_model, model_save_path)
+    logger.info(f"Model saved to: {model_save_path}")
+
+    return model_save_path
+
 def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_test: pd.Series, 
                        rule_list: list, model_save_path: str) -> Dict:
     """

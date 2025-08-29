@@ -1,18 +1,20 @@
 """
 Model predictor wrapper for detection mode.
 
-Loads the trained model from disk and exposes a simple
-predict(X) API that returns (label, probability) tuples.
+This module loads a trained Random Forest model (.joblib) and provides:
+- predict(X): returns a list of (predicted_label, probability_of_positive_class)
+- predict_proba(X): returns an array of positive-class probabilities
+
+Notes:
+- Positive class is assumed to be label 1; if the model exposes classes_, the
+  index of class 1 is used when extracting probabilities.
+- Input X can be a NumPy array, Pandas DataFrame/Series, or (X, y) tuple.
 """
 
-from __future__ import annotations
-
-from typing import Any, List, Tuple, Union, TYPE_CHECKING, cast
+from typing import Any, List, Tuple
 
 import joblib
 import numpy as np
-# Make numpy module typed as Any to avoid Pylance attribute warnings without stubs
-np = cast(Any, np)
 
 # Optional pandas import for DataFrame/Series detection without a hard dependency
 try:  # pragma: no cover - optional import
@@ -20,35 +22,52 @@ try:  # pragma: no cover - optional import
 except Exception:  # pragma: no cover
     pd = None  # type: ignore
 
-# Typing-only imports to avoid hard dependencies
-if TYPE_CHECKING:
-    # NumPy typing
-    try:
-        from numpy.typing import NDArray  # type: ignore[reportMissingImports]
-    except Exception:
-        from typing import Any as NDArray  # Fallback for analysis envs
-    # Pandas types
-    try:
-        import pandas as _pd  # type: ignore[reportMissingImports]
-    except Exception:
-        pass
+# No hard typing on numpy/pandas to keep 3.6 compatibility and avoid Pylance noise
 
 
 class Predictor:
     def __init__(self, model_path: str) -> None:
+        """Initialize predictor by loading a trained model from disk."""
         self.model_path = model_path
-        self.model = joblib.load(model_path)
+        try:
+            self.model = joblib.load(model_path)
+        except Exception as e:
+            # Helpful hint for common scikit-learn/joblib incompatibility issues
+            raise RuntimeError(
+                "Failed to load model. This can happen if the runtime scikit-learn "
+                "version differs from the one used during training. Ensure sklearn==0.24.2 "
+                "and joblib==1.0.1 (as pinned in requirements.txt). Original error: {}".format(e)
+            )
 
-    def predict(self, X: Union["_pd.DataFrame", "_pd.Series", "NDArray[Any]", Any]) -> List[Tuple[int, float]]:
-        """
-        Return list of (predicted_label, probability_of_positive_class).
+        # Determine positive class index if available
+        self._pos_index = 1
+        try:
+            classes = getattr(self.model, "classes_", None)
+            if classes is not None:
+                # Find index of label 1 if present
+                for i, c in enumerate(classes):
+                    try:
+                        if int(c) == 1:
+                            self._pos_index = i
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            # Fall back to default index 1
+            self._pos_index = 1
+
+    def predict(self, X: Any) -> List[Tuple[int, float]]:
+        """Return list of (predicted_label, probability_of_positive_class).
+
         Falls back to 0.5 probabilities if the model lacks predict_proba.
+        Keeps backward compatibility with UnifiedPipeline.detect which expects
+        a sequence of (label, probability) tuples.
         """
         # Accept (X, y) tuples from generators by extracting X
         if isinstance(X, tuple) and len(X) >= 1:
             X = X[0]
 
-        # Convert inputs to a NumPy array robustly
+        # Convert inputs to a NumPy float array robustly
         X_arr = self._to_numpy(X)
 
         # Handle empty inputs early
@@ -59,26 +78,63 @@ class Predictor:
         if X_arr.ndim == 1:
             X_arr = X_arr.reshape(1, -1)
 
+        # Feature count sanity check when available
+        try:
+            n_expected = getattr(self.model, "n_features_in_", None)
+            if n_expected is not None and X_arr.shape[1] != int(n_expected):
+                raise ValueError(
+                    "Feature dimension mismatch: expected {} features, got {}".format(
+                        int(n_expected), int(X_arr.shape[1])
+                    )
+                )
+        except Exception:
+            # If attribute isn't present or conversion fails, continue best-effort
+            pass
+
         y_pred = self.model.predict(X_arr)
 
+        # Get positive-class probabilities if available
         if hasattr(self.model, "predict_proba"):
             proba = self.model.predict_proba(X_arr)
-            # Ensure numpy array for consistent handling
             proba = np.array(proba, copy=False)
-            # Assume binary classification; take probability of class 1 if available
-            if proba.ndim == 2 and proba.shape[1] >= 2:
-                p1 = proba[:, 1]
+            if proba.ndim == 2 and proba.shape[1] > self._pos_index:
+                p1 = proba[:, self._pos_index]
+            elif proba.ndim == 1:
+                p1 = proba
             else:
-                # Single-column output; use provided values directly
-                p1 = proba.ravel()
+                p1 = np.full(shape=(len(y_pred),), fill_value=0.5, dtype=float)
         else:
-            # Fallback: neutral probability
             p1 = np.full(shape=(len(y_pred),), fill_value=0.5, dtype=float)
 
         return [(int(label), float(prob)) for label, prob in zip(y_pred, p1)]
 
+    def predict_proba(self, X: Any) -> np.ndarray:
+        """Return positive-class probabilities for each row in X.
+
+        If the underlying model does not support predict_proba, returns a
+        vector filled with 0.5.
+        """
+        # Accept (X, y) tuples from generators by extracting X
+        if isinstance(X, tuple) and len(X) >= 1:
+            X = X[0]
+
+        X_arr = self._to_numpy(X)
+        if X_arr.size == 0:
+            return np.array([], dtype=float)
+        if X_arr.ndim == 1:
+            X_arr = X_arr.reshape(1, -1)
+
+        if hasattr(self.model, "predict_proba"):
+            proba = self.model.predict_proba(X_arr)
+            proba = np.array(proba, copy=False)
+            if proba.ndim == 2 and proba.shape[1] > self._pos_index:
+                return proba[:, self._pos_index]
+            if proba.ndim == 1:
+                return proba
+        return np.full(shape=(X_arr.shape[0],), fill_value=0.5, dtype=float)
+
     @staticmethod
-    def _to_numpy(X: Any) -> "NDArray[Any]":
+    def _to_numpy(X: Any) -> np.ndarray:
         """Best-effort conversion to numpy array.
         - Uses pandas .to_numpy() if X is a DataFrame/Series.
         - Returns as-is if already an ndarray.
@@ -91,15 +147,23 @@ class Predictor:
         # Use pandas-aware conversion when available
         if pd is not None:
             try:
-                if isinstance(X, (pd.DataFrame, pd.Series)):
-                    return X.to_numpy()
+                if isinstance(X, pd.DataFrame):
+                    # Force float dtype to avoid object arrays
+                    return X.to_numpy(dtype=float)
+                if isinstance(X, pd.Series):
+                    return X.to_numpy(dtype=float)
             except Exception:
                 pass
 
         if isinstance(X, np.ndarray):
-            return X
+            # Best-effort ensure float dtype without relying on ndarray.astype typing
+            try:
+                return np.array(X, dtype=float, copy=False)
+            except Exception:
+                return np.array(X)
 
         try:
-            return np.array(X, copy=False)
+            # Best-effort float conversion
+            return np.array(X, dtype=float, copy=False)
         except Exception:
-            return np.array(list(X), copy=False)
+            return np.array(list(X), dtype=float)

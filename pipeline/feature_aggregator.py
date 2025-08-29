@@ -105,7 +105,8 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
             'total_events': float(total_events),
             'unique_rules': int(unique_rules),
             'window_start': window_start,
-            'window_end': window_end
+            'window_end': window_end,
+            'source_label': source_label
         }
         
         # Add label column for training mode
@@ -116,6 +117,10 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
     
     # Create DataFrame from aggregated data
     result_df = pd.DataFrame(aggregated_data)
+
+    # Backward/forward compatibility: also expose 'aggregated_rules_dict'
+    if not result_df.empty and 'aggregated_rules' in result_df.columns:
+        result_df['aggregated_rules_dict'] = result_df['aggregated_rules']
     
     if not result_df.empty:
         logger.info(f"Created {len(result_df)} aggregated windows")

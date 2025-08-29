@@ -106,8 +106,9 @@ class FeatureGenerator:
         
         # Map aggregated rule counts to feature vectors
         for idx, row in df_agg.iterrows():
-            if 'aggregated_rules_dict' in df_agg.columns:
-                rule_counts = row['aggregated_rules_dict']
+            # Support both 'aggregated_rules' and legacy 'aggregated_rules_dict'
+            if 'aggregated_rules' in df_agg.columns or 'aggregated_rules_dict' in df_agg.columns:
+                rule_counts = row['aggregated_rules'] if 'aggregated_rules' in df_agg.columns else row['aggregated_rules_dict']
                 if isinstance(rule_counts, dict):
                     for rule_id, count in rule_counts.items():
                         rule_id_int = int(str(rule_id))

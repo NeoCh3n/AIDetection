@@ -1,11 +1,19 @@
 PY=python3
+VENV=venv
+PIP=$(VENV)/bin/pip
+PYBIN=$(VENV)/bin/python
 
-.PHONY: install test
+.PHONY: venv install test
+
+venv:
+	$(PY) -m venv $(VENV)
+	$(PIP) install -U pip
+	$(PIP) install -r requirements.txt
 
 install:
-	$(PY) -m pip install -r requirements.txt
+	$(MAKE) venv
 
 test:
-	$(PY) tests/test_feature_aggregator.py || true
-	$(PY) tests/test_data_loader_detailed.py || true
-	$(PY) tests/test_pipeline_simple.py || true
+	$(PYBIN) tests/test_feature_aggregator.py || true
+	$(PYBIN) tests/test_data_loader_detailed.py || true
+	$(PYBIN) tests/test_pipeline_simple.py || true
