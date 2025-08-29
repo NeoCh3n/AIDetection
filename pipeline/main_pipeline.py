@@ -291,9 +291,9 @@ class UnifiedPipeline:
 
             # Use context if available; else no-op context
             class _NoopCtx:
-                def __enter__(self_inner):
+                def __enter__(self):
                     return None
-                def __exit__(self_inner, exc_type, exc, tb):
+                def __exit__(self, exc_type, exc, tb):
                     return False
 
             with (ctx_manager or _NoopCtx()) as manager:
