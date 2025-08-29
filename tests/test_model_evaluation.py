@@ -12,10 +12,10 @@ import logging
 from datetime import datetime
 
 # Add paths for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'model_training'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared_utils'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'system'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'pipeline'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'model_training'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'system'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'pipeline'))
 
 from model_evaluation import evaluate_model
 from qradar_rule_manager import QRadarRuleManager
@@ -34,7 +34,7 @@ def test_model_evaluation():
     
     try:
         # Define paths
-        model_path = os.path.join(os.path.dirname(__file__), 'model', 'test_model_skl0242_20250828_142238.joblib')
+        model_path = os.path.join(os.path.dirname(__file__), '..', 'model', 'test_model_skl0242_20250828_142238.joblib')
         
         # Check if model exists
         if not os.path.exists(model_path):
