@@ -282,17 +282,33 @@ class UnifiedPipeline:
             # Process results
             results = []
             for idx, (pred, prob) in enumerate(predictions):
-                if prob > self.config['detection']['alert_threshold']:
-                    result = {
-                        'timestamp': datetime.now().isoformat(),
-                        'hostname': df_agg.iloc[idx]['hostname'],
-                        'window_id': df_agg.iloc[idx]['window_id'],
-                        'prediction': int(pred),
-                        'probability': float(prob),
-                        'alert': prob > self.config['detection']['alert_threshold']
-                    }
-                    results.append(result)
-                    self.logger.warning(f"ALERT: Ransomware detected on {result['hostname']} (probability: {prob:.2f})")
+                is_alert = prob > self.config['detection']['alert_threshold']
+                result = {
+                    'timestamp': datetime.now().isoformat(),
+                    'hostname': df_agg.iloc[idx]['hostname'],
+                    'window_id': df_agg.iloc[idx]['window_id'],
+                    'prediction': int(pred),
+                    'probability': float(prob),
+                    'alert': bool(is_alert)
+                }
+                results.append(result)
+
+                # Unified detection logging
+                try:
+                    label_str = 'malicious' if int(pred) == 1 else 'normal'
+                    logging_utils.log_detection(
+                        hostname=result['hostname'],
+                        window_id=result['window_id'],
+                        prediction=label_str,
+                        confidence=result['probability']
+                    )
+                except Exception:
+                    pass
+
+                if is_alert:
+                    self.logger.warning(
+                        f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
+                    )
             
             self.logger.info(f"Detection completed. {len(results)} alerts generated")
             return results

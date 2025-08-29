@@ -244,25 +244,47 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
             # Transform windows to unified format
             rows = []
             for window in windows:
-                hostname = window.get('hostname', 'unknown')
                 window_start = window.get('window_start')
-                
-                # Handle both rule_counts and features formats
+
+                # Prefer host-level breakdown when available (AQL inserter schema)
+                host_triggers = window.get('host_triggers') or {}
+                if isinstance(host_triggers, dict) and host_triggers:
+                    for host, payload in host_triggers.items():
+                        rules = (payload or {}).get('rules') or {}
+                        for rule_id, count in (rules.items() if isinstance(rules, dict) else []):
+                            try:
+                                if count is not None and int(count) > 0:
+                                    rows.append({
+                                        'hostname': str(host),
+                                        'rule_id': int(rule_id),
+                                        'timestamp': window_start,
+                                        'count': int(count),
+                                        'source_label': 'detection'
+                                    })
+                            except Exception:
+                                continue
+                    continue  # handled this window fully
+
+                # Handle alternate unified shapes: rule_counts/features
+                hostname = window.get('hostname', 'global')
                 rule_counts = window.get('rule_counts', {})
                 if not rule_counts:
-                    features = window.get('features', {})
-                    rule_counts = features
-                
-                # Flatten rule counts into individual rows
-                for rule_id, count in rule_counts.items():
-                    if count is not None and int(count) > 0:  # Only include positive counts
-                        rows.append({
-                            'hostname': str(hostname),
-                            'rule_id': int(rule_id),
-                            'timestamp': window_start,
-                            'count': int(count),
-                            'source_label': 'detection'
-                        })
+                    rule_counts = window.get('features', {})
+                if not rule_counts:
+                    rule_counts = window.get('feature_vector', {})  # AQL inserter total vector
+
+                for rule_id, count in (rule_counts.items() if isinstance(rule_counts, dict) else []):
+                    try:
+                        if count is not None and int(count) > 0:  # Only include positive counts
+                            rows.append({
+                                'hostname': str(hostname),
+                                'rule_id': int(rule_id),
+                                'timestamp': window_start,
+                                'count': int(count),
+                                'source_label': 'detection'
+                            })
+                    except Exception:
+                        continue
             
             # Create DataFrame
             if not rows:
@@ -270,7 +292,14 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
                 return pd.DataFrame(columns=['hostname', 'rule_id', 'timestamp', 'count', 'source_label'])
             
             df = pd.DataFrame(rows)
-            
+
+            # Ensure timestamp is proper datetime dtype
+            if not df.empty:
+                try:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                except Exception:
+                    pass
+
             # Ensure correct data types
             df['rule_id'] = pd.to_numeric(df['rule_id'], errors='coerce')
             df['count'] = pd.to_numeric(df['count'], errors='coerce')

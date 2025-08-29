@@ -1,9 +1,15 @@
 """
-Unified MongoDB Connection Utility for Threat Detection Pipeline
+MongoDB Connection Utility (AQL Detection Only)
 
-This module provides centralized MongoDB management for the unified data processing pipeline.
-It supports both training and detection modes with consistent data structures and 
-time handling using shared utilities.
+This manager is specialized for the detection pipeline that ingests QRadar
+AQL search results (see AQLjsonResult.json) and stores 30-minute sliding
+windows into MongoDB. It focuses on three collections defined in
+mongodb/mongodb_config.json:
+
+- aql_events: optional raw AQL event rows (hostname, rule_id, timestamp, count)
+- detection_windows (qradar_sliding_windows): aggregated windows with
+  feature_vector and host_triggers
+- detection_results: model predictions per window (and optional host)
 
 Python 3.6.8 Compatible
 """
@@ -27,10 +33,15 @@ from system import logging_utils
 
 class MongoDBConnectionManager:
     """
-    Unified MongoDB connection manager for threat detection pipeline.
+    MongoDB connection manager for AQL detection-only pipeline.
     
-    Provides centralized database operations with consistent data structures
-    across both training and detection modes as per the unified pipeline architecture.
+    Provides minimal operations required by the detection path and data loader:
+    - connect() / close()
+    - create_indexes() for detection collections
+    - get_unlabeled_windows(start, end) for fetching AQL windows
+    - insert_prediction(data) for saving detection outcomes
+    - insert_event(event) supported against aql_events for simple tests
+    - get_data_summary() for basic health checks
     """
     
     def __init__(self, config_path: Optional[str] = None):
@@ -47,11 +58,13 @@ class MongoDBConnectionManager:
         self.client = None
         self.db = None
         
-        # Initialize collections from config
-        collection_config = self.config['collections']
-        self.events_collection_name = collection_config.get('events', 'events')
-        self.windows_collection_name = collection_config.get('windows', 'windows')
-        self.predictions_collection_name = collection_config.get('predictions', 'predictions')
+        # Initialize detection-only collections from config
+        # Single canonical key set: aql_events, detection_windows, detection_results
+        collection_config = self.config.get('collections', {})
+        self.events_collection_name = collection_config.get('aql_events', 'aql_events')
+        self.windows_collection_name = collection_config.get('detection_windows', 'qradar_sliding_windows')
+        self.predictions_collection_name = collection_config.get('detection_results', 'detection_results')
+        # Kept for completeness; not used in AQL-only flow
         self.rule_mappings_collection_name = collection_config.get('rule_mappings', 'rule_mappings')
         
         # Collection references
@@ -115,30 +128,27 @@ class MongoDBConnectionManager:
                 logging_utils.run_log("ERROR", "Cannot create indexes: MongoDB not connected")
                 return False
 
-            # Events collection indexes (raw QRadar events)
+            # aql_events collection indexes (optional raw events)
             events_indexes = [
-                ([('timestamp', -1)], "event_timestamp_idx"),
-                ([('rule_id', 1)], "rule_id_idx"),
-                ([('hostname', 1)], "hostname_idx"),
-                ([('timestamp', 1), ('rule_id', 1)], "timestamp_rule_idx"),
-                ([('window_id', 1)], "window_id_idx")
+                ([('timestamp', -1)], "aql_event_ts_idx"),
+                ([('rule_id', 1)], "aql_rule_idx"),
+                ([('hostname', 1)], "aql_host_idx"),
+                ([('window_id', 1)], "aql_window_idx")
             ]
-            
-            # Windows collection indexes (aggregated features)
+
+            # detection_windows collection indexes (aggregated windows)
             windows_indexes = [
-                ([('window_start', -1), ('window_end', -1)], "window_time_idx"),
-                ([('hostname', 1)], "hostname_idx"),
-                ([('window_id', 1)], "window_id_unique_idx"),
-                ([('window_start', 1), ('hostname', 1)], "window_host_idx"),
-                ([('label', 1)], "label_idx")
+                ([('window_start', -1), ('window_end', -1)], "det_window_time_idx"),
+                ([('window_id', 1)], "det_window_id_idx"),
+                ([('query_time', -1)], "det_query_time_idx"),
+                ([('total_triggers', -1)], "det_total_triggers_idx")
             ]
-            
-            # Predictions collection indexes
+
+            # detection_results collection indexes (predictions)
             predictions_indexes = [
-                ([('window_id', 1)], "prediction_window_idx"),
-                ([('hostname', 1)], "prediction_hostname_idx"),
-                ([('prediction_time', -1)], "prediction_time_idx"),
-                ([('predicted_label', 1)], "predicted_label_idx")
+                ([('window_id', 1)], "det_result_window_idx"),
+                ([('prediction_time', -1)], "det_result_time_idx"),
+                ([('predicted_label', 1)], "det_result_label_idx")
             ]
             
             # Create indexes only if collections exist
@@ -152,15 +162,13 @@ class MongoDBConnectionManager:
             if self.windows_collection:
                 for index_spec, index_name in windows_indexes:
                     try:
-                        self.windows_collection.create_index(index_spec, name=index_name)
+                        # Unique on window_id provides idempotent upserts
+                        if index_name == "det_window_id_idx":
+                            self.windows_collection.create_index(index_spec, name=index_name, unique=True)
+                        else:
+                            self.windows_collection.create_index(index_spec, name=index_name)
                     except Exception as e:
                         logging_utils.run_log("WARNING", f"Failed to create windows index {index_name}: {e}")
-                
-                try:
-                    # Create unique index on window_id for windows collection
-                    self.windows_collection.create_index([('window_id', 1)], unique=True)
-                except Exception as e:
-                    logging_utils.run_log("WARNING", f"Failed to create unique window_id index: {e}")
             
             if self.predictions_collection:
                 for index_spec, index_name in predictions_indexes:
@@ -169,7 +177,7 @@ class MongoDBConnectionManager:
                     except Exception as e:
                         logging_utils.run_log("WARNING", f"Failed to create predictions index {index_name}: {e}")
             
-            logging_utils.run_log("INFO", "MongoDB indexes created successfully for unified pipeline")
+            logging_utils.run_log("INFO", "MongoDB indexes created successfully for AQL detection")
             return True
             
         except Exception as e:
@@ -178,7 +186,7 @@ class MongoDBConnectionManager:
     
     def insert_event(self, event_data: Dict[str, Any]) -> bool:
         """
-        Insert a single raw QRadar event with unified schema.
+        Insert a single raw AQL event into aql_events (optional helper).
         
         Args:
             event_data: Event data with ['hostname', 'rule_id', 'timestamp', 'count']
@@ -192,7 +200,7 @@ class MongoDBConnectionManager:
                 return False
             
             if not self.events_collection:
-                logging_utils.run_log("ERROR", "Events collection not initialized")
+                logging_utils.run_log("ERROR", "aql_events collection not initialized")
                 return False
             
             # Ensure proper timestamp parsing using time_utils
@@ -304,10 +312,11 @@ class MongoDBConnectionManager:
     
     def insert_window(self, window_data: Dict[str, Any]) -> bool:
         """
-        Insert an aggregated window with unified schema.
+        Insert an aggregated AQL detection window into detection_windows.
         
         Args:
-            window_data: Window data with features and optional label
+            window_data: Window data with keys like window_start/window_end,
+                         feature_vector, host_triggers, total_triggers, etc.
             
         Returns:
             True if insertion successful, False otherwise
@@ -318,32 +327,39 @@ class MongoDBConnectionManager:
                 return False
             
             if not self.windows_collection:
-                logging_utils.run_log("ERROR", "Windows collection not initialized")
+                logging_utils.run_log("ERROR", "detection_windows collection not initialized")
                 return False
             
-            # Ensure window boundaries using time_utils
-            if 'timestamp' in window_data:
-                event_time = parse_qradar_timestamp(window_data['timestamp'])
-                window_start, window_end = get_window_start_end(event_time)
-                window_data['window_start'] = window_start
-                window_data['window_end'] = window_end
-                window_data['window_id'] = get_window_id(event_time)
-            
+            # Compute window_id if window_start provided
+            if 'window_id' not in window_data:
+                if 'window_start' in window_data:
+                    try:
+                        window_data['window_id'] = window_data['window_start'].strftime("%Y-%m-%d_%H-%M-%S")
+                    except Exception:
+                        pass
+                elif 'timestamp' in window_data:
+                    # Backward compat: build from a single timestamp
+                    event_time = parse_qradar_timestamp(window_data['timestamp'])
+                    ws, we = get_window_start_end(event_time)
+                    window_data['window_start'] = ws
+                    window_data['window_end'] = we
+                    window_data['window_id'] = get_window_id(event_time)
+
             # Ensure required fields
-            required_fields = ['window_id', 'window_start', 'window_end', 'hostname']
+            required_fields = ['window_id', 'window_start', 'window_end']
             for field in required_fields:
                 if field not in window_data:
                     logging_utils.run_log("ERROR", f"Missing required field: {field}")
                     return False
-            
-            # Ensure features dict exists
-            if 'features' not in window_data:
-                window_data['features'] = {}
+
+            # Normalize feature keys
+            if 'feature_vector' not in window_data and 'features' in window_data:
+                window_data['feature_vector'] = window_data.get('features', {})
             
             # Insert with upsert
             self.windows_collection.replace_one(
-                {'window_id': window_data['window_id'], 'hostname': window_data['hostname']},
-                window_data,
+                {'_id': window_data.get('_id', window_data['window_id'])},
+                {'_id': window_data.get('_id', window_data['window_id']), **window_data},
                 upsert=True
             )
             
@@ -450,7 +466,7 @@ class MongoDBConnectionManager:
     
     def get_windows_for_training(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         """
-        Retrieve windows with labels for training mode.
+        Retrieve windows with labels (not used in AQL-only mode).
         
         Args:
             start_time: Start of time range
@@ -483,7 +499,7 @@ class MongoDBConnectionManager:
     
     def get_unlabeled_windows(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         """
-        Retrieve windows without labels for detection mode.
+        Retrieve AQL detection windows without labels (standard case).
         
         Args:
             start_time: Start of time range
@@ -516,10 +532,11 @@ class MongoDBConnectionManager:
     
     def insert_prediction(self, prediction_data: Dict[str, Any]) -> bool:
         """
-        Insert a prediction result for detection mode.
+        Insert a prediction result into detection_results.
         
         Args:
-            prediction_data: Prediction with window_id, hostname, predicted_label, confidence
+            prediction_data: Prediction with at least window_id, predicted_label, confidence;
+                             hostname optional in AQL-only mode
             
         Returns:
             True if insertion successful, False otherwise
@@ -530,11 +547,11 @@ class MongoDBConnectionManager:
                 return False
             
             if not self.predictions_collection:
-                logging_utils.run_log("ERROR", "Predictions collection not initialized")
+                logging_utils.run_log("ERROR", "detection_results collection not initialized")
                 return False
             
             # Ensure required fields
-            required_fields = ['window_id', 'hostname', 'predicted_label', 'confidence']
+            required_fields = ['window_id', 'predicted_label', 'confidence']
             for field in required_fields:
                 if field not in prediction_data:
                     logging_utils.run_log("ERROR", f"Missing required field: {field}")
@@ -545,7 +562,7 @@ class MongoDBConnectionManager:
             
             # Insert with upsert
             self.predictions_collection.replace_one(
-                {'window_id': prediction_data['window_id'], 'hostname': prediction_data['hostname']},
+                {'window_id': prediction_data['window_id']},
                 prediction_data,
                 upsert=True
             )
