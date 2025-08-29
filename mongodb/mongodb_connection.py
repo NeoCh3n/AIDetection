@@ -147,6 +147,7 @@ class MongoDBConnectionManager:
             # detection_results collection indexes (predictions)
             predictions_indexes = [
                 ([('window_id', 1)], "det_result_window_idx"),
+                ([('hostname', 1)], "det_result_hostname_idx"),
                 ([('prediction_time', -1)], "det_result_time_idx"),
                 ([('predicted_label', 1)], "det_result_label_idx")
             ]
@@ -560,9 +561,12 @@ class MongoDBConnectionManager:
             # Add prediction timestamp
             prediction_data['prediction_time'] = datetime.now()
             
-            # Insert with upsert
+            # Insert with upsert; use hostname in key when provided
+            filter_key = {'window_id': prediction_data['window_id']}
+            if 'hostname' in prediction_data:
+                filter_key['hostname'] = prediction_data['hostname']
             self.predictions_collection.replace_one(
-                {'window_id': prediction_data['window_id']},
+                filter_key,
                 prediction_data,
                 upsert=True
             )

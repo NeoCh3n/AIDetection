@@ -279,36 +279,64 @@ class UnifiedPipeline:
             predictor = ModelPredictor(self.config['training']['model_path'])
             predictions = predictor.predict(X)
             
-            # Process results
+            # Process results; persist alerts to MongoDB
             results = []
-            for idx, (pred, prob) in enumerate(predictions):
-                is_alert = prob > self.config['detection']['alert_threshold']
-                result = {
-                    'timestamp': datetime.now().isoformat(),
-                    'hostname': df_agg.iloc[idx]['hostname'],
-                    'window_id': df_agg.iloc[idx]['window_id'],
-                    'prediction': int(pred),
-                    'probability': float(prob),
-                    'alert': bool(is_alert)
-                }
-                results.append(result)
+            try:
+                from mongodb.mongodb_connection import get_mongodb_manager
+            except Exception:
+                get_mongodb_manager = None  # type: ignore
 
-                # Unified detection logging
-                try:
-                    label_str = 'malicious' if int(pred) == 1 else 'normal'
-                    logging_utils.log_detection(
-                        hostname=result['hostname'],
-                        window_id=result['window_id'],
-                        prediction=label_str,
-                        confidence=result['probability']
-                    )
-                except Exception:
-                    pass
+            mongo_ctx = get_mongodb_manager() if get_mongodb_manager else None
+            ctx_manager = mongo_ctx if mongo_ctx else None
 
-                if is_alert:
-                    self.logger.warning(
-                        f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
-                    )
+            # Use context if available; else no-op context
+            class _NoopCtx:
+                def __enter__(self_inner):
+                    return None
+                def __exit__(self_inner, exc_type, exc, tb):
+                    return False
+
+            with (ctx_manager or _NoopCtx()) as manager:
+                for idx, (pred, prob) in enumerate(predictions):
+                    is_alert = prob > self.config['detection']['alert_threshold']
+                    result = {
+                        'timestamp': datetime.now().isoformat(),
+                        'hostname': df_agg.iloc[idx]['hostname'],
+                        'window_id': df_agg.iloc[idx]['window_id'],
+                        'prediction': int(pred),
+                        'probability': float(prob),
+                        'alert': bool(is_alert)
+                    }
+                    results.append(result)
+
+                    # Unified detection logging
+                    try:
+                        label_str = 'malicious' if int(pred) == 1 else 'normal'
+                        logging_utils.log_detection(
+                            hostname=result['hostname'],
+                            window_id=result['window_id'],
+                            prediction=label_str,
+                            confidence=result['probability']
+                        )
+                    except Exception:
+                        pass
+
+                    # Persist alerts to detection_results
+                    if is_alert and manager:
+                        try:
+                            manager.insert_prediction({
+                                'window_id': result['window_id'],
+                                'hostname': result['hostname'],
+                                'predicted_label': int(pred),
+                                'confidence': float(prob)
+                            })
+                        except Exception:
+                            pass
+
+                    if is_alert:
+                        self.logger.warning(
+                            f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
+                        )
             
             self.logger.info(f"Detection completed. {len(results)} alerts generated")
             return results
