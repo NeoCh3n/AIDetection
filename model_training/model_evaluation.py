@@ -1,3 +1,21 @@
+"""
+Simple usage
+------------
+- Evaluate with default training split as test:
+    python model_training/model_evaluation.py --model ./model/threat_detector.joblib
+
+- Evaluate with explicit test data (directory containing normal/ and attack/):
+    python model_training/model_evaluation.py --model ./model/threat_detector.joblib \
+        --test-data ./Training_data
+
+Options:
+- --log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
+
+Notes:
+- Uses the unified pipeline: data_loader -> feature_aggregator -> feature_generator.
+- Writes a summary line to running_log/<today>.log via logging_utils.
+"""
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -113,25 +131,25 @@ class MetricsCalculator:
         
         # Check if model is predicting only one class
         if len(np.unique(y_pred)) == 1:
-            self.logger.warning(f"⚠️  MODEL IS PREDICTING ONLY ONE CLASS: {np.unique(y_pred)[0]}")
+            self.logger.warning(f"WARNING: MODEL IS PREDICTING ONLY ONE CLASS: {np.unique(y_pred)[0]}")
             self.logger.warning("This suggests the model may be poorly trained or there's a data issue")
             
             # Additional diagnostics
             if np.unique(y_pred)[0] == 0:
-                self.logger.warning("🔍 DIAGNOSIS: Model only predicts 'Normal' (0) - possible causes:")
+                self.logger.warning("DIAGNOSIS: Model only predicts 'Normal' (0) - possible causes:")
                 self.logger.warning("   1. Model wasn't trained on enough attack samples")
                 self.logger.warning("   2. Feature preprocessing differs between training/testing")
                 self.logger.warning("   3. Model learned to always predict majority class")
                 self.logger.warning("   4. Feature values are out of expected range")
             else:
-                self.logger.warning("🔍 DIAGNOSIS: Model only predicts 'Attack' (1) - possible causes:")
+                self.logger.warning("DIAGNOSIS: Model only predicts 'Attack' (1) - possible causes:")
                 self.logger.warning("   1. Model is overly sensitive/poorly calibrated")
                 self.logger.warning("   2. Feature preprocessing issue")
                 
             # Check if we actually have both classes in true labels
             unique_true = np.unique(y_true)
             if len(unique_true) == 1:
-                self.logger.warning(f"⚠️  TEST DATA ONLY HAS ONE CLASS: {unique_true[0]}")
+                self.logger.warning(f"WARNING: TEST DATA ONLY HAS ONE CLASS: {unique_true[0]}")
                 self.logger.warning("Cannot properly evaluate model with single-class test data!")
             else:
                 self.logger.info(f"✓ Test data has both classes: {unique_true}")
@@ -143,15 +161,15 @@ class MetricsCalculator:
                 attack_pct = (attack_count / total) * 100
                 normal_pct = (normal_count / total) * 100
                 
-                self.logger.info(f"📊 Test data distribution:")
+                self.logger.info(f"Test data distribution:")
                 self.logger.info(f"   Normal: {normal_count} samples ({normal_pct:.1f}%)")
                 self.logger.info(f"   Attack: {attack_count} samples ({attack_pct:.1f}%)")
     
     def _prepare_data(self, y_true, y_pred):
         """Prepare data for metric calculation"""
         # Convert to numpy arrays first
-        y_true = np.asarray(y_true)
-        y_pred = np.asarray(y_pred)
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
         
         # Check shapes
         if y_true.shape != y_pred.shape:
@@ -163,32 +181,35 @@ class MetricsCalculator:
             self.logger.info(f"Converting data types: y_true {y_true.dtype} -> y_pred {y_pred.dtype}")
             
             # Try to find common type
-            if np.issubdtype(y_true.dtype, np.floating) or np.issubdtype(y_pred.dtype, np.floating):
-                # If either is float, convert both to float then to int
-                y_true = np.asarray(y_true, dtype=float)
-                y_pred = np.asarray(y_pred, dtype=float)
+            # If either array is floating, convert to float then to int
+            # Use dtype.kind == 'f' to avoid static checker issues with np.floating
+            if (getattr(y_true, 'dtype', None) is not None and y_true.dtype.kind == 'f') or \
+               (getattr(y_pred, 'dtype', None) is not None and y_pred.dtype.kind == 'f'):
+                y_true = np.array(y_true, dtype=float)
+                y_pred = np.array(y_pred, dtype=float)
                 
-                # Check for NaN values
-                if np.isnan(y_true).any() or np.isnan(y_pred).any():
+                # Check for NaN values using pandas for broader dtype support
+                import pandas as pd  # local import to avoid circulars in some environments
+                if pd.isna(y_true).any() or pd.isna(y_pred).any():
                     self.logger.error("NaN values detected in labels or predictions")
                     raise ValueError("NaN values found in data")
                 
                 # Convert to int
-                y_true = np.asarray(y_true, dtype=int)
-                y_pred = np.asarray(y_pred, dtype=int)
+                y_true = np.array(y_true, dtype=int)
+                y_pred = np.array(y_pred, dtype=int)
             else:
                 # Both are integers or can be converted to int
                 try:
-                    y_true = np.asarray(y_true, dtype=int)
-                    y_pred = np.asarray(y_pred, dtype=int)
+                    y_true = np.array(y_true, dtype=int)
+                    y_pred = np.array(y_pred, dtype=int)
                 except (ValueError, OverflowError) as e:
                     self.logger.error(f"Cannot convert to int: {e}")
                     raise ValueError(f"Data type conversion failed: {e}")
         else:
             # Same data type, but ensure it's int
             try:
-                y_true = np.asarray(y_true, dtype=int)
-                y_pred = np.asarray(y_pred, dtype=int)
+                y_true = np.array(y_true, dtype=int)
+                y_pred = np.array(y_pred, dtype=int)
             except (ValueError, OverflowError) as e:
                 self.logger.error(f"Cannot convert to int: {e}")
                 raise ValueError(f"Data type conversion failed: {e}")
@@ -343,20 +364,66 @@ class ModelEvaluator:
             return model
         except Exception as load_error:
             self.logger.error(f"Failed to load model: {str(load_error)}")
-            self.logger.error("This might be due to scikit-learn version incompatibility.")
-            self.logger.error("Try upgrading scikit-learn: pip install scikit-learn>=1.0.0")
+            self.logger.error("This might be due to scikit-learn version incompatibility with your environment.")
+            self.logger.error("Ensure the model is loaded with the same scikit-learn version used for training (e.g., 0.24.2 on Python 3.6.8).")
             raise ValueError(f"Model loading failed - version incompatibility: {str(load_error)}")
     
     def _prepare_test_data(self, test_data_path=None):
-        """Prepare test data for evaluation"""
+        """Prepare test data for evaluation.
+
+        If test_data_path is provided, expects a directory containing
+        'normal' and 'attack' subdirectories (like Training_data).
+        Otherwise, uses the default './Training_data' path.
+        """
         # Load data
         if test_data_path:
             self.logger.info(f"Loading test data from: {test_data_path}")
-            config = {'data_path': os.path.dirname(test_data_path)}
-            df = load_data('test', config)
+            base = os.path.abspath(test_data_path)
+
+            # If a file path is provided, use its directory
+            if os.path.isfile(base):
+                base = os.path.dirname(base)
+
+            # Determine normal and attack directories
+            normal_dir = None
+            attack_dir = None
+
+            # Case 1: base contains 'normal' and/or 'attack' subdirs
+            cand_normal = os.path.join(base, 'normal')
+            cand_attack = os.path.join(base, 'attack')
+            if os.path.isdir(cand_normal):
+                normal_dir = cand_normal
+            if os.path.isdir(cand_attack):
+                attack_dir = cand_attack
+
+            # Case 2: base itself is a 'normal' or 'attack' directory
+            base_name = os.path.basename(base.rstrip(os.sep))
+            parent = os.path.dirname(base)
+            if normal_dir is None and base_name.lower() == 'normal':
+                normal_dir = base
+                sibling_attack = os.path.join(parent, 'attack')
+                if os.path.isdir(sibling_attack):
+                    attack_dir = sibling_attack
+            if attack_dir is None and base_name.lower() == 'attack':
+                attack_dir = base
+                sibling_normal = os.path.join(parent, 'normal')
+                if os.path.isdir(sibling_normal):
+                    normal_dir = sibling_normal
+
+            # Fallback: if one is missing, use base path as both (best-effort)
+            if normal_dir is None or attack_dir is None:
+                self.logger.warning("Could not find both 'normal' and 'attack' directories; using base path for missing one.")
+                normal_dir = normal_dir or base
+                attack_dir = attack_dir or base
+
+            config = {'training_data_path': normal_dir, 'attack_data_path': attack_dir}
+            df = load_data('train', config)
         else:
             self.logger.info("Using training data split for evaluation")
-            config = {'data_path': './Training_data'}
+            config = {
+                'training_data_path': './Training_data/normal',
+                'attack_data_path': './Training_data/attack'
+            }
             df = load_data('train', config)
         
         if df.empty:
@@ -375,25 +442,36 @@ class ModelEvaluator:
         feature_gen.initialize_rules()
         
         if test_data_path:
-            X, y = feature_gen.generate_feature_vectors(df_agg, mode='test')
+            # Use training mode to ensure labels are generated for provided test set
+            X, y = feature_gen.generate_feature_vectors(df_agg, mode='train')
+            if y is None:
+                raise ValueError("Labels could not be generated from provided test data. Ensure data includes source labels.")
         else:
             X, y = feature_gen.generate_feature_vectors(df_agg, mode='train')
-            self.logger.info(f"Before split - Total samples: {len(X)}, Labels shape: {y.shape}")
-            self.logger.info(f"Before split - Label distribution: {np.bincount(y) if len(np.unique(y)) <= 2 else 'Multiple classes'}")
+            self.logger.info(f"Before split - Total samples: {len(X)}")
+            if y is not None:
+                self.logger.info(f"Labels shape: {y.shape}")
+                self.logger.info(f"Before split - Label distribution: {np.bincount(y) if len(np.unique(y)) <= 2 else 'Multiple classes'}")
+            else:
+                self.logger.warning("No labels produced; cannot perform stratified split.")
             
             if len(X) < 10:
-                self.logger.warning(f"⚠️  Very few samples ({len(X)}) for train/test split!")
+                self.logger.warning(f"WARNING: Very few samples ({len(X)}) for train/test split!")
             
             # Split the data
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=y
-            )
-            self.logger.info(f"After split - Test samples: {len(X_test)}, Train samples: {len(X_train)}")
-            self.logger.info(f"Test set label distribution: {np.bincount(y_test) if len(np.unique(y_test)) <= 2 else 'Multiple classes'}")
-            X, y = X_test, y_test
+            if y is not None:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.2, random_state=42, stratify=y
+                )
+                self.logger.info(f"After split - Test samples: {len(X_test)}, Train samples: {len(X_train)}")
+                self.logger.info(f"Test set label distribution: {np.bincount(y_test) if len(np.unique(y_test)) <= 2 else 'Multiple classes'}")
+                X, y = X_test, y_test
+            else:
+                self.logger.warning("Skipping train/test split due to missing labels.")
         
         self.logger.info(f"Test feature matrix shape: {X.shape}")
-        self.logger.info(f"Test labels shape: {y.shape}")
+        if y is not None:
+            self.logger.info(f"Test labels shape: {y.shape}")
         
         return X, y
     
@@ -402,7 +480,7 @@ class ModelEvaluator:
         self.logger.info("Making predictions...")
         
         # Log feature statistics for debugging
-        self.logger.info(f"📊 Feature matrix statistics:")
+        self.logger.info(f"Feature matrix statistics:")
         self.logger.info(f"   Shape: {X.shape}")
         self.logger.info(f"   Min value: {np.min(X):.4f}")
         self.logger.info(f"   Max value: {np.max(X):.4f}")
@@ -410,24 +488,31 @@ class ModelEvaluator:
         self.logger.info(f"   Std: {np.std(X):.4f}")
         
         # Check for unusual feature values
-        if np.any(np.isnan(X)):
-            self.logger.warning("⚠️  NaN values detected in features!")
-        if np.any(np.isinf(X)):
-            self.logger.warning("⚠️  Infinite values detected in features!")
+        import pandas as pd  # local import to satisfy static analyzers
+        if pd.isna(X).any():
+            self.logger.warning("WARNING: NaN values detected in features!")
+        # Detect infinities without relying on np.isinf to satisfy static checkers
+        try:
+            if np.any((X == np.inf) | (X == -np.inf)):
+                self.logger.warning("WARNING: Infinite values detected in features!")
+        except Exception:
+            # Fallback: very large magnitude indicates potential infinities
+            if np.any(np.abs(X) > 1e308):
+                self.logger.warning("WARNING: Extremely large values detected; possible infinities!")
         
         # Check if all features are zeros
         if np.all(X == 0):
-            self.logger.warning("⚠️  All features are zero! This will cause prediction issues.")
+            self.logger.warning("WARNING: All features are zero! This will cause prediction issues.")
         elif np.sum(X == 0) > (0.9 * X.size):
             zero_pct = (np.sum(X == 0) / X.size) * 100
-            self.logger.warning(f"⚠️  {zero_pct:.1f}% of features are zero - very sparse features!")
+            self.logger.warning(f"WARNING: {zero_pct:.1f}% of features are zero - very sparse features!")
         
         y_pred = model.predict(X)
         y_pred_proba = model.predict_proba(X)[:, 1] if hasattr(model, 'predict_proba') else None
         
         # Log prediction probabilities for debugging single-class prediction
         if y_pred_proba is not None:
-            self.logger.info(f"📊 Prediction probabilities:")
+            self.logger.info(f"Prediction probabilities:")
             self.logger.info(f"   Min probability: {np.min(y_pred_proba):.4f}")
             self.logger.info(f"   Max probability: {np.max(y_pred_proba):.4f}")
             self.logger.info(f"   Mean probability: {np.mean(y_pred_proba):.4f}")
@@ -435,9 +520,9 @@ class ModelEvaluator:
             
             # Check if probabilities are all very low or very high
             if np.max(y_pred_proba) < 0.1:
-                self.logger.warning("⚠️  All prediction probabilities < 0.1 - model very biased toward Normal")
+                self.logger.warning("WARNING: All prediction probabilities < 0.1 - model very biased toward Normal")
             elif np.min(y_pred_proba) > 0.9:
-                self.logger.warning("⚠️  All prediction probabilities > 0.9 - model very biased toward Attack")
+                self.logger.warning("WARNING: All prediction probabilities > 0.9 - model very biased toward Attack")
         
         return y_pred, y_pred_proba
     
@@ -485,7 +570,33 @@ class ModelEvaluator:
             self.logger.info(f"Confusion matrix: {results.confusion_matrix}")
         
         self.logger.info("\nClassification Report:")
-        self.logger.info(results.classification_report)
+        try:
+            self.logger.info(str(results.classification_report))
+        except Exception:
+            # Defensive: ensure logging does not fail on unexpected types
+            self.logger.info(repr(results.classification_report))
+
+        # Persist a compact summary into running_log via centralized logger
+        try:
+            summary_payload = {
+                'test_samples': results.test_samples,
+                'accuracy': results.accuracy,
+                'precision': results.precision,
+                'recall': results.recall,
+                'f1_score': results.f1_score,
+                'roc_auc': results.roc_auc,
+                'confusion_matrix': results.confusion_matrix,
+                'positive_predictions': results.positive_predictions,
+                'actual_positives': results.actual_positives,
+            }
+            # Use standardized pipeline event logging
+            try:
+                from system import logging_utils as _lu
+            except Exception:
+                _lu = logging_utils  # fallback to top-level import
+            _lu.log_pipeline_event('EVALUATION_RESULTS', 'Model evaluation summary', metadata=summary_payload)
+        except Exception as _e:
+            self.logger.warning(f"Could not write evaluation summary to running_log: {_e}")
 
 
 # Legacy function for backward compatibility
@@ -560,3 +671,60 @@ def evaluate_model_simple(model, X_test, y_test):
     except Exception as e:
         logging.error(f"Simple model evaluation failed: {str(e)}")
         raise
+
+
+if __name__ == "__main__":
+    """
+    Command-line entrypoint to evaluate a trained model.
+
+    Usage examples:
+      - Evaluate with default training split for test:
+          python model_training/model_evaluation.py --model ./model/threat_detector.joblib
+
+      - Evaluate with explicit test data directory (must contain normal/ and attack/):
+          python model_training/model_evaluation.py --model ./model/threat_detector.joblib \
+              --test-data ./Training_data
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Evaluate a trained threat detection model")
+    parser.add_argument("--model", required=True, help="Path to the trained .joblib model file")
+    parser.add_argument("--test-data", dest="test_data", default=None,
+                        help="Optional path to test data directory (with normal/ and attack/)")
+    parser.add_argument("--log-level", dest="log_level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Logging level")
+
+    args = parser.parse_args()
+
+    # Configure basic logging
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    evaluator = ModelEvaluator()
+    try:
+        results = evaluator.evaluate_model(model_path=args.model, test_data_path=args.test_data)
+
+        # Print concise summary to stdout
+        print("\n=== MODEL EVALUATION SUMMARY ===")
+        print(f"Accuracy:   {results.accuracy:.4f}")
+        print(f"Precision:  {results.precision:.4f}")
+        print(f"Recall:     {results.recall:.4f}")
+        print(f"F1-Score:   {results.f1_score:.4f}")
+        if results.roc_auc is not None:
+            print(f"ROC-AUC:    {results.roc_auc:.4f}")
+        print(f"Test Size:  {results.test_samples}")
+        print(f"TP/FP/FN/TN from confusion matrix: {results.confusion_matrix}")
+        print("\nClassification Report:")
+        try:
+            # classification_report is expected to be a string; force str for safety
+            print(str(results.classification_report))
+        except Exception:
+            import json as _json
+            try:
+                print(_json.dumps(results.classification_report, indent=2))
+            except Exception:
+                print(repr(results.classification_report))
+    except Exception as e:
+        print(f"Model evaluation failed: {e}")
+        sys.exit(1)
