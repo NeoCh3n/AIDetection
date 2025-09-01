@@ -133,7 +133,8 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
         DataFrame with unified columns: hostname, rule_id, timestamp, count, source_label
     """
     if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Data directory not found: {data_path}")
+        logger.warning(f"Data directory not found for label '{source_label}': {data_path} (treating as empty)")
+        return pd.DataFrame(columns=['hostname', 'rule_id', 'timestamp', 'count', 'source_label'])
     
     all_files = []
     

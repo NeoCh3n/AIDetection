@@ -8,6 +8,9 @@ Simple usage
     python model_training/model_evaluation.py --model ./model/threat_detector.joblib \
         --test-data ./Training_data
 
+ - Evaluate a single class by pointing directly to ./Training_data/normal or ./Training_data/attack.
+   Only that directory is used (no auto-include of sibling).
+
 Options:
 - --log-level [DEBUG|INFO|WARNING|ERROR|CRITICAL]
 
@@ -400,23 +403,21 @@ class ModelEvaluator:
             base_name = os.path.basename(base.rstrip(os.sep))
             parent = os.path.dirname(base)
             if normal_dir is None and base_name.lower() == 'normal':
+                # Honor explicit single-class directory: only load this directory
                 normal_dir = base
-                sibling_attack = os.path.join(parent, 'attack')
-                if os.path.isdir(sibling_attack):
-                    attack_dir = sibling_attack
+                attack_dir = None
             if attack_dir is None and base_name.lower() == 'attack':
+                # Honor explicit single-class directory: only load this directory
                 attack_dir = base
-                sibling_normal = os.path.join(parent, 'normal')
-                if os.path.isdir(sibling_normal):
-                    normal_dir = sibling_normal
+                normal_dir = None
 
-            # Fallback: if one is missing, use base path as both (best-effort)
-            if normal_dir is None or attack_dir is None:
-                self.logger.warning("Could not find both 'normal' and 'attack' directories; using base path for missing one.")
-                normal_dir = normal_dir or base
-                attack_dir = attack_dir or base
+            # No sibling inference: if one side missing, treat as single-class dataset
 
-            config = {'training_data_path': normal_dir, 'attack_data_path': attack_dir}
+            # Build config; missing dir paths will be treated as empty by the loader
+            config = {
+                'training_data_path': normal_dir if normal_dir is not None else "__MISSING__",
+                'attack_data_path': attack_dir if attack_dir is not None else "__MISSING__"
+            }
             df = load_data('train', config)
         else:
             self.logger.info("Using training data split for evaluation")
