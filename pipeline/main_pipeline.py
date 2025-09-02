@@ -258,8 +258,8 @@ class UnifiedPipeline:
                 self.logger.warning("No data loaded for prediction")
                 return None
             
-            # Aggregate features
-            df_agg = aggregate_to_windows(df)
+            # Aggregate features (ensure detection-mode to avoid training labels)
+            df_agg = aggregate_to_windows(df, mode='detect')
             if df_agg.empty:
                 self.logger.warning("No aggregated windows")
                 return None
