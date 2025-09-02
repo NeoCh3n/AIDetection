@@ -661,12 +661,13 @@ def evaluate_model_simple(model, X_test, y_test):
         calculator = MetricsCalculator()
         results = calculator.calculate_metrics(y_test, y_pred, y_pred_proba, pred_counts, actual_counts)
         
+        # Normalize to plain Python types for clean formatting/serialization
         return {
-            'accuracy': results.accuracy,
-            'precision': results.precision,
-            'recall': results.recall,
-            'f1_score': results.f1_score,
-            'roc_auc': results.roc_auc
+            'accuracy': float(results.accuracy),
+            'precision': float(results.precision),
+            'recall': float(results.recall),
+            'f1_score': float(results.f1_score),
+            'roc_auc': (None if results.roc_auc is None else float(results.roc_auc))
         }
         
     except Exception as e:

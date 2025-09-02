@@ -81,12 +81,15 @@ class Predictor:
         # Feature count sanity check when available
         try:
             n_expected = getattr(self.model, "n_features_in_", None)
-            if n_expected is not None and X_arr.shape[1] != int(n_expected):
-                raise ValueError(
-                    "Feature dimension mismatch: expected {} features, got {}".format(
-                        int(n_expected), int(X_arr.shape[1])
+            if n_expected is not None:
+                expected = int(n_expected)
+                got = int(X_arr.shape[1])
+                if got != expected:
+                    raise ValueError(
+                        "Feature dimension mismatch: expected {} features, got {}".format(
+                            expected, got
+                        )
                     )
-                )
         except Exception:
             # If attribute isn't present or conversion fails, continue best-effort
             pass
