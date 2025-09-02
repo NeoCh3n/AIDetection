@@ -2,6 +2,20 @@
 
 Supervised threat detection using QRadar rule trigger frequencies. The project trains a Random Forest classifier on Picus BAS–labeled data and reuses the exact same processing path for detection to eliminate training–serving skew.
 
+## How To Use
+
+- Activate venv (required): `source venv/bin/activate`
+- Install dependencies: `make install` (preferred) or `pip install -r requirements.txt`
+- Run training (from repo root):
+  - `python -m pipeline.main_pipeline train`
+  - or `python ./pipeline/main_pipeline.py train`
+- Run detection:
+  - `python -m pipeline.main_pipeline detect`
+  - or `python ./pipeline/main_pipeline.py detect`
+- Options:
+  - `--config PATH` to use a custom JSON config (default: `pipeline/config.json`)
+  - `--verbose` to enable more verbose logging
+
 ## Overview
 
 - Primary model: `RandomForestClassifier` (sklearn) on tabular features (2898 QRadar Rule IDs)

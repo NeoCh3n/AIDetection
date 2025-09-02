@@ -1,7 +1,26 @@
 #!/usr/bin/env python3
 """
 Unified Threat Detection Pipeline
-Single orchestrator for training and detection modes
+Single orchestrator for training and detection modes.
+
+How To Use
+- Activate venv: `source venv/bin/activate` (required).
+- Install deps: `make install` (uses local venv) or `pip install -r requirements.txt`.
+- Run training (from repo root):
+  - `python -m pipeline.main_pipeline train`
+  - or `python ./pipeline/main_pipeline.py train`
+- Run detection:
+  - `python -m pipeline.main_pipeline detect`
+  - or `python ./pipeline/main_pipeline.py detect`
+
+Options
+- `--config PATH`: custom JSON config (default `pipeline/config.json`).
+- `--verbose`: enable more verbose logging.
+
+Notes
+- Requires Python 3.6.8-compatible environment and local venv.
+- Training: data_loader → feature_aggregator → feature_generator → model_training (+ evaluation).
+- Detection: data_loader → feature_aggregator → feature_generator → model_predictor (alerts/logging).
 """
 
 import sys
@@ -11,11 +30,18 @@ import json
 from datetime import datetime, timedelta
 import logging
 
-# Add system to path for logging
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'system'))
+"""
+Ensure project root is on sys.path so top-level packages (e.g., `system`,
+`api_integration`, `mongodb`, `shared_utils`) are importable when running this
+file directly (python ./pipeline/main_pipeline.py).
+"""
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from system import logging_utils
 
-# Add parent directories to path for imports
+# Add parent directories to path for imports (kept for safety; root already added)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api_integration'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'mongodb'))
@@ -360,7 +386,20 @@ class UnifiedPipeline:
 
 def main():
     """Main entry point"""
-    parser = argparse.ArgumentParser(description='Unified Ransomware Detection Pipeline')
+    parser = argparse.ArgumentParser(
+        description='Unified Threat Detection Pipeline',
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            'Examples:\n'
+            '  source venv/bin/activate\n'
+            '  make install\n'
+            '  python -m pipeline.main_pipeline train --config pipeline/config.json\n'
+            '  python -m pipeline.main_pipeline detect --config pipeline/config.json\n\n'
+            'Options:\n'
+            '  --config PATH   Use a custom JSON config (default: pipeline/config.json)\n'
+            '  --verbose       Enable more verbose logging\n'
+        ),
+    )
     parser.add_argument('mode', choices=['train', 'detect'], help='Pipeline mode')
     parser.add_argument('--config', help='Configuration file path')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
