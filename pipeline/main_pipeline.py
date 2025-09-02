@@ -78,8 +78,9 @@ from shared_utils.qradar_rule_manager import QRadarRuleManager
 from shared_utils.time_utils import parse_qradar_timestamp, get_window_id
 
 class UnifiedPipeline:
-    def __init__(self, mode='detect', config_path=None):
+    def __init__(self, mode='detect', config_path=None, verbose: bool = False):
         self.mode = mode
+        self.verbose = verbose
         self.config = self.load_config(config_path)
         self.setup_logging()
         
@@ -91,7 +92,7 @@ class UnifiedPipeline:
         log_file = os.path.join(log_dir, f'pipeline_{self.mode}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
         
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG if self.verbose else logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(log_file),
@@ -471,7 +472,7 @@ def main():
     
     args = parser.parse_args()
     
-    pipeline = UnifiedPipeline(mode=args.mode, config_path=args.config)
+    pipeline = UnifiedPipeline(mode=args.mode, config_path=args.config, verbose=args.verbose)
     result = pipeline.execute()
     
     if result:
