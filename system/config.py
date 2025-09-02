@@ -1,83 +1,79 @@
+import json
 import os
+from typing import Any, Dict
 
-#### change parameters here
+"""
+Centralized configuration for the unified pipeline.
 
-#### Qradar configuration
-# Prefer environment variables; fall back to sensible defaults.
-# Never commit real tokens into source control.
-Qradar_address_default = os.getenv("QRADAR_ADDRESS", "192.168.153.123")
-Qradar_token_default = os.getenv("QRADAR_API_TOKEN", "REPLACE_WITH_TOKEN")
+This module bridges legacy callers (system.logging_utils, tests, some pipeline
+modules) with the modern JSON config at pipeline/config.json described in
+AGENTS.md. It exposes a small set of constants for logging/syslog and a
+get_config() function returning a consolidated dictionary used by components
+like feature_generator and tests.
 
-request_header_default = {
-    'SEC': Qradar_token_default,
-    'Version': '20.0',
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-    'Connection': 'Close'
-}
+Backwards compatibility helpers are included to tolerate older access patterns
+such as config.get('key', default).
+"""
 
-##### MongoDB configuration for QRadar rule trigger ML pipeline (offline deployment)
-# DB CONNECTION STRING - Updated for offline MongoDB deployment
-MONGODB_CONNECTION_STRING = "mongodb://localhost:27017/"
+# -------------------------
+# Syslog / logging defaults
+# -------------------------
+DATA_RETENTION_DAYS = int(os.getenv("DATA_RETENTION_DAYS", "7"))
 
-# DB NAME - Updated for QRadar ML project
-MONGODB_DB_NAME = "qradar_ml"
+# Frequency for periodic scheduling (minutes). Used by some logs/tests.
+fetch_data_frequency_default = int(os.getenv("FETCH_FREQUENCY_MIN", "30"))
 
-# COLLECTION NAMES - Updated for rule trigger storage and ML processing
-# Main collection for 15-minute rule trigger data
-MONGODB_COLLECTION_NAME = "qradar_rule_triggers_ml"
-# Additional collections for the complete pipeline
-MONGODB_ML_FEATURES_COLLECTION = "ml_features"
-MONGODB_ANOMALY_RESULTS_COLLECTION = "anomaly_results"
+# Where local logs are written
+log_dir_path_default = os.getenv("LOG_DIR", os.path.join("running_log/"))
 
-# Timeframe configuration for 15-minute storage with 30-minute testing
-MONGODB_STORAGE_BUCKET_MINUTES = 15
-MONGODB_TESTING_WINDOW_MINUTES = 30
-
-# Data retention configuration - 7 days for operational requirements
-DATA_RETENTION_DAYS = 7
-
-### Change AQL here
-AQL_default = """select "qidEventId" as 'Event ID',"sysmon_hostname" as 'sysmon_hostname (custom)', "deviceTime" as 'Log Source Time',"startTime" as 'Start Time',"Process Path" as 'Process Path (custom)',"sourceIP" as 'Source IP',"destinationIP" as 'Destination IP',"destinationPort" as 'Destination Port' from events where ( "qidEventId"='3' AND "sysmon_hostname"='DESKTOP-64-EDR' ) order by "startTime" desc last 15 minutes"""
-
-#################
-# Parameters
-# Frequency of fetching data from Qradar (every __ minutes)
-# if you change fetch_data_frequency_default, please also edit the schedule task in crontab
-fetch_data_frequency_default = 15
-
-# Analyze time (every __ minutes)
-# Please do not change
-# if you change analyze_time_default, please train and apply a new model
-analyze_duration_default = 30
-
-# Maximum record count
-maximum_record_count_default = 800000
-
-# Use lowercase 'model' directory to match repository layout
-model_path_default = os.path.join("model", "svm_NetworkConnection_4D")
-svm_model_path_default = os.path.join("model", "svm_NetworkConnection_4D")
-logreg_model_path_default = os.path.join("model", "logreg_NetworkConnection_4D")
-rf_model_path_default = os.path.join("model", "rf_NetworkConnection_4D")
-voting_model_path_default = os.path.join("model", "voting_NetworkConnection_4D")
-
-log_dir_path_default = os.path.join("running_log/")
-
+# Syslog target and headers
 log_destination_address_default = os.getenv("SYSLOG_ADDRESS", "192.168.153.123")
 log_destination_port_default = int(os.getenv("SYSLOG_PORT", "514"))
 
-# Syslog header configuration (project name: AIR; default tag: AIR-RF)
 SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AIR")
 SYSLOG_HEADER_ML = os.getenv("SYSLOG_HEADER_ML", f"{SYSLOG_HEADER_BASE}-RF")
 SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-RF")
 
-#### Configuration dictionary for pipeline modules
-def get_config():
+
+# -------------------------
+# QRadar defaults (env-based)
+# -------------------------
+Qradar_address_default = os.getenv("QRADAR_ADDRESS", "192.168.153.123")
+Qradar_token_default = os.getenv("QRADAR_API_TOKEN", "REPLACE_WITH_TOKEN")
+request_header_default = {
+    'SEC': Qradar_token_default,
+    'Version': os.getenv('QRADAR_API_VERSION', '20.0'),
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'Connection': 'Close',
+}
+
+
+# -------------------------
+# Pipeline JSON config loader
+# -------------------------
+def _load_json_config() -> Dict[str, Any]:
+    """Load pipeline/config.json if present, else return {}."""
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'pipeline', 'config.json')
+    try:
+        with open(cfg_path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_config() -> Dict[str, Any]:
     """
-    Returns centralized configuration dictionary for pipeline components.
-    Used by feature_generator.py and other modules.
+    Return consolidated configuration reflecting AGENTS.md.
+
+    - Prefers pipeline/config.json values when present.
+    - Provides sensible defaults for missing sections.
+    - Includes paths.model_dir for tests and modules expecting it.
     """
-    return {
+    file_cfg = _load_json_config()
+
+    # Defaults aligned with AGENTS.md
+    defaults: Dict[str, Any] = {
         'rule_manager': {
             'mode': 'file',
             'rule_file_path': os.path.join('Qradar_rule', 'production_rules.txt'),
@@ -89,63 +85,73 @@ def get_config():
             'expected_rules': 2898,
             'window_size_minutes': 30,
             'log_transform': True,
-            'normalize_counts': False
-        },
-        'data_processing': {
-            'batch_size': 1000,
-            'max_features': 2898,
-            'missing_value_strategy': 'zero_fill'
+            'normalize_counts': False,
         },
         'model': {
             'random_forest': {
                 'n_estimators': 200,
-                'max_depth': None,
-                'min_samples_split': 2,
-                'min_samples_leaf': 1,
                 'class_weight': 'balanced_subsample',
-                'random_state': 42
+                'max_features': 'sqrt',
+                'random_state': 42,
+                'n_jobs': -1,
             }
         },
         'mongodb': {
-            'connection_string': MONGODB_CONNECTION_STRING,
-            'database_name': MONGODB_DB_NAME,
-            'collection_name': MONGODB_COLLECTION_NAME,
-            'features_collection': MONGODB_ML_FEATURES_COLLECTION,
-            'anomaly_collection': MONGODB_ANOMALY_RESULTS_COLLECTION
+            'connection_string': 'mongodb://localhost:27017/',
+            'database_name': 'qradar_ml',
+            'collection_name': 'detection_data',
         },
         'paths': {
-            'model_dir': os.path.dirname(model_path_default),
-            'log_dir': log_dir_path_default,
+            'model_dir': 'model',
+            'log_dir': 'running_log',
             'training_data_dir': 'Training_data',
-            'qradar_rule_dir': 'Qradar_rule'
-        }
+            'qradar_rule_dir': 'Qradar_rule',
+        },
     }
 
-#### NEVER change the below!
-# run the default to check the parameter
+    # Merge relevant pieces from pipeline/config.json when present
+    merged = defaults.copy()
+
+    # training.model_path informs paths.model_dir if available
+    training_cfg = file_cfg.get('training', {}) if isinstance(file_cfg, dict) else {}
+    if isinstance(training_cfg, dict):
+        model_path = training_cfg.get('model_path')
+        if isinstance(model_path, str):
+            merged['paths']['model_dir'] = os.path.dirname(model_path) or 'model'
+
+    # detection.mongodb_config maps into mongodb defaults
+    detect_cfg = file_cfg.get('detection', {}) if isinstance(file_cfg, dict) else {}
+    if isinstance(detect_cfg, dict):
+        mdb = detect_cfg.get('mongodb_config', {})
+        if isinstance(mdb, dict):
+            merged['mongodb']['connection_string'] = mdb.get('connection_string', merged['mongodb']['connection_string'])
+            merged['mongodb']['database_name'] = mdb.get('database', merged['mongodb']['database_name'])
+            merged['mongodb']['collection_name'] = mdb.get('collection', merged['mongodb']['collection_name'])
+
+    # paths override
+    paths_cfg = file_cfg.get('paths', {}) if isinstance(file_cfg, dict) else {}
+    if isinstance(paths_cfg, dict):
+        merged['paths']['model_dir'] = paths_cfg.get('model_output', merged['paths']['model_dir']).replace('./', '') if paths_cfg.get('model_output') else merged['paths']['model_dir']
+        merged['paths']['log_dir'] = paths_cfg.get('logs', merged['paths']['log_dir']).replace('./', '') if paths_cfg.get('logs') else merged['paths']['log_dir']
+        merged['paths']['training_data_dir'] = paths_cfg.get('training_data', merged['paths']['training_data_dir']).replace('./', '') if paths_cfg.get('training_data') else merged['paths']['training_data_dir']
+
+    return merged
+
+
+def get(key: str, default: Any = None) -> Any:
+    """
+    Backwards-compatible accessor for callers that mistakenly treat this
+    module as a mapping. Returns a top-level key from get_config(), or default.
+    """
+    try:
+        return get_config().get(key, default)
+    except Exception:
+        return default
+
+
 if __name__ == "__main__":
-    print("Qradar_address_default:", Qradar_address_default)
-    # Mask token output for safety
-    masked_token = (
-        ("****" + Qradar_token_default[-4:]) if Qradar_token_default and Qradar_token_default != "REPLACE_WITH_TOKEN" else "(unset)"
-    )
-    print("Qradar_token_default:", masked_token)
-    print("request_header_default:", request_header_default)
-    print("MONGODB_CONNECTION_STRING:", MONGODB_CONNECTION_STRING)
-    print("MONGODB_DB_NAME:", MONGODB_DB_NAME)
-    print("MONGODB_COLLECTION_NAME:", MONGODB_COLLECTION_NAME)
-    print("AQL_default:", AQL_default)
-    print("fetch_data_frequency_default:", fetch_data_frequency_default)
-    print("analyze_duration_default:", analyze_duration_default)
-    print("maximum_record_count_default:", maximum_record_count_default)
-    print("model_path_default:", model_path_default)
-    print("svm_model_path_default:", svm_model_path_default)
-    print("logreg_model_path_default:", logreg_model_path_default)
-    print("rf_model_path_default:", rf_model_path_default)
-    print("voting_model_path_default:", voting_model_path_default)
-    print("log_dir_path_default:", log_dir_path_default)
-    print("log_destination_address_default:", log_destination_address_default)
-    print("log_destination_port_default:", log_destination_port_default)
-    print("SYSLOG_HEADER_BASE:", SYSLOG_HEADER_BASE)
-    print("SYSLOG_HEADER_ML:", SYSLOG_HEADER_ML)
-    print("SYSLOG_HEADER_LOG:", SYSLOG_HEADER_LOG)
+    cfg = get_config()
+    print("Model dir:", cfg['paths']['model_dir'])
+    print("Log dir:", cfg['paths']['log_dir'])
+    print("MongoDB:", cfg['mongodb'])
+    print("RF params:", cfg['model']['random_forest'])
