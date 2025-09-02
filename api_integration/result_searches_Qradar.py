@@ -21,26 +21,32 @@ Qradar_address_default = "192.168.153.123"
 search_id_default = "6c1b5627-e9f1-45a9-9040-7bab65a6463b"
 
 #### Retrieves the results of a search in Qradar using the search id
-def result_searches_Qradar(Qradar_address = Qradar_address_default , search_id = search_id_default , request_header = request_header_default ):
+def result_searches_Qradar(Qradar_address=Qradar_address_default, search_id=search_id_default,
+                           request_header=request_header_default, timeout: int = 60):
     ## Construct the request URI for the Qradar API
     request_URI = "https://" + Qradar_address + "/api/ariel/searches/" + search_id + "/results"
     try:
         ## Make a GET request to the Qradar API
-        get_request_ariel_searches_results = requests.get(request_URI, headers = request_header, verify =False)
+        get_request_ariel_searches_results = requests.get(
+            request_URI, headers=request_header, verify=False, timeout=timeout
+        )
         ## Parse the JSON response
         get_response_ariel_searches_results = get_request_ariel_searches_results.json()
         logging_utils.run_log("INFO" , "7. GET Request sent to Qradar: getting ariel searches results -- Response Code:" + str(get_request_ariel_searches_results))
-    except:
-        logging_utils.run_log("ERROR" , "Failed to send GET Request to Qradar")
-        return
+    except requests.Timeout as e:
+        logging_utils.run_log("ERROR" , f"QRadar result retrieval timeout after {timeout}s: {e}")
+        return None
+    except Exception as e:
+        logging_utils.run_log("ERROR" , f"Failed to send GET Request to Qradar: {e}")
+        return None
     ## return the results
     try:
         record_count = len(get_response_ariel_searches_results['events'])
         logging_utils.run_log("INFO" , "8. Response received from Qradar: downloaded ariel search results -- record_count:" + str(record_count) )
         return(get_response_ariel_searches_results)
-    except:
+    except Exception:
         logging_utils.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(get_response_ariel_searches_results) )
-        return
+        return None
 
 #### default
 if __name__ == "__main__":

@@ -21,19 +21,25 @@ request_header_default = {
 Qradar_address_default = "192.168.153.123"
 search_id_default = "6c1b5627-e9f1-45a9-9040-7bab65a6463b"
 
-def status_searches_Qradar(Qradar_address=Qradar_address_default, search_id=search_id_default, request_header=request_header_default):
+def status_searches_Qradar(Qradar_address=Qradar_address_default, search_id=search_id_default,
+                           request_header=request_header_default, timeout: int = 30):
     """Retrieves the status of a search in Qradar using the search_id"""
     # Construct the request URI for the Qradar API
     request_URI = f"https://{Qradar_address}/api/ariel/searches/" + search_id
     try:
         # Make a GET request to the Qradar API
-        get_request_ariel_searches = requests.get(request_URI, headers=request_header, verify=False)
+        get_request_ariel_searches = requests.get(
+            request_URI, headers=request_header, verify=False, timeout=timeout
+        )
         # Parse the JSON response
         get_response_ariel_searches = get_request_ariel_searches.json()
         logging_utils.run_log("INFO", "5. GET Request sent to Qradar: getting ariel searches status information -- Response Code: " + str(get_request_ariel_searches))
-    except:
-        logging_utils.run_log("ERROR", "Failed to send GET Request to Qradar")
-        return
+    except requests.Timeout as e:
+        logging_utils.run_log("ERROR", f"QRadar status check timeout after {timeout}s: {e}")
+        return None
+    except Exception as e:
+        logging_utils.run_log("ERROR", f"Failed to send GET Request to Qradar: {e}")
+        return None
     # return information from the response
     try:
         status = str(get_response_ariel_searches['status'])
@@ -41,9 +47,9 @@ def status_searches_Qradar(Qradar_address=Qradar_address_default, search_id=sear
         query_execution_time = str(get_response_ariel_searches['query_execution_time']/1000)
         logging_utils.run_log("INFO", "6. Response received from Qradar: retrieved ariel searches status information -- status:" + status + ", progress:" + progress + "%," + "query_execution_time:" + query_execution_time)
         return(get_response_ariel_searches)
-    except:
+    except Exception:
         logging_utils.run_log("ERROR", "Response received from Qradar: error message -- body:" + str(get_response_ariel_searches))
-        return
+        return None
 
 if __name__ == "__main__":
     status = status_searches_Qradar(Qradar_address_default, search_id_default, request_header_default)

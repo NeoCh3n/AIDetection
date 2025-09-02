@@ -175,45 +175,110 @@ class UnifiedPipeline:
         self.logger.info(f"Fetching QRadar data from {start_time} to {end_time}")
         
         try:
+            qcfg = self.config['detection']['qradar_config']
             # Construct AQL query
-            aql = self.config['detection']['qradar_config']['query_30min'].format(
+            aql = qcfg['query_30min'].format(
                 start_time=start_time.strftime("%Y-%m-%d %H:%M:%S"),
                 end_time=end_time.strftime("%Y-%m-%d %H:%M:%S")
             )
+            # Build request header from config (avoid logging token)
+            request_header = {
+                'SEC': qcfg.get('token', ''),
+                'Version': str(qcfg.get('version', '20.0')),
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Connection': 'Close'
+            }
+            http_timeout = int(qcfg.get('timeout', 300))
+            poll_interval = max(3, int(qcfg.get('poll_interval', 5)))
+            max_wait = int(qcfg.get('max_wait_seconds', http_timeout))
             
             # Create search
             search_response = create_searches_Qradar(
-                qradar_address=self.config['detection']['qradar_config']['host'],
-                AQL=aql
+                qradar_address=qcfg['host'],
+                AQL=aql,
+                request_header=request_header,
+                timeout=min(http_timeout, max_wait)
             )
             
             if not search_response:
                 self.logger.error("Failed to create QRadar search")
+                try:
+                    logging_utils.run_log("ERROR", "QRadar create_search failed")
+                except Exception:
+                    pass
                 return None
             
             search_id = search_response.get('search_id')
             self.logger.info(f"Created search: {search_id}")
             
-            # Wait for completion and get results
-            # Note: This is a simplified flow - implement polling in production
+            # Poll for completion and get results
             import time
-            time.sleep(10)  # Wait for search completion
+            start_wait = time.monotonic()
+            last_status = None
+            last_progress = None
+            while True:
+                # Check timeout
+                elapsed = time.monotonic() - start_wait
+                if elapsed > max_wait:
+                    msg = (
+                        f"QRadar search timed out after {int(elapsed)}s waiting for completion; "
+                        f"search_id={search_id}, last_status={last_status}, last_progress={last_progress}"
+                    )
+                    self.logger.error(msg)
+                    try:
+                        logging_utils.run_log("ERROR", msg)
+                    except Exception:
+                        pass
+                    # Attempt cleanup
+                    try:
+                        delete_searches_Qradar(Qradar_address=qcfg['host'], search_id=search_id, request_header=request_header, timeout=10)
+                    except Exception:
+                        pass
+                    return None
+
+                # Query status
+                status_resp = status_searches_Qradar(
+                    Qradar_address=qcfg['host'],
+                    search_id=search_id,
+                    request_header=request_header,
+                    timeout=min(30, http_timeout)
+                )
+                if not status_resp or not isinstance(status_resp, dict):
+                    time.sleep(poll_interval)
+                    continue
+
+                last_status = str(status_resp.get('status', '')).upper()
+                last_progress = status_resp.get('progress')
+                # Log periodic progress
+                self.logger.info(f"QRadar search status: {last_status} ({last_progress}%) for search_id={search_id}")
+                if last_status in ("COMPLETED", "COMPLETE", "SORTED", "DONE", "FINISHED"):
+                    break
+                time.sleep(poll_interval)
             
             result_data = result_searches_Qradar(
-                Qradar_address=self.config['detection']['qradar_config']['host'],
-                search_id=search_id
+                Qradar_address=qcfg['host'],
+                search_id=search_id,
+                request_header=request_header,
+                timeout=min(60, max(15, http_timeout))
             )
             
             # Cleanup search
             delete_searches_Qradar(
-                Qradar_address=self.config['detection']['qradar_config']['host'],
-                search_id=search_id
+                Qradar_address=qcfg['host'],
+                search_id=search_id,
+                request_header=request_header,
+                timeout=15
             )
             
             return result_data
             
         except Exception as e:
             self.logger.error(f"Failed to fetch QRadar data: {str(e)}")
+            try:
+                logging_utils.run_log("ERROR", f"QRadar fetch failure: {str(e)}")
+            except Exception:
+                pass
             return None
     
     def store_detection_data(self, data, start_time, end_time):
