@@ -6,8 +6,7 @@ from typing import Any, Dict
 Centralized configuration for the unified pipeline.
 
 This module bridges legacy callers (system.logging_utils, tests, some pipeline
-modules) with the modern JSON config at pipeline/config.json described in
-AGENTS.md. It exposes a small set of constants for logging/syslog and a
+modules) with the modern JSON config at pipeline/config.json. It exposes a small set of constants for logging/syslog and a
 get_config() function returning a consolidated dictionary used by components
 like feature_generator and tests.
 
