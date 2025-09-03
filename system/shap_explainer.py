@@ -26,6 +26,7 @@ import os
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import seaborn as sns
 import plotext as plt_terminal
 from datetime import datetime
@@ -191,6 +192,10 @@ class Explainer:
     def _log_explanation(self, X, shap_values):
         """Log detailed SHAP explanation summary."""
         try:
+            # Unwrap (shap_values, plot_results) if present
+            if isinstance(shap_values, tuple):
+                shap_values = shap_values[0]
+
             # Handle multi-class output (take class 1 for binary classification)
             if isinstance(shap_values, list) and len(shap_values) > 1:
                 values = shap_values[1]  # Malicious class
@@ -201,6 +206,11 @@ class Explainer:
             else:
                 values = shap_values
                 class_explained = "prediction"
+            
+            # Ensure numpy array (supports SHAP Explanation objects)
+            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
+                values = values.values
+            values = np.array(values)
             
             # Calculate importance for logging
             if values.ndim > 1:
@@ -225,8 +235,11 @@ class Explainer:
             for idx in top_indices:
                 if idx < len(self.feature_names):
                     feature_name = self.feature_names[idx]
-                    rule_name = self.rule_mapping.get(feature_name, feature_name)
-                    
+                    # Safely resolve rule name as string
+                    rule_name = self.rule_mapping.get(feature_name) or feature_name
+                    if not isinstance(rule_name, str):
+                        rule_name = str(rule_name)
+
                     explanation_summary['top_contributing_features'].append({
                         'rank': len(explanation_summary['top_contributing_features']) + 1,
                         'feature': feature_name,
@@ -258,6 +271,8 @@ class Explainer:
             shap_values = self.explain(X, log_results=False)
             
             # Handle multi-class output
+            if isinstance(shap_values, tuple):
+                shap_values = shap_values[0]
             if isinstance(shap_values, list) and len(shap_values) > 1:
                 values = shap_values[1]  # Malicious class
             elif isinstance(shap_values, list):
@@ -265,6 +280,11 @@ class Explainer:
             else:
                 values = shap_values
             
+            # Ensure numpy array (supports SHAP Explanation objects)
+            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
+                values = values.values
+            values = np.array(values)
+
             # Calculate importance
             if values.ndim > 1:
                 importance = np.abs(values).mean(axis=0)
@@ -278,8 +298,11 @@ class Explainer:
             for rank, idx in enumerate(indices, 1):
                 if idx < len(self.feature_names):
                     feature_name = self.feature_names[idx]
-                    rule_name = self.rule_mapping.get(feature_name, feature_name)
-                    
+                    # Safely resolve rule name as string
+                    rule_name = self.rule_mapping.get(feature_name) or feature_name
+                    if not isinstance(rule_name, str):
+                        rule_name = str(rule_name)
+
                     ranking.append({
                         'rank': rank,
                         'feature': feature_name,
@@ -312,6 +335,8 @@ class Explainer:
             ranking = self.get_feature_importance(X)
             
             # Handle multi-class output
+            if isinstance(shap_values, tuple):
+                shap_values = shap_values[0]
             if isinstance(shap_values, list) and len(shap_values) > 1:
                 values = shap_values[1]  # Malicious class
                 class_name = "Malicious Class"
@@ -321,6 +346,11 @@ class Explainer:
             else:
                 values = shap_values
                 class_name = "Prediction"
+            
+            # Ensure numpy array (supports SHAP Explanation objects)
+            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
+                values = values.values
+            values = np.array(values)
             
             # Prepare data for heat map
             X_processed = self._prepare_input(X)
@@ -353,7 +383,10 @@ class Explainer:
             # Create rule labels for features
             rule_labels = []
             for fname in top_feature_names[:len(top_feature_indices)]:
-                rule_name = self.rule_mapping.get(fname, fname)
+                # Safely resolve rule name and ensure it is a string
+                rule_name = self.rule_mapping.get(fname) or fname
+                if not isinstance(rule_name, str):
+                    rule_name = str(rule_name)
                 # Truncate long rule names for display
                 if len(rule_name) > 25:
                     rule_name = rule_name[:22] + "..."
@@ -430,7 +463,17 @@ class Explainer:
             plt.figure(figsize=figsize)
             
             # Create color map based on importance
-            colors = plt.cm.Reds(np.linspace(0.9, 0.3, len(importance_scores)))
+            # Ensure the input to the colormap is a concrete ndarray to satisfy type checkers
+            cmap = cm.get_cmap('Reds')
+            linspace_vals = np.linspace(
+                0.9,
+                0.3,
+                num=len(importance_scores),
+                endpoint=True,
+                retstep=False,
+                dtype=float,
+            )
+            colors = cmap(np.asarray(linspace_vals, dtype=float))
             
             bars = plt.barh(range(len(features)), importance_scores, color=colors)
             
@@ -518,6 +561,8 @@ class Explainer:
             ranking = self.get_feature_importance(X)
             
             # Handle multi-class output
+            if isinstance(shap_values, tuple):
+                shap_values = shap_values[0]
             if isinstance(shap_values, list) and len(shap_values) > 1:
                 values = shap_values[1]  # Malicious class
                 class_name = "Malicious Class"
@@ -527,6 +572,11 @@ class Explainer:
             else:
                 values = shap_values
                 class_name = "Prediction"
+            
+            # Ensure numpy array (supports SHAP Explanation objects)
+            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
+                values = values.values
+            values = np.array(values)
             
             # Prepare data
             X_processed = self._prepare_input(X)
@@ -558,7 +608,10 @@ class Explainer:
             # Create rule labels (truncated for terminal)
             rule_labels = []
             for fname in top_feature_names[:len(top_feature_indices)]:
-                rule_name = self.rule_mapping.get(fname, fname)
+                # Safely resolve rule name and ensure it is a string
+                rule_name = self.rule_mapping.get(fname) or fname
+                if not isinstance(rule_name, str):
+                    rule_name = str(rule_name)
                 # Truncate for terminal display
                 if len(rule_name) > 20:
                     rule_name = rule_name[:17] + "..."

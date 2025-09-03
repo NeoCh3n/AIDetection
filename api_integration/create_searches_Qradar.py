@@ -3,6 +3,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from system import logging_utils
 import requests
+from urllib.parse import urlencode
 import urllib3
 urllib3.disable_warnings()
 
@@ -24,12 +25,17 @@ AQL_default = """select "qidEventId" as 'Event ID',"sysmon_hostname" as 'sysmon_
 def create_searches_Qradar(qradar_address=Qradar_address_default, AQL=AQL_default,
                            request_header=request_header_default, timeout: int = 60):
     # Construct the request URI for the Qradar API
-    request_URI = "https://" + qradar_address + "/api/ariel/searches?query_expression=" + AQL
+    base_uri = "https://" + qradar_address + "/api/ariel/searches"
 
     try:
         # Make a POST request to the Qradar API
+        # Use params so requests handles URL encoding safely
         post_request_ariel_searches = requests.post(
-            request_URI, headers=request_header, verify=False, timeout=timeout
+            base_uri,
+            headers=request_header,
+            params={"query_expression": AQL},
+            verify=False,
+            timeout=timeout,
         )
         # Parse the JSON response
         post_response_ariel_searches = post_request_ariel_searches.json()

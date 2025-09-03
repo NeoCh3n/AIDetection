@@ -18,7 +18,7 @@
       "token": "677f60e2-3d58-4275-a1f0-c13d1975fdbe",
       "version": "20.0",
       "verify_ssl": false,
-      "query_30min": "SELECT \"qidEventId\" as rule_id, \"sysmon_hostname\" as hostname, \"startTime\" as timestamp, COUNT(*) as count FROM events WHERE \"startTime\" >= '{start_time}' AND \"startTime\" < '{end_time}' GROUP BY rule_id, hostname, timestamp",
+      "query_30min": "SELECT \"qidEventId\" as 'Custom Rule', \"sysmon_hostname\" as 'sysmon_hostname (custom)', MIN(\"startTime\") as 'Log Source Time (Minimum)', COUNT(*) as 'Count' FROM events START '{start_time}' STOP '{end_time}' GROUP BY 'Custom Rule', 'sysmon_hostname (custom)'",
       "timeout": 300
     },
     "mongodb_config": {
