@@ -367,15 +367,20 @@ class UnifiedPipeline:
             try:
                 prod_rule_to_index = feature_gen.rule_manager.get_production_rule_to_index_map()
                 dim = feature_gen.get_feature_vector_dimension()
-                index_to_rule: List[Optional[int]] = [None] * dim
+                # Use -1 sentinel to avoid Optional typing complexities
+                index_to_rule: List[int] = [-1] * dim
                 for rid, idx in prod_rule_to_index.items():
                     j = int(idx)
                     if 0 <= j < dim:
                         index_to_rule[j] = int(rid)
-                feature_names = [f"rule_{r}" if r is not None else f"feature_{i}" for i, r in enumerate(index_to_rule)]
+                feature_names = [
+                    f"rule_{rid}" if rid >= 0 else f"feature_{k}"
+                    for k, rid in enumerate(index_to_rule)
+                ]
             except Exception:
-                index_to_rule = None
-                feature_names = [f"feature_{i}"] * (X.shape[1] if hasattr(X, 'shape') else 0)
+                index_to_rule = []
+                n_features = X.shape[1] if hasattr(X, 'shape') else 0
+                feature_names = [f"feature_{k}" for k in range(int(n_features))]
             
             # Make predictions
             try:
@@ -455,10 +460,11 @@ class UnifiedPipeline:
                                     val = float(row_vec[j])
                                     if val <= 0:
                                         continue
-                                    rule_id = None
+                                    resolved_rule = j
                                     if index_to_rule and j < len(index_to_rule):
-                                        rule_id = index_to_rule[j]
-                                    top_rules.append({'rule_id': int(rule_id) if rule_id is not None else j, 'value': val})
+                                        rid_val = index_to_rule[j]
+                                        resolved_rule = int(rid_val) if isinstance(rid_val, int) and rid_val >= 0 else j
+                                    top_rules.append({'rule_id': resolved_rule, 'value': val})
                             else:
                                 top_rules = []
 
