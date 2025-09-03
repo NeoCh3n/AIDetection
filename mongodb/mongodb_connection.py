@@ -19,7 +19,7 @@ import sys
 import pymongo
 from typing import Dict, Any, Optional, List, Tuple
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 # Add shared_utils to path for shared utilities integration
@@ -270,7 +270,8 @@ class MongoDBConnectionManager:
             for i in range(0, len(events), batch_size):
                 batch = events[i:i + batch_size]
                 
-                # Prepare bulk operations
+                # Prepare bulk operations (use PyMongo ReplaceOne)
+                from pymongo import ReplaceOne
                 operations = []
                 for event_data in batch:
                     # Process timestamps
@@ -285,20 +286,20 @@ class MongoDBConnectionManager:
                     event_data['count'] = int(event_data['count'])
                     event_data['hostname'] = str(event_data['hostname'])
                     
-                    operations.append({
-                        'replaceOne': {
-                            'filter': {
+                    operations.append(
+                        ReplaceOne(
+                            {
                                 'window_id': event_data['window_id'],
                                 'hostname': event_data['hostname'],
                                 'rule_id': event_data['rule_id']
                             },
-                            'replacement': event_data,
-                            'upsert': True
-                        }
-                    })
+                            event_data,
+                            upsert=True
+                        )
+                    )
                 
                 if operations:
-                    result = self.events_collection.bulk_write(operations)
+                    result = self.events_collection.bulk_write(operations, ordered=False)
                     total_inserted += result.upserted_count + result.modified_count
                     
                     if i % (batch_size * 10) == 0:
@@ -518,9 +519,22 @@ class MongoDBConnectionManager:
             return []
         
         try:
+            # Normalize datetimes to naive UTC for comparison with stored values
+            def _normalize(dt: datetime) -> datetime:
+                try:
+                    if isinstance(dt, datetime) and dt.tzinfo is not None:
+                        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+                except Exception:
+                    pass
+                return dt
+
+            start_norm = _normalize(start_time)
+            end_norm = _normalize(end_time)
+
+            # Return windows that overlap the requested interval
             query = {
-                'window_start': {'$gte': start_time},
-                'window_end': {'$lte': end_time},
+                'window_end': {'$gt': start_norm},
+                'window_start': {'$lt': end_norm},
                 'label': {'$exists': False}
             }
             

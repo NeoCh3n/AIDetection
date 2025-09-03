@@ -18,6 +18,8 @@ data_retention_days = config.DATA_RETENTION_DAYS
 header_ml = config.SYSLOG_HEADER_ML
 header_log = config.SYSLOG_HEADER_LOG
 
+SUPPRESS_STDOUT = True  # avoid duplicate console noise; rely on app logger
+
 def run_log(level, message, payload = None):
     # Ensure log directory exists
     Path(log_dir_path).mkdir(parents=True, exist_ok=True)
@@ -57,7 +59,9 @@ def run_log(level, message, payload = None):
             payload_str = str(payload).replace("\n", " ")
             log_message += " | Payload: " + payload_str + "\n"
         logfile_today.write(log_message)
-        print(log_message)
+        # Optional stdout printing (disabled by default to avoid duplicates)
+        if not SUPPRESS_STDOUT:
+            print(log_message)
 
     # send the logs to Qradar
     # Sanitize syslog message to a single line and cap size
@@ -172,6 +176,8 @@ def _get_logger(address: str, port: int, header: str) -> logging.Logger:
         handler = _handler_cache[key]
         if handler not in logger.handlers:
             logger.addHandler(handler)
+    # Prevent propagation to root logger to avoid duplicate StreamHandler output
+    logger.propagate = False
 
     return logger
 
