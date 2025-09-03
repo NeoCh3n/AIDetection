@@ -27,7 +27,6 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import seaborn as sns
 import plotext as plt_terminal
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
@@ -392,30 +391,49 @@ class Explainer:
                     rule_name = rule_name[:22] + "..."
                 rule_labels.append(rule_name)
             
-            # Create the heat map
+            # Create the heat map (pure matplotlib fallback; avoids seaborn dependency)
             plt.figure(figsize=figsize)
-            
-            # Create heat map with custom colormap
-            sns.heatmap(
+
+            # Symmetric color scale around 0 for SHAP values
+            absmax = float(np.nanmax(np.abs(heatmap_data))) if np.size(heatmap_data) else 1.0
+            if absmax == 0:
+                absmax = 1.0
+            img = plt.imshow(
                 heatmap_data,
-                xticklabels=rule_labels,
-                yticklabels=instance_labels,
-                cmap='RdBu_r',  # Red for positive (malicious), Blue for negative
-                center=0,
-                annot=True,
-                fmt='.3f',
-                cbar_kws={'label': 'SHAP Value (Impact on Prediction)'},
-                linewidths=0.5
+                aspect='auto',
+                cmap='RdBu_r',  # Red positive, Blue negative
+                vmin=-absmax,
+                vmax=absmax,
+                interpolation='nearest'
             )
-            
-            plt.title(f'SHAP Feature Importance Heat Map - {class_name}\n'
-                     f'Top {n_features} Contributing Features', 
-                     fontsize=14, fontweight='bold')
+
+            # Add colorbar with label
+            cbar = plt.colorbar(img)
+            cbar.set_label('SHAP Value (Impact on Prediction)')
+
+            # Set tick labels
+            plt.xticks(ticks=np.arange(len(rule_labels)), labels=rule_labels, rotation=45, ha='right')
+            plt.yticks(ticks=np.arange(len(instance_labels)), labels=instance_labels)
+
+            # Annotate values in each cell
+            h, w = heatmap_data.shape
+            for i in range(h):
+                for j in range(w):
+                    val = heatmap_data[i, j]
+                    # Choose text color based on background intensity for readability
+                    color = 'black' if abs(val) < (0.6 * absmax) else 'white'
+                    plt.text(j, i, f"{val:.3f}", ha='center', va='center', fontsize=8, color=color)
+
+            # Axes labels and title
+            plt.title(
+                f'SHAP Feature Importance Heat Map - {class_name}\n'
+                f'Top {n_features} Contributing Features',
+                fontsize=14,
+                fontweight='bold'
+            )
             plt.xlabel('Security Rules / Features', fontsize=12)
             plt.ylabel('Data Instances', fontsize=12)
-            
-            # Rotate x-axis labels for better readability
-            plt.xticks(rotation=45, ha='right')
+
             plt.tight_layout()
             
             # Save or display
