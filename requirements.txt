@@ -16,3 +16,6 @@ plotext>=4.2.0
 
 # SHAP for model explainability
 shap>=0.39.0,<0.42.0
+
+# Visualization enhancements for SHAP heat maps
+seaborn>=0.11.0,<0.12.0
