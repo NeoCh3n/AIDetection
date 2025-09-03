@@ -49,6 +49,9 @@ class Explainer:
             feature_names: Optional list of feature names (auto-generated if None)
             rule_mapping: Optional dict mapping feature names to rule descriptions
         """
+        # Initialize logging FIRST so helper methods can use it safely
+        self.logger = logging.getLogger(__name__)
+
         self.model = model
         self.background_data = self._validate_background_data(background_data)
         self.feature_names = self._setup_feature_names(feature_names)
@@ -59,9 +62,6 @@ class Explainer:
         
         # Initialize SHAP TreeExplainer optimized for RandomForest
         self.explainer = shap.TreeExplainer(self.model, data=self.background_data)
-        
-        # Setup logging
-        self.logger = logging.getLogger(__name__)
         self.logger.info("SHAP Explainer initialized successfully")
 
     def _validate_background_data(self, background_data):
