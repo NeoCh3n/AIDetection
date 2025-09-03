@@ -29,6 +29,7 @@ import argparse
 import json
 from datetime import datetime, timedelta
 import logging
+import numpy as np
 
 """
 Ensure project root is on sys.path so top-level packages (e.g., `system`,
@@ -359,7 +360,20 @@ class UnifiedPipeline:
             # Generate features
             feature_gen = FeatureGenerator()
             feature_gen.initialize_rules()
-            X = feature_gen.generate_feature_vectors(df_agg, mode='detect')
+            X, _ = feature_gen.generate_feature_vectors(df_agg, mode='detect')
+
+            # Build feature name mapping for explainability/top-k logging
+            try:
+                prod_rule_to_index = feature_gen.rule_manager.get_production_rule_to_index_map()
+                dim = feature_gen.get_feature_vector_dimension()
+                index_to_rule = [None] * dim
+                for rid, idx in prod_rule_to_index.items():
+                    if 0 <= int(idx) < dim:
+                        index_to_rule[int(idx)] = int(rid)
+                feature_names = [f"rule_{r}" if r is not None else f"feature_{i}" for i, r in enumerate(index_to_rule)]
+            except Exception:
+                index_to_rule = None
+                feature_names = [f"feature_{i}"] * (X.shape[1] if hasattr(X, 'shape') else 0)
             
             # Make predictions
             try:
@@ -370,6 +384,18 @@ class UnifiedPipeline:
 
             predictor = ModelPredictor(self.config['training']['model_path'])
             predictions = predictor.predict(X)
+
+            # Initialize SHAP explainer once if available
+            shap_explainer = None
+            try:
+                from system.shap_explainer import Explainer as ShapExplainer
+                shap_explainer = ShapExplainer(
+                    getattr(predictor, 'model', None),
+                    X if hasattr(X, 'shape') and X.shape[0] > 1 else (X if hasattr(X, 'shape') else []),
+                    feature_names=feature_names
+                )
+            except Exception as e:
+                self.logger.warning(f"SHAP explainer unavailable: {e}")
             
             # Process results; persist alerts to MongoDB
             results = []
@@ -412,6 +438,78 @@ class UnifiedPipeline:
                         )
                     except Exception:
                         pass
+
+                    # On alert, add detailed top-10 rules and SHAP explanation
+                    if is_alert:
+                        try:
+                            # Top-10 rules by feature magnitude
+                            top_n = int(self.config.get('detection', {}).get('top_rules_count', 10))
+                            if hasattr(X, 'shape') and X.shape[0] > idx:
+                                row_vec = X[idx]
+                                # argsort descending
+                                top_idx = list(reversed(np.argsort(row_vec)[:top_n].tolist()))
+                                top_rules = []
+                                for j in top_idx:
+                                    val = float(row_vec[j])
+                                    if val <= 0:
+                                        continue
+                                    rule_id = None
+                                    if index_to_rule and j < len(index_to_rule):
+                                        rule_id = index_to_rule[j]
+                                    top_rules.append({'rule_id': int(rule_id) if rule_id is not None else j, 'value': val})
+                            else:
+                                top_rules = []
+
+                            # Log alert details with top rules
+                            try:
+                                logging_utils.run_log(
+                                    "ALERT_DETAIL",
+                                    f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
+                                    payload={
+                                        'hostname': result['hostname'],
+                                        'window_id': result['window_id'],
+                                        'confidence': result['probability'],
+                                        'top_rules_by_count': top_rules,
+                                    }
+                                )
+                            except Exception:
+                                pass
+
+                            # SHAP explanation (top-N contributing features)
+                            if shap_explainer is not None and hasattr(X, 'shape'):
+                                try:
+                                    # Explain single instance
+                                    shap_vals = shap_explainer.explain(row_vec.reshape(1, -1), log_results=False)
+
+                                    # Build ranking from explainer util to align features
+                                    ranking = []
+                                    try:
+                                        ranking = shap_explainer.get_feature_importance(row_vec.reshape(1, -1))
+                                    except Exception:
+                                        pass
+
+                                    top_r = ranking[:top_n] if ranking else []
+                                    shap_top_rules = [
+                                        int(str(item.get('feature', '').replace('rule_', ''))) if str(item.get('feature', '')).startswith('rule_') else item.get('feature')
+                                        for item in top_r
+                                    ]
+                                    shap_top_values = [float(item.get('importance', 0.0)) for item in top_r]
+
+                                    try:
+                                        logging_utils.log_shap_results(
+                                            hostname=result['hostname'],
+                                            window_id=result['window_id'],
+                                            top_rules=shap_top_rules,
+                                            shap_values=shap_top_values,
+                                            prediction=label_str,
+                                            confidence=result['probability']
+                                        )
+                                    except Exception:
+                                        pass
+                                except Exception as e:
+                                    self.logger.warning(f"SHAP explanation failed for {result['window_id']}: {e}")
+                        except Exception as e:
+                            self.logger.warning(f"Alert detail logging failed: {e}")
 
                     # Persist alerts to detection_results
                     if is_alert and manager:
