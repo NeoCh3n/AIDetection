@@ -30,6 +30,7 @@ import json
 from datetime import datetime, timedelta
 import logging
 import numpy as np
+from typing import List, Optional
 
 """
 Ensure project root is on sys.path so top-level packages (e.g., `system`,
@@ -366,10 +367,11 @@ class UnifiedPipeline:
             try:
                 prod_rule_to_index = feature_gen.rule_manager.get_production_rule_to_index_map()
                 dim = feature_gen.get_feature_vector_dimension()
-                index_to_rule = [None] * dim
+                index_to_rule: List[Optional[int]] = [None] * dim
                 for rid, idx in prod_rule_to_index.items():
-                    if 0 <= int(idx) < dim:
-                        index_to_rule[int(idx)] = int(rid)
+                    j = int(idx)
+                    if 0 <= j < dim:
+                        index_to_rule[j] = int(rid)
                 feature_names = [f"rule_{r}" if r is not None else f"feature_{i}" for i, r in enumerate(index_to_rule)]
             except Exception:
                 index_to_rule = None
