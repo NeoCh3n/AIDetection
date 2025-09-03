@@ -15,7 +15,6 @@ from typing import Dict, Any
 import logging
 import glob
 from datetime import datetime, timedelta
-import pytz
 
 # Add system path for config access
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -220,14 +219,13 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
     logger.info("Loading detection data from MongoDB using unified connection...")
     
     try:
-        # Get configuration parameters
-        query_window_minutes = config.get('fetch_data_frequency_default', 15)
-        
-        # Set timezone
-        tz = pytz.UTC
-        
-        # Calculate time window
-        end_time = datetime.now(tz)
+        # Determine query window (default to pipeline window size)
+        query_window_minutes = int(
+            config.get('window_size_minutes', config.get('query_frequency_minutes', 30))
+        )
+
+        # Calculate time window using local (naive) time to match stored values
+        end_time = datetime.now()
         start_time = end_time - timedelta(minutes=query_window_minutes)
         
         # Use MongoDB connection manager

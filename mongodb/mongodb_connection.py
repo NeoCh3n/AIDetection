@@ -19,7 +19,7 @@ import sys
 import pymongo
 from typing import Dict, Any, Optional, List, Tuple
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 # Add shared_utils to path for shared utilities integration
@@ -519,9 +519,22 @@ class MongoDBConnectionManager:
             return []
         
         try:
+            # Normalize datetimes to naive UTC for comparison with stored values
+            def _normalize(dt: datetime) -> datetime:
+                try:
+                    if isinstance(dt, datetime) and dt.tzinfo is not None:
+                        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+                except Exception:
+                    pass
+                return dt
+
+            start_norm = _normalize(start_time)
+            end_norm = _normalize(end_time)
+
+            # Return windows that overlap the requested interval
             query = {
-                'window_start': {'$gte': start_time},
-                'window_end': {'$lte': end_time},
+                'window_end': {'$gt': start_norm},
+                'window_start': {'$lt': end_norm},
                 'label': {'$exists': False}
             }
             
