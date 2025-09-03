@@ -270,7 +270,8 @@ class MongoDBConnectionManager:
             for i in range(0, len(events), batch_size):
                 batch = events[i:i + batch_size]
                 
-                # Prepare bulk operations
+                # Prepare bulk operations (use PyMongo ReplaceOne)
+                from pymongo import ReplaceOne
                 operations = []
                 for event_data in batch:
                     # Process timestamps
@@ -285,20 +286,20 @@ class MongoDBConnectionManager:
                     event_data['count'] = int(event_data['count'])
                     event_data['hostname'] = str(event_data['hostname'])
                     
-                    operations.append({
-                        'replaceOne': {
-                            'filter': {
+                    operations.append(
+                        ReplaceOne(
+                            {
                                 'window_id': event_data['window_id'],
                                 'hostname': event_data['hostname'],
                                 'rule_id': event_data['rule_id']
                             },
-                            'replacement': event_data,
-                            'upsert': True
-                        }
-                    })
+                            event_data,
+                            upsert=True
+                        )
+                    )
                 
                 if operations:
-                    result = self.events_collection.bulk_write(operations)
+                    result = self.events_collection.bulk_write(operations, ordered=False)
                     total_inserted += result.upserted_count + result.modified_count
                     
                     if i % (batch_size * 10) == 0:

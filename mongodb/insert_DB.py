@@ -21,7 +21,7 @@ import math
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from pymongo import MongoClient
+from pymongo import MongoClient, ReplaceOne
 from pymongo.errors import ConnectionFailure
 from system import logging_utils
 
@@ -274,19 +274,14 @@ class AQLDataInserter:
             for i in range(0, len(documents), batch_size):
                 batch = documents[i:i + batch_size]
                 
-                # Prepare bulk operations with upsert
-                operations = []
-                for doc in batch:
-                    operations.append({
-                        'replaceOne': {
-                            'filter': {'_id': doc['_id']},
-                            'replacement': doc,
-                            'upsert': True
-                        }
-                    })
+                # Prepare bulk operations with upsert (use PyMongo ReplaceOne)
+                operations = [
+                    ReplaceOne({'_id': doc['_id']}, doc, upsert=True)
+                    for doc in batch
+                ]
                 
                 if operations:
-                    result = collection.bulk_write(operations)
+                    result = collection.bulk_write(operations, ordered=False)
                     total_inserted += result.upserted_count + result.modified_count
                     
                     if i % (batch_size * 5) == 0:
