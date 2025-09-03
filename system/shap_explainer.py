@@ -473,7 +473,8 @@ class Explainer:
                 retstep=False,
                 dtype=float,
             )
-            colors = cmap(np.asarray(linspace_vals, dtype=float))
+            # Use np.array for broad stub compatibility (Pylance/old numpy stubs)
+            colors = cmap(np.array(linspace_vals, dtype=float))
             
             bars = plt.barh(range(len(features)), importance_scores, color=colors)
             
