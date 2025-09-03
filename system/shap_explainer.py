@@ -430,7 +430,7 @@ class Explainer:
             plt.figure(figsize=figsize)
             
             # Create color map based on importance
-            colors = plt.cm.Reds(np.linspace(0.3, 0.9, len(importance_scores)))
+            colors = plt.cm.Reds(np.linspace(0.9, 0.3, len(importance_scores)))
             
             bars = plt.barh(range(len(features)), importance_scores, color=colors)
             
@@ -545,7 +545,7 @@ class Explainer:
                     continue
             
             if not top_feature_indices:
-                print("❌ No valid features found for terminal heat map")
+                print("ERROR: No valid features found for terminal heat map")
                 return
             
             # Prepare heat map data
@@ -566,11 +566,11 @@ class Explainer:
             
             # Display header
             print("\n" + "="*80)
-            print(f"🔥 SHAP HEAT MAP - {class_name}")
+            print(f"SHAP HEAT MAP - {class_name}")
             print("="*80)
-            print(f"📊 Top {n_features} Features | {n_instances} Instance(s)")
-            print("🔴 Red/High: Positive SHAP (contributes to malicious)")
-            print("🔵 Blue/Low: Negative SHAP (contributes to benign)")
+            print(f"Top {n_features} Features | {n_instances} Instance(s)")
+            print("RED/High: Positive SHAP (contributes to malicious)")
+            print("BLUE/Low: Negative SHAP (contributes to benign)")
             print("-"*80)
             
             # Display heat map using plotext
@@ -597,22 +597,22 @@ class Explainer:
                     
                     # Color coding for terminal
                     if value > 0.01:
-                        color_symbol = "🔴"
+                        color_symbol = "[+]"
                     elif value < -0.01:
-                        color_symbol = "🔵"
+                        color_symbol = "[-]"
                     else:
-                        color_symbol = "⚪"
+                        color_symbol = "[0]"
                     
                     row += f"{value:>8.3f}{color_symbol}"
                 print(row)
             
             print("-" * 60)
-            print("🎯 Legend: 🔴 High Impact | ⚪ Neutral | 🔵 Low Impact")
+            print("Legend: [+] High Impact | [0] Neutral | [-] Low Impact")
             print("="*80)
             
         except Exception as e:
             self.logger.error(f"Error displaying terminal heat map: {str(e)}")
-            print(f"❌ Error displaying terminal heat map: {str(e)}")
+            print(f"ERROR: Error displaying terminal heat map: {str(e)}")
 
     def display_terminal_importance_chart(self, X, top_features=10):
         """
@@ -626,7 +626,7 @@ class Explainer:
             ranking = self.get_feature_importance(X)[:top_features]
             
             if not ranking:
-                print("❌ No feature importance data available")
+                print("ERROR: No feature importance data available")
                 return
             
             # Prepare data for plotext
@@ -647,13 +647,13 @@ class Explainer:
                 features, 
                 importance_scores, 
                 width=60,
-                title="🔍 Top Security Rules - Feature Importance"
+                title="Top Security Rules - Feature Importance"
             )
             plt_terminal.show()
             
             # Also display as text table
             print("\n" + "="*70)
-            print("📊 FEATURE IMPORTANCE RANKING")
+            print("FEATURE IMPORTANCE RANKING")
             print("="*70)
             print(f"{'Rank':<4} {'Importance':<12} {'Security Rule':<50}")
             print("-"*70)
@@ -678,7 +678,7 @@ class Explainer:
             
         except Exception as e:
             self.logger.error(f"Error displaying terminal importance chart: {str(e)}")
-            print(f"❌ Error displaying terminal chart: {str(e)}")
+            print(f"ERROR: Error displaying terminal chart: {str(e)}")
 
     def display_terminal_summary(self, X, top_features=8):
         """
@@ -695,56 +695,56 @@ class Explainer:
             probabilities = self.model.predict_proba(X_processed)
             
             # Display header
-            print("\n" + "🛡️ " * 20)
-            print("🔍 SHAP THREAT DETECTION ANALYSIS")
-            print("🛡️ " * 20)
+            print("\n" + "=" * 60)
+            print("SHAP THREAT DETECTION ANALYSIS")
+            print("=" * 60)
             
             # Show predictions
-            print(f"\n📋 ANALYSIS SUMMARY:")
+            print(f"\nANALYSIS SUMMARY:")
             print(f"   Instances Analyzed: {len(X_processed)}")
             print(f"   Total Features: {len(self.feature_names)}")
             print(f"   Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Show predictions for each instance
-            print(f"\n🎯 MODEL PREDICTIONS:")
+            print(f"\nMODEL PREDICTIONS:")
             for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
                 confidence = prob.max()
-                status_icon = "🚨" if pred == 1 or pred == "malicious" else "✅"
+                status_icon = "[THREAT]" if pred == 1 or pred == "malicious" else "[BENIGN]"
                 print(f"   Instance {i+1}: {status_icon} {pred} (confidence: {confidence:.1%})")
             
             # Display terminal heat map
             self.display_terminal_heatmap(X, top_features=top_features, max_instances=5)
             
             # Display importance chart
-            print(f"\n📈 FEATURE IMPORTANCE ANALYSIS:")
+            print(f"\nFEATURE IMPORTANCE ANALYSIS:")
             self.display_terminal_importance_chart(X, top_features=top_features)
             
             # Show key insights
             ranking = self.get_feature_importance(X)
             if ranking:
                 top_rule = ranking[0]
-                print(f"\n💡 KEY INSIGHTS:")
-                print(f"   🥇 Most Critical Rule: {top_rule['rule']}")
-                print(f"   📊 Importance Score: {top_rule['importance']:.4f}")
-                print(f"   🎯 Detection Confidence: {probabilities.max():.1%}")
+                print(f"\nKEY INSIGHTS:")
+                print(f"   Most Critical Rule: {top_rule['rule']}")
+                print(f"   Importance Score: {top_rule['importance']:.4f}")
+                print(f"   Detection Confidence: {probabilities.max():.1%}")
                 
                 # Show threat level
                 max_confidence = probabilities.max()
                 if max_confidence > 0.9:
-                    threat_level = "🔴 HIGH"
+                    threat_level = "HIGH"
                 elif max_confidence > 0.7:
-                    threat_level = "🟡 MEDIUM"
+                    threat_level = "MEDIUM"
                 else:
-                    threat_level = "🟢 LOW"
-                print(f"   ⚠️  Threat Level: {threat_level}")
+                    threat_level = "LOW"
+                print(f"   Threat Level: {threat_level}")
             
-            print("\n" + "🛡️ " * 20)
-            print("✅ Terminal analysis complete!")
-            print("🛡️ " * 20)
+            print("\n" + "=" * 60)
+            print("Terminal analysis complete!")
+            print("=" * 60)
             
         except Exception as e:
             self.logger.error(f"Error displaying terminal summary: {str(e)}")
-            print(f"❌ Error displaying terminal summary: {str(e)}")
+            print(f"ERROR: Error displaying terminal summary: {str(e)}")
 
     def generate_markdown_report(self, X, output_path=None, include_visualizations=True):
         """
