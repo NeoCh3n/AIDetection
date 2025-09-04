@@ -17,7 +17,8 @@ Usage:
     explainer = Explainer()
     results = explainer.explain(
         model=my_model,
-        data=input_data,
+        background_data=background_data,
+        instance_data=instance_data,
         feature_name_list=feature_names,
         output_dir="./results",
         plot=True,
@@ -62,18 +63,20 @@ class Explainer:
     
     def explain(self, 
                 model, 
-                data: Union[np.ndarray, pd.DataFrame], 
+                background_data: Union[np.ndarray, pd.DataFrame], 
+                instance_data: Union[np.ndarray, pd.DataFrame],
                 feature_name_list: List[str], 
                 output_dir: str,
                 plot: bool = False,
                 plot_in_terminal: bool = False, 
                 summary_report: bool = False) -> Dict[str, Any]:
         """
-        Explain a machine learning model using SHAP values.
+        Explain a machine learning model using SHAP values for specific instances.
         
         Args:
             model: Trained ML model with predict() and predict_proba() methods
-            data: Input data to explain (background data for SHAP baseline)
+            background_data: Background data for SHAP baseline (representative sample)
+            instance_data: Specific instance(s) to explain
             feature_name_list: List of feature names for meaningful explanations
             output_dir: Directory to save outputs (plots, reports)
             plot: Whether to generate and save visualization plots (default: False)
@@ -88,64 +91,64 @@ class Explainer:
         """
         try:
             # Validate inputs
-            self._validate_inputs(model, data, feature_name_list, output_dir)
+            self._validate_inputs(model, background_data, instance_data, feature_name_list, output_dir)
             
-            # Prepare data and initialize SHAP
-            background_data = self._prepare_background_data(data)
-            feature_names = self._validate_feature_names(feature_name_list, background_data)
-            
-            # Initialize SHAP explainer
-            explainer = self._initialize_shap_explainer(model, background_data)
-            
-            # Generate SHAP explanations
-            self.logger.info(f"Generating SHAP explanations for {background_data.shape[0]} samples...")
-            shap_values = explainer.shap_values(background_data)
-            
-            # Calculate feature importance
-            importance_ranking = self._calculate_feature_importance(shap_values, feature_names)
+            # Prepare data
+            background_array = self._prepare_background_data(background_data)
+            instance_array = self._prepare_instance_data(instance_data)
+            feature_names = self._validate_feature_names(feature_name_list, background_array)
             
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
+            self.logger.info(f"Created output directory: {output_dir}")
             
-            # Prepare results
+            # Initialize SHAP explainer with background data
+            explainer = self._initialize_shap_explainer(model, background_array)
+            
+            # Calculate SHAP values for the specific instances
+            self.logger.info(f"Calculating SHAP values for {instance_array.shape[0]} instance(s)")
+            shap_values = explainer.shap_values(instance_array)
+            
+            # Calculate feature importance
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            
+            # Build results
             results = {
                 'shap_values': shap_values,
-                'feature_importance': importance_ranking,
-                'model_type': type(model).__name__,
-                'samples_analyzed': background_data.shape[0],
+                'feature_importance': feature_importance,
+                'feature_names': feature_names,
+                'instance_shape': instance_array.shape,
+                'background_shape': background_array.shape,
+                'samples_analyzed': instance_array.shape[0],
                 'features_count': len(feature_names),
+                'model_type': type(model).__name__,
                 'timestamp': datetime.now().isoformat(),
                 'output_files': {}
             }
             
             # Generate visualizations if requested
             if plot:
-                plot_files = self._generate_plots(
-                    shap_values, feature_names, importance_ranking, output_dir
-                )
+                plot_files = self._generate_plots(shap_values, feature_names, instance_array, output_dir)
                 results['output_files'].update(plot_files)
             
-            # Display terminal plots if requested
+            # Terminal visualization
             if plot_in_terminal:
-                self._display_terminal_visualizations(
-                    shap_values, feature_names, importance_ranking, model, background_data
-                )
+                self._display_terminal_plots(shap_values, feature_names, model, instance_array)
             
-            # Generate summary report if requested
+            # Summary report
             if summary_report:
-                report_file = self._generate_summary_report(
-                    results, model, background_data, feature_names, output_dir
-                )
-                results['output_files']['summary_report'] = report_file
+                report_path = self._generate_summary_report(results, model, background_array, instance_array, feature_names, output_dir)
+                if report_path:
+                    results['output_files']['summary_report'] = report_path
             
-            self.logger.info(f"SHAP analysis completed successfully. Results saved to {output_dir}")
+            self.logger.info("SHAP explanation completed successfully")
             return results
             
         except Exception as e:
             self.logger.error(f"Error in SHAP explanation: {e}")
             raise
     
-    def _validate_inputs(self, model, data, feature_name_list, output_dir):
+    def _validate_inputs(self, model, background_data, instance_data, feature_name_list, output_dir):
         """Validate all input parameters."""
         # Validate model
         if model is None:
@@ -155,9 +158,13 @@ class Explainer:
         if not hasattr(model, 'predict_proba'):
             raise ValueError("Model must have a 'predict_proba' method")
         
-        # Validate data
-        if data is None:
-            raise ValueError("Data cannot be None")
+        # Validate background data
+        if background_data is None:
+            raise ValueError("Background data cannot be None")
+        
+        # Validate instance data
+        if instance_data is None:
+            raise ValueError("Instance data cannot be None")
         
         # Validate feature names
         if not feature_name_list or not isinstance(feature_name_list, (list, tuple)):
@@ -180,18 +187,46 @@ class Explainer:
             try:
                 data_array = np.array(data)
             except Exception as e:
-                raise ValueError(f"Cannot convert data to numpy array: {e}")
+                raise ValueError(f"Cannot convert background data to numpy array: {e}")
         
         # Validate shape
         if data_array.ndim != 2:
-            raise ValueError(f"Data must be 2D, got shape {data_array.shape}")
+            raise ValueError(f"Background data must be 2D, got shape {data_array.shape}")
         
         if data_array.shape[0] == 0 or data_array.shape[1] == 0:
-            raise ValueError(f"Data cannot be empty, got shape {data_array.shape}")
+            raise ValueError(f"Background data cannot be empty, got shape {data_array.shape}")
         
         # Check for invalid values
         if not np.isfinite(data_array).all():
-            self.logger.warning("Data contains non-finite values (NaN, inf)")
+            self.logger.warning("Background data contains non-finite values (NaN, inf)")
+        
+        return data_array
+    
+    def _prepare_instance_data(self, data):
+        """Prepare and validate instance data."""
+        # Convert to numpy array
+        if isinstance(data, pd.DataFrame):
+            data_array = data.values
+        elif isinstance(data, np.ndarray):
+            data_array = data.copy()
+        else:
+            try:
+                data_array = np.array(data)
+            except Exception as e:
+                raise ValueError(f"Cannot convert instance data to numpy array: {e}")
+        
+        # Ensure 2D
+        if data_array.ndim == 1:
+            data_array = data_array.reshape(1, -1)
+        elif data_array.ndim != 2:
+            raise ValueError(f"Instance data must be 1D or 2D, got shape {data_array.shape}")
+        
+        if data_array.shape[0] == 0 or data_array.shape[1] == 0:
+            raise ValueError(f"Instance data cannot be empty, got shape {data_array.shape}")
+        
+        # Check for invalid values
+        if not np.isfinite(data_array).all():
+            raise ValueError("Instance data contains non-finite values (NaN, inf)")
         
         return data_array
     
@@ -277,7 +312,7 @@ class Explainer:
             self.logger.error(f"Error calculating feature importance: {e}")
             return []
     
-    def _generate_plots(self, shap_values, feature_names, importance_ranking, output_dir):
+    def _generate_plots(self, shap_values, feature_names, instance_data, output_dir):
         """Generate visualization plots and save to files."""
         plot_files = {}
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -285,12 +320,12 @@ class Explainer:
         try:
             # Generate feature importance plot
             importance_path = os.path.join(output_dir, f"feature_importance_{timestamp}.png")
-            self._create_importance_plot(importance_ranking, importance_path)
+            self._create_importance_plot(shap_values, feature_names, importance_path)
             plot_files['importance_plot'] = importance_path
             
             # Generate SHAP heatmap
             heatmap_path = os.path.join(output_dir, f"shap_heatmap_{timestamp}.png")
-            self._create_heatmap_plot(shap_values, feature_names, importance_ranking, heatmap_path)
+            self._create_heatmap_plot(shap_values, feature_names, instance_data, heatmap_path)
             plot_files['heatmap'] = heatmap_path
             
             self.logger.info(f"Plots generated successfully in {output_dir}")
@@ -300,49 +335,56 @@ class Explainer:
         
         return plot_files
     
-    def _create_importance_plot(self, importance_ranking, output_path, top_features=15):
+    def _create_importance_plot(self, shap_values, feature_names, output_path, top_features=15):
         """Create and save feature importance plot."""
-        if not importance_ranking:
-            self.logger.warning("No feature importance data available for plotting")
-            return
-        
-        # Prepare data
-        ranking = importance_ranking[:top_features]
-        features = [item['feature'] for item in ranking]
-        scores = [item['importance'] for item in ranking]
-        
-        # Truncate long feature names
-        features = [f[:30] + "..." if len(f) > 30 else f for f in features]
-        
-        # Create plot
-        plt.figure(figsize=(10, max(6, len(features) * 0.4)))
-        
-        # Color gradient
-        colors = plt.cm.Reds(np.linspace(0.8, 0.3, len(scores)))
-        
-        bars = plt.barh(range(len(features)), scores, color=colors)
-        
-        # Customize
-        plt.yticks(range(len(features)), features)
-        plt.xlabel('SHAP Importance Score')
-        plt.title(f'Top {len(features)} Feature Importance Ranking')
-        plt.gca().invert_yaxis()
-        
-        # Add value labels
-        for i, (bar, score) in enumerate(zip(bars, scores)):
-            plt.text(bar.get_width() + max(scores) * 0.01, 
-                    bar.get_y() + bar.get_height()/2,
-                    f'{score:.4f}', ha='left', va='center')
-        
-        plt.grid(axis='x', alpha=0.3)
-        plt.tight_layout()
-        
-        # Save plot
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        self.logger.info(f"Feature importance plot saved to {output_path}")
+        try:
+            # Calculate feature importance
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            
+            if not feature_importance:
+                self.logger.warning("No feature importance data available for plotting")
+                return
+            
+            # Prepare data
+            ranking = feature_importance[:top_features]
+            features = [item['feature'] for item in ranking]
+            scores = [item['importance'] for item in ranking]
+            
+            # Truncate long feature names
+            features = [f[:30] + "..." if len(f) > 30 else f for f in features]
+            
+            # Create plot
+            plt.figure(figsize=(10, max(6, len(features) * 0.4)))
+            
+            # Color gradient
+            colors = plt.cm.Reds(np.linspace(0.8, 0.3, len(scores)))
+            
+            bars = plt.barh(range(len(features)), scores, color=colors)
+            
+            # Customize
+            plt.yticks(range(len(features)), features)
+            plt.xlabel('SHAP Importance Score')
+            plt.title(f'Top {len(features)} Feature Importance Ranking')
+            plt.gca().invert_yaxis()
+            
+            # Add value labels
+            for i, (bar, score) in enumerate(zip(bars, scores)):
+                plt.text(bar.get_width() + max(scores) * 0.01, 
+                        bar.get_y() + bar.get_height()/2,
+                        f'{score:.4f}', ha='left', va='center')
+            
+            plt.grid(axis='x', alpha=0.3)
+            plt.tight_layout()
+            
+            # Save plot
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            self.logger.info(f"Feature importance plot saved to {output_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating importance plot: {e}")
     
-    def _create_heatmap_plot(self, shap_values, feature_names, importance_ranking, output_path, top_features=20):
+    def _create_heatmap_plot(self, shap_values, feature_names, instance_data, output_path, top_features=20):
         """Create and save SHAP heatmap plot."""
         try:
             # Handle multi-class output
@@ -361,12 +403,12 @@ class Explainer:
                 values = values.values
             values = np.array(values)
             
-            # Prepare data for heatmap
-            n_instances = min(values.shape[0], 10)  # Limit instances for readability
-            n_features = min(top_features, len(importance_ranking))
+            # Calculate feature importance for ordering
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            n_features = min(top_features, len(feature_importance))
             
             # Get top feature indices
-            top_feature_names = [item['feature'] for item in importance_ranking[:n_features]]
+            top_feature_names = [item['feature'] for item in feature_importance[:n_features]]
             top_feature_indices = []
             
             for fname in top_feature_names:
@@ -380,7 +422,8 @@ class Explainer:
                 self.logger.warning("No valid feature indices found for heatmap")
                 return
             
-            # Create heatmap data
+            # Prepare heatmap data
+            n_instances = min(values.shape[0], 10)  # Limit instances for readability
             if values.ndim > 1:
                 heatmap_data = values[:n_instances, top_feature_indices]
                 instance_labels = [f"Instance {i+1}" for i in range(n_instances)]
@@ -416,16 +459,8 @@ class Explainer:
             cbar.set_label('SHAP Value (Impact on Prediction)')
             
             # Set labels
-            plt.xticks(ticks=np.arange(len(feature_labels)), labels=feature_labels, rotation=45, ha='right')
-            plt.yticks(ticks=np.arange(len(instance_labels)), labels=instance_labels)
-            
-            # Annotate cells
-            h, w = heatmap_data.shape
-            for i in range(h):
-                for j in range(w):
-                    val = heatmap_data[i, j]
-                    color = 'black' if abs(val) < (0.6 * absmax) else 'white'
-                    plt.text(j, i, f"{val:.3f}", ha='center', va='center', fontsize=8, color=color)
+            plt.xticks(range(len(feature_labels)), feature_labels, rotation=45, ha='right')
+            plt.yticks(range(len(instance_labels)), instance_labels)
             
             # Title and labels
             plt.title(
@@ -446,12 +481,12 @@ class Explainer:
         except Exception as e:
             self.logger.error(f"Error creating heatmap: {e}")
     
-    def _display_terminal_visualizations(self, shap_values, feature_names, importance_ranking, model, background_data):
+    def _display_terminal_plots(self, shap_values, feature_names, model, instance_data):
         """Display visualizations in terminal."""
         try:
             # Get model predictions
-            predictions = model.predict(background_data)
-            probabilities = model.predict_proba(background_data)
+            predictions = model.predict(instance_data)
+            probabilities = model.predict_proba(instance_data)
             
             # Display header
             print("\n" + "=" * 70)
@@ -460,19 +495,20 @@ class Explainer:
             
             # Model info
             print(f"\nModel: {type(model).__name__}")
-            print(f"Samples analyzed: {len(background_data)}")
+            print(f"Instances analyzed: {len(instance_data)}")
             print(f"Features: {len(feature_names)}")
             print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Predictions summary
             print(f"\nPredictions:")
-            unique_preds, counts = np.unique(predictions, return_counts=True)
-            for pred, count in zip(unique_preds, counts):
-                confidence = probabilities[predictions == pred].max(axis=1).mean()
-                print(f"  {pred}: {count} samples (avg confidence: {confidence:.2%})")
+            for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
+                confidence = prob.max()
+                pred_label = "Malicious" if pred == 1 else "Benign"
+                print(f"  Instance {i+1}: {pred_label} (confidence: {confidence:.1%})")
             
             # Feature importance table
-            top_features = importance_ranking[:10]  # Top 10
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            top_features = feature_importance[:10]  # Top 10
             if top_features:
                 print(f"\nTop {len(top_features)} Most Important Features:")
                 print("-" * 70)
@@ -484,12 +520,7 @@ class Explainer:
                     if len(feature) > 45:
                         feature = feature[:42] + "..."
                     
-                    # Visual bar
-                    bar_length = min(20, int(item['importance'] * 100))
-                    bar = "█" * bar_length + "░" * (20 - bar_length)
-                    
                     print(f"{item['rank']:<4} {item['importance']:<12.4f} {feature:<50}")
-                    print(f"     {bar}")
                 
                 print("-" * 70)
                 print(f"Most critical feature: {top_features[0]['feature']}")
@@ -498,18 +529,18 @@ class Explainer:
             print("=" * 70)
             
         except Exception as e:
-            self.logger.error(f"Error displaying terminal visualizations: {e}")
+            self.logger.error(f"Error displaying terminal plots: {e}")
             print(f"ERROR: {e}")
     
-    def _generate_summary_report(self, results, model, background_data, feature_names, output_dir):
+    def _generate_summary_report(self, results, model, background_data, instance_data, feature_names, output_dir):
         """Generate markdown summary report."""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             report_path = os.path.join(output_dir, f"shap_analysis_report_{timestamp}.md")
             
             # Get predictions
-            predictions = model.predict(background_data)
-            probabilities = model.predict_proba(background_data)
+            predictions = model.predict(instance_data)
+            probabilities = model.predict_proba(instance_data)
             
             # Generate report content
             report_lines = [
@@ -517,26 +548,29 @@ class Explainer:
                 "",
                 f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 f"**Model Type:** {type(model).__name__}",
-                f"**Samples Analyzed:** {len(background_data)}",
-                f"**Total Features:** {len(feature_names)}",
+                f"**Instances Analyzed:** {results['samples_analyzed']}",
+                f"**Total Features:** {results['features_count']}",
+                f"**Background Data Shape:** {background_data.shape}",
                 "",
-                "## Model Predictions Summary",
+                "## Instance Predictions",
                 ""
             ]
             
             # Add prediction details
-            unique_preds, counts = np.unique(predictions, return_counts=True)
-            for pred, count in zip(unique_preds, counts):
-                confidence = probabilities[predictions == pred].max(axis=1).mean()
+            for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
+                pred_label = "Malicious" if pred == 1 else "Benign"
+                confidence = prob.max()
                 report_lines.extend([
-                    f"- **Prediction {pred}:** {count} samples (avg confidence: {confidence:.2%})",
+                    f"### Instance {i+1}",
+                    f"- **Prediction:** {pred_label}",
+                    f"- **Confidence:** {confidence:.1%}",
+                    ""
                 ])
             
             # Add feature importance table
             top_features = results['feature_importance'][:15]  # Top 15
             if top_features:
                 report_lines.extend([
-                    "",
                     "## Top Contributing Features",
                     "",
                     "| Rank | Feature | Importance Score |",
@@ -582,6 +616,7 @@ class Explainer:
                 "",
                 f"- **SHAP Analysis Timestamp:** {results['timestamp']}",
                 f"- **Background Data Shape:** {background_data.shape}",
+                f"- **Instance Data Shape:** {instance_data.shape}",
                 f"- **Feature Count:** {results['features_count']}",
                 f"- **Samples Analyzed:** {results['samples_analyzed']}",
                 ""
@@ -597,319 +632,6 @@ class Explainer:
         except Exception as e:
             self.logger.error(f"Error generating summary report: {e}")
             return None
-    
-    def __str__(self) -> str:
-        """String representation of the explainer."""
-        return "SHAP Explainer (ready to use with explain() method)"
-    
-    def __repr__(self) -> str:
-        """Detailed representation of the explainer."""
-        return self.__str__()
-        """
-        Generate SHAP explanations for input data.
-        
-        Args:
-            X: Input data to explain (single instance or batch)
-            max_samples: Maximum number of samples to explain (for performance)
-            log_results: Whether to log explanation results
-            
-        Returns:
-            SHAP values array with shape (n_samples, n_features) or (n_samples, n_features, n_classes)
-            
-        Raises:
-            ValueError: If input data is invalid
-        """
-        try:
-            # Prepare input data
-            X_processed = self._prepare_input_data(X)
-            
-            # Limit samples for performance
-            if X_processed.shape[0] > max_samples:
-                self.logger.warning(f"Limiting explanation to {max_samples} samples (got {X_processed.shape[0]})")
-                X_processed = X_processed[:max_samples]
-            
-            # Generate SHAP values
-            self.logger.info(f"Generating SHAP explanations for {X_processed.shape[0]} samples...")
-            shap_values = self.explainer.shap_values(X_processed)
-            
-            # Log results if requested
-            if log_results:
-                self._log_explanation_summary(X_processed, shap_values)
-            
-            return shap_values
-            
-        except Exception as e:
-            self.logger.error(f"Error generating SHAP explanation: {e}")
-            raise
-    
-    def _prepare_input_data(self, X):
-        """Prepare and validate input data for SHAP explanation."""
-        # Convert to numpy array
-        if isinstance(X, pd.DataFrame):
-            X_array = X.values
-        elif isinstance(X, np.ndarray):
-            X_array = X.copy()
-        else:
-            try:
-                X_array = np.array(X)
-            except Exception as e:
-                raise ValueError(f"Cannot convert input data to numpy array: {e}")
-        
-        # Ensure 2D
-        if X_array.ndim == 1:
-            X_array = X_array.reshape(1, -1)
-        elif X_array.ndim != 2:
-            raise ValueError(f"Input data must be 1D or 2D, got shape {X_array.shape}")
-        
-        # Validate feature count
-        if X_array.shape[1] != self.background_data.shape[1]:
-            raise ValueError(f"Input features ({X_array.shape[1]}) don't match "
-                           f"background data features ({self.background_data.shape[1]})")
-        
-        # Check for invalid values
-        if not np.isfinite(X_array).all():
-            raise ValueError("Input data contains non-finite values (NaN, inf)")
-        
-        return X_array
-    
-    def _log_explanation_summary(self, X, shap_values):
-        """Log a summary of the SHAP explanation results."""
-        try:
-            # Handle different SHAP value formats
-            if isinstance(shap_values, list):
-                # Multi-class: use class 1 for binary or first class for multi-class
-                if len(shap_values) == 2:
-                    values = shap_values[1]  # Binary classification - positive class
-                    class_name = "positive_class"
-                else:
-                    values = shap_values[0]  # Multi-class - first class
-                    class_name = f"class_0"
-            else:
-                values = shap_values
-                class_name = "prediction"
-            
-            # Convert to numpy array if needed
-            if hasattr(values, 'values'):
-                values = values.values
-            values = np.array(values)
-            
-            # Calculate feature importance
-            if values.ndim == 2:
-                importance = np.abs(values).mean(axis=0)
-            else:
-                importance = np.abs(values)
-            
-            # Get top features
-            top_indices = np.argsort(importance)[-5:][::-1]  # Top 5
-            
-            summary = {
-                'timestamp': datetime.now().isoformat(),
-                'samples_explained': X.shape[0],
-                'class_explained': class_name,
-                'top_features': []
-            }
-            
-            for i, idx in enumerate(top_indices):
-                if idx < len(self.feature_names):
-                    summary['top_features'].append({
-                        'rank': i + 1,
-                        'feature': self.feature_names[idx],
-                        'rule': self.rule_mapping.get(self.feature_names[idx], self.feature_names[idx]),
-                        'avg_importance': float(importance[idx])
-                    })
-            
-            self.logger.info("SHAP Explanation Summary:")
-            self.logger.info(json.dumps(summary, indent=2))
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to log explanation summary: {e}")
-    
-    def get_feature_importance(self, X: Union[np.ndarray, pd.DataFrame, list], 
-                             class_index: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Get feature importance ranking for input data.
-        
-        Args:
-            X: Input data to analyze
-            class_index: For multi-class models, which class to analyze (None for auto-select)
-            
-        Returns:
-            List of dicts with feature importance ranking
-        """
-        try:
-            shap_values = self.explain(X, log_results=False)
-            
-            # Handle different SHAP value formats
-            if isinstance(shap_values, list):
-                if class_index is not None and class_index < len(shap_values):
-                    values = shap_values[class_index]
-                elif len(shap_values) == 2:
-                    values = shap_values[1]  # Binary - positive class
-                else:
-                    values = shap_values[0]  # Multi-class - first class
-            else:
-                values = shap_values
-            
-            # Convert to numpy array if needed
-            if hasattr(values, 'values'):
-                values = values.values
-            values = np.array(values)
-            
-            # Calculate importance
-            if values.ndim == 2:
-                importance = np.abs(values).mean(axis=0)
-            else:
-                importance = np.abs(values)
-            
-            # Create ranking
-            indices = np.argsort(importance)[::-1]
-            ranking = []
-            
-            for rank, idx in enumerate(indices, 1):
-                if idx < len(self.feature_names):
-                    feature_name = self.feature_names[idx]
-                    rule_name = self.rule_mapping.get(feature_name, feature_name)
-                    
-                    ranking.append({
-                        'rank': rank,
-                        'feature': feature_name,
-                        'rule': str(rule_name),
-                        'importance': float(importance[idx])
-                    })
-            
-            return ranking
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating feature importance: {e}")
-            return []
-    
-    def generate_summary_plot(self, X: Union[np.ndarray, pd.DataFrame, list], 
-                            output_path: Optional[str] = None, 
-                            top_features: int = 15) -> Optional[str]:
-        """
-        Generate a summary plot showing feature importance.
-        
-        Args:
-            X: Input data to analyze
-            output_path: Path to save the plot (None to display only)
-            top_features: Number of top features to show
-            
-        Returns:
-            Path to saved plot or None if display only
-        """
-        try:
-            ranking = self.get_feature_importance(X)[:top_features]
-            
-            if not ranking:
-                self.logger.warning("No feature importance data available")
-                return None
-            
-            # Prepare data
-            features = [item['rule'][:30] + "..." if len(item['rule']) > 30 
-                       else item['rule'] for item in ranking]
-            scores = [item['importance'] for item in ranking]
-            
-            # Create plot
-            plt.figure(figsize=(10, max(6, len(features) * 0.4)))
-            
-            # Color gradient
-            colors = plt.cm.Reds(np.linspace(0.8, 0.3, len(scores)))
-            
-            bars = plt.barh(range(len(features)), scores, color=colors)
-            
-            # Customize
-            plt.yticks(range(len(features)), features)
-            plt.xlabel('SHAP Importance Score')
-            plt.title(f'Top {len(features)} Feature Importance Ranking')
-            plt.gca().invert_yaxis()
-            
-            # Add value labels
-            for i, (bar, score) in enumerate(zip(bars, scores)):
-                plt.text(bar.get_width() + max(scores) * 0.01, 
-                        bar.get_y() + bar.get_height()/2,
-                        f'{score:.4f}', ha='left', va='center')
-            
-            plt.grid(axis='x', alpha=0.3)
-            plt.tight_layout()
-            
-            # Save or show
-            if output_path:
-                plt.savefig(output_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                self.logger.info(f"Feature importance plot saved to {output_path}")
-                return output_path
-            else:
-                plt.show()
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Error generating summary plot: {e}")
-            return None
-    
-    def display_terminal_summary(self, X: Union[np.ndarray, pd.DataFrame, list], 
-                               top_features: int = 10):
-        """
-        Display feature importance summary in terminal.
-        
-        Args:
-            X: Input data to analyze
-            top_features: Number of top features to display
-        """
-        try:
-            # Get model predictions
-            X_processed = self._prepare_input_data(X)
-            predictions = self.model.predict(X_processed)
-            probabilities = self.model.predict_proba(X_processed)
-            
-            # Get feature importance
-            ranking = self.get_feature_importance(X)[:top_features]
-            
-            # Display header
-            print("\n" + "=" * 70)
-            print("SHAP MODEL EXPLANATION SUMMARY")
-            print("=" * 70)
-            
-            # Model info
-            print(f"\nModel: {type(self.model).__name__}")
-            print(f"Samples analyzed: {len(X_processed)}")
-            print(f"Features: {len(self.feature_names)}")
-            print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            # Predictions summary
-            print(f"\nPredictions:")
-            unique_preds, counts = np.unique(predictions, return_counts=True)
-            for pred, count in zip(unique_preds, counts):
-                confidence = probabilities[predictions == pred].max(axis=1).mean()
-                print(f"  {pred}: {count} samples (avg confidence: {confidence:.2%})")
-            
-            # Feature importance table
-            if ranking:
-                print(f"\nTop {len(ranking)} Most Important Features:")
-                print("-" * 70)
-                print(f"{'Rank':<4} {'Importance':<12} {'Feature/Rule':<50}")
-                print("-" * 70)
-                
-                for item in ranking:
-                    rule = item['rule']
-                    if len(rule) > 45:
-                        rule = rule[:42] + "..."
-                    
-                    # Visual bar
-                    bar_length = min(20, int(item['importance'] * 100))
-                    bar = "█" * bar_length + "░" * (20 - bar_length)
-                    
-                    print(f"{item['rank']:<4} {item['importance']:<12.4f} {rule:<50}")
-                    print(f"     {bar}")
-                
-                print("-" * 70)
-                print(f"Most critical feature: {ranking[0]['rule']}")
-                print(f"Importance score: {ranking[0]['importance']:.4f}")
-            
-            print("=" * 70)
-            
-        except Exception as e:
-            self.logger.error(f"Error displaying terminal summary: {e}")
-            print(f"ERROR: {e}")
     
     def __str__(self) -> str:
         """String representation of the explainer."""
