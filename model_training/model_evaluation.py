@@ -37,6 +37,12 @@ from pipeline.data_loader import load_data
 from pipeline.feature_aggregator import aggregate_to_windows
 from pipeline.feature_generator import FeatureGenerator
 
+# Ensure all logs go to running_log/YYYY-MM-DD.log
+try:
+    logging_utils.setup_global_daily_file_logging(include_stdout=True)
+except Exception:
+    pass
+
 
 class EvaluationResults:
     """Data class to hold evaluation results"""

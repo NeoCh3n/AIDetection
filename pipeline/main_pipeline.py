@@ -87,20 +87,15 @@ class UnifiedPipeline:
         self.setup_logging()
         
     def setup_logging(self):
-        """Setup unified logging for pipeline"""
-        log_dir = os.path.join(os.path.dirname(__file__), '..', 'running_log')
-        os.makedirs(log_dir, exist_ok=True)
-        
-        log_file = os.path.join(log_dir, f'pipeline_{self.mode}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
-        
-        logging.basicConfig(
-            level=logging.DEBUG if self.verbose else logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()
-            ]
-        )
+        """Setup unified logging: all logs to running_log/YYYY-MM-DD.log"""
+        # Route all Python logging to the daily running_log file and keep console output.
+        # This avoids creating per-run pipeline_* log files.
+        try:
+            level = logging.DEBUG if self.verbose else logging.INFO
+            logging_utils.setup_global_daily_file_logging(level=level, include_stdout=True)
+        except Exception:
+            # Fallback: ensure at least a basic console logger is present
+            logging.basicConfig(level=logging.DEBUG if self.verbose else logging.INFO)
         self.logger = logging.getLogger('UnifiedPipeline')
         
     def load_config(self, config_path=None):

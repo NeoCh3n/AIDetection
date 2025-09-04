@@ -32,7 +32,11 @@ from pipeline.feature_aggregator import aggregate_to_windows
 from pipeline.feature_generator import FeatureGenerator
 from shared_utils.qradar_rule_manager import QRadarRuleManager
 
-# Configure logging
+# Configure logging: route all logs to running_log/YYYY-MM-DD.log
+try:
+    logging_utils.setup_global_daily_file_logging(level=logging.INFO, include_stdout=True)
+except Exception:
+    pass
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
