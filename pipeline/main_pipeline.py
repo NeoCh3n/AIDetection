@@ -53,6 +53,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils')
 from data_loader import load_data
 from feature_aggregator import aggregate_to_windows
 from feature_generator import FeatureGenerator
+from system.shap_explainer import Explainer
 
 # Training/Evaluation from model_training package
 from model_training.model_training import train_threat_detector, evaluate_and_report
@@ -399,6 +400,7 @@ class UnifiedPipeline:
             except Exception as e:
                 self.logger.warning(f"SHAP explainer unavailable: {e}")
             
+            explainer = Explainer(predictor, X) #Explainer class initialization
             # Process results; persist alerts to MongoDB
             results = []
             try:
@@ -432,13 +434,44 @@ class UnifiedPipeline:
                     # Unified detection logging
                     try:
                         label_str = 'malicious' if int(pred) == 1 else 'normal'
+                        
+                        # Create unique output directory for this window_id and timestamp
+                        window_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        window_id = df_agg.iloc[idx]['window_id']
+                        hostname = df_agg.iloc[idx]['hostname']
+                        
+                        # Clean hostname for filesystem safety
+                        safe_hostname = "".join(c for c in hostname if c.isalnum() or c in ('-', '_')).rstrip()
+                        output_subdir = f"detection_output/{safe_hostname}_{window_id}_{window_timestamp}"
+                        os.makedirs(output_subdir, exist_ok=True)
+                        
+                        # Generate SHAP plots in the unique directory
+                        shap_values = explainer.explain(X, generate_plots=True, output_dir=output_subdir, show_terminal=False)
+                        ranking = explainer.get_feature_importance(X)
+                        
+                        # Generate markdown report in the same directory
+                        report_filename = f"threat_report_{safe_hostname}_{window_id}_{window_timestamp}.md"
+                        report_path = os.path.join(output_subdir, report_filename)
+                        report = explainer.generate_markdown_report(X, report_path)
+                        
                         logging_utils.log_detection(
                             hostname=result['hostname'],
                             window_id=result['window_id'],
                             prediction=label_str,
                             confidence=result['probability']
                         )
-                    except Exception:
+                        logging_utils.log_shap_results(
+                            hostname=result['hostname'],
+                            window_id=result['window_id'],
+                            top_rules=[item['rule'] for item in ranking[:10]],
+                            shap_values=[item['importance'] for item in ranking[:10]],
+                            report_path=report_path
+                        )
+                        
+                        self.logger.info(f"SHAP analysis saved to: {output_subdir}")
+                        
+                    except Exception as e:
+                        self.logger.warning(f"SHAP analysis failed for window {result.get('window_id', 'unknown')}: {str(e)}")
                         pass
 
                     # On alert, add detailed top-10 rules and SHAP explanation
