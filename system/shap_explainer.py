@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 """
-SHAP Explainer for RandomForest Threat Detection Models
+SHAP Explainer for Machine Learning Models
 
 This module provides SHAP (SHapley Additive exPlanations) explainability for
-RandomForest models used in malicious activity detection. It integrates with
-the logging system to provide detailed explanations when malicious predictions
-are made.
+machine learning models used in threat detection and classification tasks.
 
 Features:
-- Simple 2-parameter constructor (model, background_data)
-- Automatic rule mapping configuration
-- Logging integration for threat detection records
-- Feature importance ranking
-- Markdown report generation
+- Simple initialization with no parameters
+- Main explain() function with required and optional parameters
+- Support for tree-based models (RandomForest, XGBoost, etc.)
+- Feature importance ranking and visualization
+- Terminal and file-based reporting
+- Comprehensive logging integration
 
 Usage:
-    explainer = Explainer(model, background_data)
-    shap_values = explainer.explain(suspicious_data)
-    ranking = explainer.get_feature_importance(suspicious_data)
+    explainer = Explainer()
+    results = explainer.explain(
+        model=my_model,
+        background_data=background_data,
+        instance_data=instance_data,
+        feature_name_list=feature_names,
+        output_dir="./results",
+        plot=True,
+        plot_in_terminal=True,
+        summary_report=True
+    )
 """
 
 import shap
@@ -25,267 +32,262 @@ import json
 import os
 import logging
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import plotext as plt_terminal
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 class Explainer:
     """
-    SHAP Explainer for RandomForest threat detection models.
+    SHAP Explainer for machine learning models.
     
-    Provides explainability for malicious predictions using SHAP values,
-    with integrated logging and rule mapping for security analysis.
+    Provides explainability for model predictions using SHAP values,
+    with support for various model types and comprehensive analysis features.
+    
+    The class is initialized without parameters and provides a main explain()
+    function that accepts all necessary inputs.
     """
     
-    def __init__(self, model, background_data, feature_names=None, rule_mapping=None):
+    def __init__(self):
         """
-        Initialize SHAP explainer for RandomForest models.
+        Initialize SHAP explainer with no parameters.
+        
+        The explainer is ready to use with the explain() method which accepts
+        all necessary parameters for model explanation.
+        """
+        # Initialize logging
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.info("SHAP Explainer initialized and ready to use")
+    
+    def explain(self, 
+                model, 
+                background_data: Union[np.ndarray, pd.DataFrame], 
+                instance_data: Union[np.ndarray, pd.DataFrame],
+                feature_name_list: List[str], 
+                output_dir: str,
+                plot: bool = False,
+                plot_in_terminal: bool = False, 
+                summary_report: bool = False) -> Dict[str, Any]:
+        """
+        Explain a machine learning model using SHAP values for specific instances.
         
         Args:
-            model: Trained RandomForest model with predict() and predict_proba() methods
-            background_data: Background dataset for SHAP baseline (numpy array or pandas DataFrame)
-            feature_names: Optional list of feature names (auto-generated if None)
-            rule_mapping: Optional dict mapping feature names to rule descriptions
-        """
-        # Initialize logging FIRST so helper methods can use it safely
-        self.logger = logging.getLogger(__name__)
-
-        self.model = model
-        self.background_data = self._validate_background_data(background_data)
-        self.feature_names = self._setup_feature_names(feature_names)
-        self.rule_mapping = rule_mapping or self._load_rule_mapping()
-        
-        # Validate model compatibility
-        self._validate_model()
-        
-        # Initialize SHAP TreeExplainer optimized for RandomForest
-        self.explainer = shap.TreeExplainer(self.model, data=self.background_data)
-        self.logger.info("SHAP Explainer initialized successfully")
-
-    def _validate_background_data(self, background_data):
-        """Validate and convert background data to numpy array."""
-        if hasattr(background_data, 'values'):  # pandas DataFrame
-            return background_data.values
-        elif isinstance(background_data, np.ndarray):
-            return background_data
-        else:
-            try:
-                return np.array(background_data)
-            except Exception as e:
-                raise ValueError(f"Invalid background_data format: {str(e)}")
-
-    def _setup_feature_names(self, feature_names):
-        """Setup feature names based on background data shape."""
-        n_features = self.background_data.shape[1]
-        
-        if feature_names is None:
-            return [f'feature_{i}' for i in range(n_features)]
-        elif len(feature_names) != n_features:
-            self.logger.warning(f"Feature names length ({len(feature_names)}) doesn't match data features ({n_features})")
-            return [f'feature_{i}' for i in range(n_features)]
-        else:
-            return list(feature_names)
-
-    def _validate_model(self):
-        """Validate model compatibility with SHAP TreeExplainer."""
-        if not hasattr(self.model, 'estimators_'):
-            raise ValueError("Model must be a tree-based ensemble (e.g., RandomForest)")
-        
-        if not hasattr(self.model, 'predict') or not hasattr(self.model, 'predict_proba'):
-            raise ValueError("Model must have predict() and predict_proba() methods")
-        
-        # Check feature compatibility
-        expected_features = getattr(self.model, 'n_features_in_', None)
-        if expected_features and expected_features != self.background_data.shape[1]:
-            self.logger.warning(f"Feature count mismatch: model expects {expected_features}, got {self.background_data.shape[1]}")
-
-    def _load_rule_mapping(self):
-        """Load rule mapping from configuration if available."""
-        try:
-            # Try to load from system config
-            import system.config as config
-            config_data = config.get_config()
-            
-            rule_mapping_path = config_data.get('rule_mapping_path', 'rule_mapping.json')
-            if not os.path.isabs(rule_mapping_path):
-                # Make path relative to project root
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                rule_mapping_path = os.path.join(project_root, rule_mapping_path)
-            
-            if os.path.exists(rule_mapping_path):
-                with open(rule_mapping_path, 'r') as f:
-                    rule_mapping = json.load(f)
-                self.logger.info(f"Loaded rule mapping from {rule_mapping_path}")
-                return rule_mapping
-            else:
-                self.logger.info(f"Rule mapping file not found at {rule_mapping_path}")
-                
-        except Exception as e:
-            self.logger.warning(f"Could not load rule mapping: {str(e)}")
-        
-        # Return default mapping
-        return {name: f"Rule_{name}" for name in self.feature_names}
-
-    def explain(self, X, log_results=True, generate_plots=False, output_dir=None, show_terminal=False):
-        """
-        Generate SHAP explanations for input data.
-        
-        Args:
-            X: Input data to explain (single instance or batch)
-            log_results: Whether to log explanation results
-            generate_plots: Whether to generate heat map and importance plots
-            output_dir: Directory for saving plots (if generate_plots=True)
-            show_terminal: Whether to display results in terminal using plotext
+            model: Trained ML model with predict() and predict_proba() methods
+            background_data: Background data for SHAP baseline (representative sample)
+            instance_data: Specific instance(s) to explain
+            feature_name_list: List of feature names for meaningful explanations
+            output_dir: Directory to save outputs (plots, reports)
+            plot: Whether to generate and save visualization plots (default: False)
+            plot_in_terminal: Whether to display plots in terminal (default: False)
+            summary_report: Whether to generate markdown summary report (default: False)
             
         Returns:
-            SHAP values for the input data, and optionally plot paths
+            Dict containing SHAP values, feature importance, and file paths
+            
+        Raises:
+            ValueError: If inputs are invalid or incompatible
         """
         try:
-            # Validate and prepare input
-            X_processed = self._prepare_input(X)
+            # Validate inputs
+            self._validate_inputs(model, background_data, instance_data, feature_name_list, output_dir)
             
-            # Generate SHAP values
-            shap_values = self.explainer.shap_values(X_processed)
+            # Prepare data
+            background_array = self._prepare_background_data(background_data)
+            instance_array = self._prepare_instance_data(instance_data)
+            feature_names = self._validate_feature_names(feature_name_list, background_array)
             
-            if log_results:
-                self._log_explanation(X_processed, shap_values)
+            # Create output directory
+            os.makedirs(output_dir, exist_ok=True)
+            self.logger.info(f"Created output directory: {output_dir}")
             
-            # Show terminal summary if requested
-            if show_terminal:
-                self.display_terminal_summary(X)
+            # Initialize SHAP explainer with background data
+            explainer = self._initialize_shap_explainer(model, background_array)
             
-            # Generate visualizations if requested
-            if generate_plots:
-                plot_results = self.generate_summary_visualization(X, output_dir)
-                self.logger.info(f"Visualizations generated: {plot_results}")
-                return shap_values, plot_results
+            # Calculate SHAP values for the specific instances
+            self.logger.info(f"Calculating SHAP values for {instance_array.shape[0]} instance(s)")
+            shap_values = explainer.shap_values(instance_array)
             
-            return shap_values
+            # Calculate feature importance
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
             
-        except Exception as e:
-            self.logger.error(f"Error generating SHAP explanation: {str(e)}")
-            raise
-
-    def _prepare_input(self, X):
-        """Prepare input data for SHAP explanation."""
-        # Convert to numpy array if needed
-        if hasattr(X, 'values'):  # pandas DataFrame
-            X_array = X.values
-        elif isinstance(X, np.ndarray):
-            X_array = X
-        else:
-            X_array = np.array(X)
-        
-        # Ensure 2D
-        if X_array.ndim == 1:
-            X_array = X_array.reshape(1, -1)
-        
-        # Check feature count
-        if X_array.shape[1] != self.background_data.shape[1]:
-            raise ValueError(f"Input features ({X_array.shape[1]}) don't match background data ({self.background_data.shape[1]})")
-        
-        return X_array
-
-    def _log_explanation(self, X, shap_values):
-        """Log detailed SHAP explanation summary."""
-        try:
-            # Unwrap (shap_values, plot_results) if present
-            if isinstance(shap_values, tuple):
-                shap_values = shap_values[0]
-
-            # Handle multi-class output (take class 1 for binary classification)
-            if isinstance(shap_values, list) and len(shap_values) > 1:
-                values = shap_values[1]  # Malicious class
-                class_explained = "malicious"
-            elif isinstance(shap_values, list):
-                values = shap_values[0]
-                class_explained = "class_0"
-            else:
-                values = shap_values
-                class_explained = "prediction"
-            
-            # Ensure numpy array (supports SHAP Explanation objects)
-            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
-                values = values.values
-            values = np.array(values)
-            
-            # Calculate importance for logging
-            if values.ndim > 1:
-                avg_importance = np.abs(values).mean(axis=0)
-                instance_count = values.shape[0]
-            else:
-                avg_importance = np.abs(values)
-                instance_count = 1
-            
-            # Get top contributing features
-            top_indices = np.argsort(avg_importance)[-10:][::-1]  # Top 10
-            
-            # Create explanation summary
-            explanation_summary = {
+            # Build results
+            results = {
+                'shap_values': shap_values,
+                'feature_importance': feature_importance,
+                'feature_names': feature_names,
+                'instance_shape': instance_array.shape,
+                'background_shape': background_array.shape,
+                'samples_analyzed': instance_array.shape[0],
+                'features_count': len(feature_names),
+                'model_type': type(model).__name__,
                 'timestamp': datetime.now().isoformat(),
-                'class_explained': class_explained,
-                'instance_count': instance_count,
-                'total_features': len(avg_importance),
-                'top_contributing_features': []
+                'output_files': {}
             }
             
-            for idx in top_indices:
-                if idx < len(self.feature_names):
-                    feature_name = self.feature_names[idx]
-                    # Safely resolve rule name as string
-                    rule_name = self.rule_mapping.get(feature_name) or feature_name
-                    if not isinstance(rule_name, str):
-                        rule_name = str(rule_name)
-
-                    explanation_summary['top_contributing_features'].append({
-                        'rank': len(explanation_summary['top_contributing_features']) + 1,
-                        'feature': feature_name,
-                        'rule_description': rule_name,
-                        'importance_score': float(avg_importance[idx])
-                    })
+            # Generate visualizations if requested
+            if plot:
+                plot_files = self._generate_plots(shap_values, feature_names, instance_array, output_dir)
+                results['output_files'].update(plot_files)
             
-            # Log the explanation
-            self.logger.info("="*60)
-            self.logger.info("SHAP EXPLANATION GENERATED")
-            self.logger.info("="*60)
-            self.logger.info(f"Explanation Summary:\n{json.dumps(explanation_summary, indent=2)}")
-            self.logger.info("="*60)
+            # Terminal visualization
+            if plot_in_terminal:
+                self._display_terminal_plots(shap_values, feature_names, model, instance_array)
+            
+            # Summary report
+            if summary_report:
+                report_path = self._generate_summary_report(results, model, background_array, instance_array, feature_names, output_dir)
+                if report_path:
+                    results['output_files']['summary_report'] = report_path
+            
+            self.logger.info("SHAP explanation completed successfully")
+            return results
             
         except Exception as e:
-            self.logger.warning(f"Could not log SHAP explanation: {str(e)}")
-
-    def get_feature_importance(self, X):
-        """
-        Get feature importance ranking for given input.
+            self.logger.error(f"Error in SHAP explanation: {e}")
+            raise
+    
+    def _validate_inputs(self, model, background_data, instance_data, feature_name_list, output_dir):
+        """Validate all input parameters."""
+        # Validate model
+        if model is None:
+            raise ValueError("Model cannot be None")
+        if not hasattr(model, 'predict'):
+            raise ValueError("Model must have a 'predict' method")
+        if not hasattr(model, 'predict_proba'):
+            raise ValueError("Model must have a 'predict_proba' method")
         
-        Args:
-            X: Input data to analyze
-            
-        Returns:
-            List of dicts with feature importance ranking
-        """
+        # Validate background data
+        if background_data is None:
+            raise ValueError("Background data cannot be None")
+        
+        # Validate instance data
+        if instance_data is None:
+            raise ValueError("Instance data cannot be None")
+        
+        # Validate feature names
+        if not feature_name_list or not isinstance(feature_name_list, (list, tuple)):
+            raise ValueError("feature_name_list must be a non-empty list or tuple")
+        
+        # Validate output directory
+        if not output_dir or not isinstance(output_dir, str):
+            raise ValueError("output_dir must be a non-empty string")
+        
+        self.logger.info("Input validation completed successfully")
+    
+    def _prepare_background_data(self, data):
+        """Prepare and validate background data."""
+        # Convert to numpy array
+        if isinstance(data, pd.DataFrame):
+            data_array = data.values
+        elif isinstance(data, np.ndarray):
+            data_array = data.copy()
+        else:
+            try:
+                data_array = np.array(data)
+            except Exception as e:
+                raise ValueError(f"Cannot convert background data to numpy array: {e}")
+        
+        # Validate shape
+        if data_array.ndim != 2:
+            raise ValueError(f"Background data must be 2D, got shape {data_array.shape}")
+        
+        if data_array.shape[0] == 0 or data_array.shape[1] == 0:
+            raise ValueError(f"Background data cannot be empty, got shape {data_array.shape}")
+        
+        # Check for invalid values
+        if not np.isfinite(data_array).all():
+            self.logger.warning("Background data contains non-finite values (NaN, inf)")
+        
+        return data_array
+    
+    def _prepare_instance_data(self, data):
+        """Prepare and validate instance data."""
+        # Convert to numpy array
+        if isinstance(data, pd.DataFrame):
+            data_array = data.values
+        elif isinstance(data, np.ndarray):
+            data_array = data.copy()
+        else:
+            try:
+                data_array = np.array(data)
+            except Exception as e:
+                raise ValueError(f"Cannot convert instance data to numpy array: {e}")
+        
+        # Ensure 2D
+        if data_array.ndim == 1:
+            data_array = data_array.reshape(1, -1)
+        elif data_array.ndim != 2:
+            raise ValueError(f"Instance data must be 1D or 2D, got shape {data_array.shape}")
+        
+        if data_array.shape[0] == 0 or data_array.shape[1] == 0:
+            raise ValueError(f"Instance data cannot be empty, got shape {data_array.shape}")
+        
+        # Check for invalid values
+        if not np.isfinite(data_array).all():
+            raise ValueError("Instance data contains non-finite values (NaN, inf)")
+        
+        return data_array
+    
+    def _validate_feature_names(self, feature_name_list, data_array):
+        """Validate feature names against data dimensions."""
+        feature_names = list(feature_name_list)
+        n_features = data_array.shape[1]
+        
+        if len(feature_names) != n_features:
+            raise ValueError(f"Number of feature names ({len(feature_names)}) must match "
+                           f"number of data features ({n_features})")
+        
+        # Check for duplicates
+        if len(set(feature_names)) != len(feature_names):
+            raise ValueError("Feature names must be unique")
+        
+        # Ensure all names are strings
+        feature_names = [str(name) for name in feature_names]
+        
+        return feature_names
+    
+    def _initialize_shap_explainer(self, model, background_data):
+        """Initialize the appropriate SHAP explainer."""
         try:
-            shap_values = self.explain(X, log_results=False)
-            
-            # Handle multi-class output
-            if isinstance(shap_values, tuple):
-                shap_values = shap_values[0]
-            if isinstance(shap_values, list) and len(shap_values) > 1:
-                values = shap_values[1]  # Malicious class
-            elif isinstance(shap_values, list):
-                values = shap_values[0]
+            # Try TreeExplainer first (fastest for tree models)
+            if (hasattr(model, 'estimators_') or hasattr(model, 'tree_') or 
+                hasattr(model, 'booster')):
+                explainer = shap.TreeExplainer(model, data=background_data)
+                self.logger.info("Using SHAP TreeExplainer")
+                return explainer
+        except Exception as e:
+            self.logger.warning(f"TreeExplainer failed: {e}. Falling back to KernelExplainer")
+        
+        try:
+            # Fallback to KernelExplainer (works with any model)
+            explainer = shap.KernelExplainer(model.predict_proba, background_data)
+            self.logger.info("Using SHAP KernelExplainer")
+            return explainer
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize SHAP explainer: {e}")
+    
+    def _calculate_feature_importance(self, shap_values, feature_names):
+        """Calculate feature importance ranking from SHAP values."""
+        try:
+            # Handle different SHAP value formats
+            if isinstance(shap_values, list):
+                # Multi-class: use class 1 for binary or first class for multi-class
+                if len(shap_values) == 2:
+                    values = shap_values[1]  # Binary classification - positive class
+                else:
+                    values = shap_values[0]  # Multi-class - first class
             else:
                 values = shap_values
             
-            # Ensure numpy array (supports SHAP Explanation objects)
-            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
+            # Convert to numpy array if needed
+            if hasattr(values, 'values'):
                 values = values.values
             values = np.array(values)
-
+            
             # Calculate importance
-            if values.ndim > 1:
+            if values.ndim == 2:
                 importance = np.abs(values).mean(axis=0)
             else:
                 importance = np.abs(values)
@@ -295,47 +297,97 @@ class Explainer:
             ranking = []
             
             for rank, idx in enumerate(indices, 1):
-                if idx < len(self.feature_names):
-                    feature_name = self.feature_names[idx]
-                    # Safely resolve rule name as string
-                    rule_name = self.rule_mapping.get(feature_name) or feature_name
-                    if not isinstance(rule_name, str):
-                        rule_name = str(rule_name)
-
+                if idx < len(feature_names):
+                    feature_name = feature_names[idx]
+                    
                     ranking.append({
                         'rank': rank,
                         'feature': feature_name,
-                        'rule': rule_name,
                         'importance': float(importance[idx])
                     })
             
             return ranking
             
         except Exception as e:
-            self.logger.error(f"Error calculating feature importance: {str(e)}")
+            self.logger.error(f"Error calculating feature importance: {e}")
             return []
-
-    def generate_heatmap(self, X, output_path=None, top_features=20, figsize=(12, 8)):
-        """
-        Generate a heat map visualization of SHAP feature importance.
+    
+    def _generate_plots(self, shap_values, feature_names, instance_data, output_dir):
+        """Generate visualization plots and save to files."""
+        plot_files = {}
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        Args:
-            X: Input data to analyze
-            output_path: Optional path to save the heat map image
-            top_features: Number of top features to display (default: 20)
-            figsize: Figure size tuple (width, height)
-            
-        Returns:
-            String path to the saved image or None if display only
-        """
         try:
-            # Get SHAP values and feature importance
-            shap_values = self.explain(X, log_results=False)
-            ranking = self.get_feature_importance(X)
+            # Generate feature importance plot
+            importance_path = os.path.join(output_dir, f"feature_importance_{timestamp}.png")
+            self._create_importance_plot(shap_values, feature_names, importance_path)
+            plot_files['importance_plot'] = importance_path
             
+            # Generate SHAP heatmap
+            heatmap_path = os.path.join(output_dir, f"shap_heatmap_{timestamp}.png")
+            self._create_heatmap_plot(shap_values, feature_names, instance_data, heatmap_path)
+            plot_files['heatmap'] = heatmap_path
+            
+            self.logger.info(f"Plots generated successfully in {output_dir}")
+            
+        except Exception as e:
+            self.logger.error(f"Error generating plots: {e}")
+        
+        return plot_files
+    
+    def _create_importance_plot(self, shap_values, feature_names, output_path, top_features=15):
+        """Create and save feature importance plot."""
+        try:
+            # Calculate feature importance
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            
+            if not feature_importance:
+                self.logger.warning("No feature importance data available for plotting")
+                return
+            
+            # Prepare data
+            ranking = feature_importance[:top_features]
+            features = [item['feature'] for item in ranking]
+            scores = [item['importance'] for item in ranking]
+            
+            # Truncate long feature names
+            features = [f[:30] + "..." if len(f) > 30 else f for f in features]
+            
+            # Create plot
+            plt.figure(figsize=(10, max(6, len(features) * 0.4)))
+            
+            # Color gradient
+            colors = plt.cm.Reds(np.linspace(0.8, 0.3, len(scores)))
+            
+            bars = plt.barh(range(len(features)), scores, color=colors)
+            
+            # Customize
+            plt.yticks(range(len(features)), features)
+            plt.xlabel('SHAP Importance Score')
+            plt.title(f'Top {len(features)} Feature Importance Ranking')
+            plt.gca().invert_yaxis()
+            
+            # Add value labels
+            for i, (bar, score) in enumerate(zip(bars, scores)):
+                plt.text(bar.get_width() + max(scores) * 0.01, 
+                        bar.get_y() + bar.get_height()/2,
+                        f'{score:.4f}', ha='left', va='center')
+            
+            plt.grid(axis='x', alpha=0.3)
+            plt.tight_layout()
+            
+            # Save plot
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            self.logger.info(f"Feature importance plot saved to {output_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating importance plot: {e}")
+    
+    def _create_heatmap_plot(self, shap_values, feature_names, instance_data, output_path, top_features=20):
+        """Create and save SHAP heatmap plot."""
+        try:
             # Handle multi-class output
-            if isinstance(shap_values, tuple):
-                shap_values = shap_values[0]
             if isinstance(shap_values, list) and len(shap_values) > 1:
                 values = shap_values[1]  # Malicious class
                 class_name = "Malicious Class"
@@ -346,32 +398,32 @@ class Explainer:
                 values = shap_values
                 class_name = "Prediction"
             
-            # Ensure numpy array (supports SHAP Explanation objects)
-            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
+            # Ensure numpy array
+            if hasattr(values, 'values'):
                 values = values.values
             values = np.array(values)
             
-            # Prepare data for heat map
-            X_processed = self._prepare_input(X)
-            n_instances = min(X_processed.shape[0], 10)  # Limit to 10 instances for readability
-            n_features = min(top_features, len(ranking))
+            # Calculate feature importance for ordering
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            n_features = min(top_features, len(feature_importance))
             
             # Get top feature indices
-            top_feature_names = [item['feature'] for item in ranking[:n_features]]
+            top_feature_names = [item['feature'] for item in feature_importance[:n_features]]
             top_feature_indices = []
             
             for fname in top_feature_names:
                 try:
-                    idx = self.feature_names.index(fname)
+                    idx = feature_names.index(fname)
                     top_feature_indices.append(idx)
                 except ValueError:
                     continue
             
             if not top_feature_indices:
-                self.logger.warning("No valid feature indices found for heat map")
-                return None
+                self.logger.warning("No valid feature indices found for heatmap")
+                return
             
-            # Create heat map data
+            # Prepare heatmap data
+            n_instances = min(values.shape[0], 10)  # Limit instances for readability
             if values.ndim > 1:
                 heatmap_data = values[:n_instances, top_feature_indices]
                 instance_labels = [f"Instance {i+1}" for i in range(n_instances)]
@@ -379,25 +431,20 @@ class Explainer:
                 heatmap_data = values[top_feature_indices].reshape(1, -1)
                 instance_labels = ["Instance 1"]
             
-            # Create rule labels for features
-            rule_labels = []
+            # Create feature labels
+            feature_labels = []
             for fname in top_feature_names[:len(top_feature_indices)]:
-                # Safely resolve rule name and ensure it is a string
-                rule_name = self.rule_mapping.get(fname) or fname
-                if not isinstance(rule_name, str):
-                    rule_name = str(rule_name)
-                # Truncate long rule names for display
-                if len(rule_name) > 25:
-                    rule_name = rule_name[:22] + "..."
-                rule_labels.append(rule_name)
+                label = fname if len(fname) <= 25 else fname[:22] + "..."
+                feature_labels.append(label)
             
-            # Create the heat map (pure matplotlib fallback; avoids seaborn dependency)
-            plt.figure(figsize=figsize)
-
-            # Symmetric color scale around 0 for SHAP values
+            # Create heatmap
+            plt.figure(figsize=(12, 8))
+            
+            # Symmetric color scale around 0
             absmax = float(np.nanmax(np.abs(heatmap_data))) if np.size(heatmap_data) else 1.0
             if absmax == 0:
                 absmax = 1.0
+            
             img = plt.imshow(
                 heatmap_data,
                 aspect='auto',
@@ -406,561 +453,190 @@ class Explainer:
                 vmax=absmax,
                 interpolation='nearest'
             )
-
-            # Add colorbar with label
+            
+            # Add colorbar
             cbar = plt.colorbar(img)
             cbar.set_label('SHAP Value (Impact on Prediction)')
-
-            # Set tick labels
-            plt.xticks(ticks=np.arange(len(rule_labels)), labels=rule_labels, rotation=45, ha='right')
-            plt.yticks(ticks=np.arange(len(instance_labels)), labels=instance_labels)
-
-            # Annotate values in each cell
-            h, w = heatmap_data.shape
-            for i in range(h):
-                for j in range(w):
-                    val = heatmap_data[i, j]
-                    # Choose text color based on background intensity for readability
-                    color = 'black' if abs(val) < (0.6 * absmax) else 'white'
-                    plt.text(j, i, f"{val:.3f}", ha='center', va='center', fontsize=8, color=color)
-
-            # Axes labels and title
+            
+            # Set labels
+            plt.xticks(range(len(feature_labels)), feature_labels, rotation=45, ha='right')
+            plt.yticks(range(len(instance_labels)), instance_labels)
+            
+            # Title and labels
             plt.title(
-                f'SHAP Feature Importance Heat Map - {class_name}\n'
+                f'SHAP Feature Importance Heatmap - {class_name}\n'
                 f'Top {n_features} Contributing Features',
-                fontsize=14,
-                fontweight='bold'
+                fontsize=14, fontweight='bold'
             )
-            plt.xlabel('Security Rules / Features', fontsize=12)
+            plt.xlabel('Features', fontsize=12)
             plt.ylabel('Data Instances', fontsize=12)
-
+            
             plt.tight_layout()
             
-            # Save or display
-            if output_path:
-                plt.savefig(output_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                self.logger.info(f"SHAP heat map saved to {output_path}")
-                return output_path
-            else:
-                plt.show()
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Error generating heat map: {str(e)}")
-            return None
-
-    def generate_feature_importance_plot(self, X, output_path=None, top_features=15, figsize=(10, 8)):
-        """
-        Generate a horizontal bar plot of feature importance.
-        
-        Args:
-            X: Input data to analyze
-            output_path: Optional path to save the plot
-            top_features: Number of top features to display
-            figsize: Figure size tuple (width, height)
-            
-        Returns:
-            String path to the saved image or None if display only
-        """
-        try:
-            ranking = self.get_feature_importance(X)[:top_features]
-            
-            if not ranking:
-                self.logger.warning("No feature importance data available for plotting")
-                return None
-            
-            # Prepare data
-            features = [item['rule'] for item in ranking]
-            importance_scores = [item['importance'] for item in ranking]
-            
-            # Truncate long feature names
-            features = [f[:30] + "..." if len(f) > 30 else f for f in features]
-            
-            # Create horizontal bar plot
-            plt.figure(figsize=figsize)
-            
-            # Create color map based on importance
-            # Ensure the input to the colormap is a concrete ndarray to satisfy type checkers
-            cmap = cm.get_cmap('Reds')
-            linspace_vals = np.linspace(
-                0.9,
-                0.3,
-                num=len(importance_scores),
-                endpoint=True,
-                retstep=False,
-                dtype=float,
-            )
-            # Use np.array for broad stub compatibility (Pylance/old numpy stubs)
-            colors = cmap(np.array(linspace_vals, dtype=float))
-            
-            bars = plt.barh(range(len(features)), importance_scores, color=colors)
-            
-            # Customize plot
-            plt.yticks(range(len(features)), features)
-            plt.xlabel('SHAP Importance Score', fontsize=12)
-            plt.title('Top Security Rules Contributing to Threat Detection', 
-                     fontsize=14, fontweight='bold')
-            plt.gca().invert_yaxis()  # Highest importance at top
-            
-            # Add value labels on bars
-            for i, bar in enumerate(bars):
-                width = bar.get_width()
-                plt.text(width + max(importance_scores) * 0.01, bar.get_y() + bar.get_height()/2,
-                        f'{importance_scores[i]:.4f}', ha='left', va='center', fontsize=9)
-            
-            plt.grid(axis='x', alpha=0.3)
-            plt.tight_layout()
-            
-            # Save or display
-            if output_path:
-                plt.savefig(output_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                self.logger.info(f"Feature importance plot saved to {output_path}")
-                return output_path
-            else:
-                plt.show()
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Error generating feature importance plot: {str(e)}")
-            return None
-
-    def generate_summary_visualization(self, X, output_dir=None, prefix="shap_analysis"):
-        """
-        Generate a comprehensive set of visualizations including heat map and importance plot.
-        
-        Args:
-            X: Input data to analyze
-            output_dir: Directory to save visualizations (uses current dir if None)
-            prefix: Prefix for output filenames
-            
-        Returns:
-            Dict with paths to generated visualizations
-        """
-        try:
-            if output_dir is None:
-                output_dir = os.getcwd()
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            results = {
-                'heatmap': None,
-                'importance_plot': None,
-                'timestamp': timestamp
-            }
-            
-            # Generate heat map
-            heatmap_path = os.path.join(output_dir, f"{prefix}_heatmap_{timestamp}.png")
-            results['heatmap'] = self.generate_heatmap(X, heatmap_path)
-            
-            # Generate importance plot
-            importance_path = os.path.join(output_dir, f"{prefix}_importance_{timestamp}.png")
-            results['importance_plot'] = self.generate_feature_importance_plot(X, importance_path)
-            
-            self.logger.info(f"Summary visualizations generated in {output_dir}")
-            return results
+            # Save plot
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            self.logger.info(f"SHAP heatmap saved to {output_path}")
             
         except Exception as e:
-            self.logger.error(f"Error generating summary visualizations: {str(e)}")
-            return {'error': str(e)}
-
-    def display_terminal_heatmap(self, X, top_features=15, max_instances=8):
-        """
-        Display a heat map in the terminal using plotext.
-        
-        Args:
-            X: Input data to analyze
-            top_features: Number of top features to display
-            max_instances: Maximum number of instances to show
-        """
+            self.logger.error(f"Error creating heatmap: {e}")
+    
+    def _display_terminal_plots(self, shap_values, feature_names, model, instance_data):
+        """Display visualizations in terminal."""
         try:
-            # Get SHAP values and feature importance
-            shap_values = self.explain(X, log_results=False)
-            ranking = self.get_feature_importance(X)
-            
-            # Handle multi-class output
-            if isinstance(shap_values, tuple):
-                shap_values = shap_values[0]
-            if isinstance(shap_values, list) and len(shap_values) > 1:
-                values = shap_values[1]  # Malicious class
-                class_name = "Malicious Class"
-            elif isinstance(shap_values, list):
-                values = shap_values[0]
-                class_name = "Class 0"
-            else:
-                values = shap_values
-                class_name = "Prediction"
-            
-            # Ensure numpy array (supports SHAP Explanation objects)
-            if hasattr(values, 'values') and not isinstance(values, np.ndarray):
-                values = values.values
-            values = np.array(values)
-            
-            # Prepare data
-            X_processed = self._prepare_input(X)
-            n_instances = min(X_processed.shape[0], max_instances)
-            n_features = min(top_features, len(ranking))
-            
-            # Get top feature names and indices
-            top_feature_names = [item['feature'] for item in ranking[:n_features]]
-            top_feature_indices = []
-            
-            for fname in top_feature_names:
-                try:
-                    idx = self.feature_names.index(fname)
-                    top_feature_indices.append(idx)
-                except ValueError:
-                    continue
-            
-            if not top_feature_indices:
-                print("ERROR: No valid features found for terminal heat map")
-                return
-            
-            # Prepare heat map data
-            if values.ndim > 1:
-                heatmap_data = values[:n_instances, top_feature_indices]
-            else:
-                heatmap_data = values[top_feature_indices].reshape(1, -1)
-                n_instances = 1
-            
-            # Create rule labels (truncated for terminal)
-            rule_labels = []
-            for fname in top_feature_names[:len(top_feature_indices)]:
-                # Safely resolve rule name and ensure it is a string
-                rule_name = self.rule_mapping.get(fname) or fname
-                if not isinstance(rule_name, str):
-                    rule_name = str(rule_name)
-                # Truncate for terminal display
-                if len(rule_name) > 20:
-                    rule_name = rule_name[:17] + "..."
-                rule_labels.append(rule_name)
+            # Get model predictions
+            predictions = model.predict(instance_data)
+            probabilities = model.predict_proba(instance_data)
             
             # Display header
-            print("\n" + "="*80)
-            print(f"SHAP HEAT MAP - {class_name}")
-            print("="*80)
-            print(f"Top {n_features} Features | {n_instances} Instance(s)")
-            print("RED/High: Positive SHAP (contributes to malicious)")
-            print("BLUE/Low: Negative SHAP (contributes to benign)")
-            print("-"*80)
+            print("\n" + "=" * 70)
+            print("SHAP MODEL EXPLANATION SUMMARY")
+            print("=" * 70)
             
-            # Display heat map using plotext
-            plt_terminal.clear_figure()
-            plt_terminal.theme('dark')
+            # Model info
+            print(f"\nModel: {type(model).__name__}")
+            print(f"Instances analyzed: {len(instance_data)}")
+            print(f"Features: {len(feature_names)}")
+            print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Create a simple text-based heat map
-            print("\nFeature Importance Heat Map:")
-            print("-" * 60)
-            
-            # Header row
-            header = "Instance".ljust(12)
-            for i, label in enumerate(rule_labels):
-                if i < 5:  # Limit to 5 features for terminal width
-                    header += f"{label[:8]:>10}"
-            print(header)
-            print("-" * 60)
-            
-            # Data rows
-            for i in range(n_instances):
-                row = f"Inst_{i+1}".ljust(12)
-                for j in range(min(5, len(top_feature_indices))):
-                    value = heatmap_data[i, j] if heatmap_data.ndim > 1 else heatmap_data[j]
-                    
-                    # Color coding for terminal
-                    if value > 0.01:
-                        color_symbol = "[+]"
-                    elif value < -0.01:
-                        color_symbol = "[-]"
-                    else:
-                        color_symbol = "[0]"
-                    
-                    row += f"{value:>8.3f}{color_symbol}"
-                print(row)
-            
-            print("-" * 60)
-            print("Legend: [+] High Impact | [0] Neutral | [-] Low Impact")
-            print("="*80)
-            
-        except Exception as e:
-            self.logger.error(f"Error displaying terminal heat map: {str(e)}")
-            print(f"ERROR: Error displaying terminal heat map: {str(e)}")
-
-    def display_terminal_importance_chart(self, X, top_features=10):
-        """
-        Display feature importance as a horizontal bar chart in terminal using plotext.
-        
-        Args:
-            X: Input data to analyze
-            top_features: Number of top features to display
-        """
-        try:
-            ranking = self.get_feature_importance(X)[:top_features]
-            
-            if not ranking:
-                print("ERROR: No feature importance data available")
-                return
-            
-            # Prepare data for plotext
-            features = []
-            importance_scores = []
-            
-            for item in ranking:
-                rule_name = item['rule']
-                # Truncate long names for terminal
-                if len(rule_name) > 25:
-                    rule_name = rule_name[:22] + "..."
-                features.append(rule_name)
-                importance_scores.append(item['importance'])
-            
-            # Display using plotext
-            plt_terminal.clear_figure()
-            plt_terminal.simple_bar(
-                features, 
-                importance_scores, 
-                width=60,
-                title="Top Security Rules - Feature Importance"
-            )
-            plt_terminal.show()
-            
-            # Also display as text table
-            print("\n" + "="*70)
-            print("FEATURE IMPORTANCE RANKING")
-            print("="*70)
-            print(f"{'Rank':<4} {'Importance':<12} {'Security Rule':<50}")
-            print("-"*70)
-            
-            for item in ranking:
-                rank = item['rank']
-                importance = item['importance']
-                rule = item['rule']
-                
-                # Truncate rule name if too long
-                if len(rule) > 45:
-                    rule = rule[:42] + "..."
-                
-                # Visual importance indicator
-                bar_length = int(importance * 20)  # Scale to 20 chars max
-                bar = "█" * bar_length + "░" * (20 - bar_length)
-                
-                print(f"{rank:<4} {importance:<12.4f} {rule:<50}")
-                print(f"     {bar}")
-            
-            print("="*70)
-            
-        except Exception as e:
-            self.logger.error(f"Error displaying terminal importance chart: {str(e)}")
-            print(f"ERROR: Error displaying terminal chart: {str(e)}")
-
-    def display_terminal_summary(self, X, top_features=8):
-        """
-        Display a comprehensive terminal summary with both heat map and importance chart.
-        
-        Args:
-            X: Input data to analyze
-            top_features: Number of top features to display
-        """
-        try:
-            # Get predictions first
-            X_processed = self._prepare_input(X)
-            predictions = self.model.predict(X_processed)
-            probabilities = self.model.predict_proba(X_processed)
-            
-            # Display header
-            print("\n" + "=" * 60)
-            print("SHAP THREAT DETECTION ANALYSIS")
-            print("=" * 60)
-            
-            # Show predictions
-            print(f"\nANALYSIS SUMMARY:")
-            print(f"   Instances Analyzed: {len(X_processed)}")
-            print(f"   Total Features: {len(self.feature_names)}")
-            print(f"   Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            # Show predictions for each instance
-            print(f"\nMODEL PREDICTIONS:")
+            # Predictions summary
+            print(f"\nPredictions:")
             for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
                 confidence = prob.max()
-                status_icon = "[THREAT]" if pred == 1 or pred == "malicious" else "[BENIGN]"
-                print(f"   Instance {i+1}: {status_icon} {pred} (confidence: {confidence:.1%})")
+                pred_label = "Malicious" if pred == 1 else "Benign"
+                print(f"  Instance {i+1}: {pred_label} (confidence: {confidence:.1%})")
             
-            # Display terminal heat map
-            self.display_terminal_heatmap(X, top_features=top_features, max_instances=5)
-            
-            # Display importance chart
-            print(f"\nFEATURE IMPORTANCE ANALYSIS:")
-            self.display_terminal_importance_chart(X, top_features=top_features)
-            
-            # Show key insights
-            ranking = self.get_feature_importance(X)
-            if ranking:
-                top_rule = ranking[0]
-                print(f"\nKEY INSIGHTS:")
-                print(f"   Most Critical Rule: {top_rule['rule']}")
-                print(f"   Importance Score: {top_rule['importance']:.4f}")
-                print(f"   Detection Confidence: {probabilities.max():.1%}")
+            # Feature importance table
+            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            top_features = feature_importance[:10]  # Top 10
+            if top_features:
+                print(f"\nTop {len(top_features)} Most Important Features:")
+                print("-" * 70)
+                print(f"{'Rank':<4} {'Importance':<12} {'Feature':<50}")
+                print("-" * 70)
                 
-                # Show threat level
-                max_confidence = probabilities.max()
-                if max_confidence > 0.9:
-                    threat_level = "HIGH"
-                elif max_confidence > 0.7:
-                    threat_level = "MEDIUM"
-                else:
-                    threat_level = "LOW"
-                print(f"   Threat Level: {threat_level}")
+                for item in top_features:
+                    feature = item['feature']
+                    if len(feature) > 45:
+                        feature = feature[:42] + "..."
+                    
+                    print(f"{item['rank']:<4} {item['importance']:<12.4f} {feature:<50}")
+                
+                print("-" * 70)
+                print(f"Most critical feature: {top_features[0]['feature']}")
+                print(f"Importance score: {top_features[0]['importance']:.4f}")
             
-            print("\n" + "=" * 60)
-            print("Terminal analysis complete!")
-            print("=" * 60)
+            print("=" * 70)
             
         except Exception as e:
-            self.logger.error(f"Error displaying terminal summary: {str(e)}")
-            print(f"ERROR: Error displaying terminal summary: {str(e)}")
-
-    def generate_markdown_report(self, X, output_path=None, include_visualizations=True):
-        """
-        Generate a detailed markdown report for the SHAP explanation.
-        
-        Args:
-            X: Input data to analyze
-            output_path: Optional path to save the report
-            include_visualizations: Whether to generate and include visualization plots
-            
-        Returns:
-            String containing the markdown report
-        """
+            self.logger.error(f"Error displaying terminal plots: {e}")
+            print(f"ERROR: {e}")
+    
+    def _generate_summary_report(self, results, model, background_data, instance_data, feature_names, output_dir):
+        """Generate markdown summary report."""
         try:
-            # Get predictions and explanations
-            X_processed = self._prepare_input(X)
-            predictions = self.model.predict(X_processed)
-            probabilities = self.model.predict_proba(X_processed)
-            ranking = self.get_feature_importance(X)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            report_path = os.path.join(output_dir, f"shap_analysis_report_{timestamp}.md")
             
-            # Generate visualizations if requested
-            plot_results = None
-            if include_visualizations and output_path:
-                output_dir = os.path.dirname(output_path) if output_path else None
-                plot_results = self.generate_summary_visualization(X, output_dir)
+            # Get predictions
+            predictions = model.predict(instance_data)
+            probabilities = model.predict_proba(instance_data)
             
-            # Generate report
+            # Generate report content
             report_lines = [
-                "# SHAP Threat Detection Explanation Report",
+                "# SHAP Model Explanation Report",
                 "",
                 f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                f"**Instances Analyzed:** {len(X_processed)}",
-                f"**Model Type:** {type(self.model).__name__}",
-                f"**Total Features:** {len(self.feature_names)}",
+                f"**Model Type:** {type(model).__name__}",
+                f"**Instances Analyzed:** {results['samples_analyzed']}",
+                f"**Total Features:** {results['features_count']}",
+                f"**Background Data Shape:** {background_data.shape}",
                 "",
-                "## Model Predictions",
+                "## Instance Predictions",
                 ""
             ]
             
             # Add prediction details
             for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
+                pred_label = "Malicious" if pred == 1 else "Benign"
+                confidence = prob.max()
                 report_lines.extend([
                     f"### Instance {i+1}",
-                    f"- **Prediction:** {pred}",
-                    f"- **Confidence:** {prob.max():.4f}",
-                    f"- **Class Probabilities:** {prob.tolist()}",
+                    f"- **Prediction:** {pred_label}",
+                    f"- **Confidence:** {confidence:.1%}",
                     ""
                 ])
             
-            # Add visualizations section if available
-            if plot_results and not plot_results.get('error'):
+            # Add feature importance table
+            top_features = results['feature_importance'][:15]  # Top 15
+            if top_features:
                 report_lines.extend([
-                    "## Visualizations",
-                    ""
+                    "## Top Contributing Features",
+                    "",
+                    "| Rank | Feature | Importance Score |",
+                    "|------|---------|------------------|"
                 ])
                 
-                if plot_results.get('heatmap'):
-                    heatmap_filename = os.path.basename(plot_results['heatmap'])
-                    report_lines.extend([
-                        "### SHAP Feature Importance Heat Map",
-                        f"![SHAP Heat Map]({heatmap_filename})",
-                        "",
-                        "The heat map shows how each security rule contributes to the threat detection for each analyzed instance. "
-                        "Red colors indicate positive contribution to malicious prediction, while blue indicates negative contribution.",
-                        ""
-                    ])
+                for item in top_features:
+                    report_lines.append(
+                        f"| {item['rank']} | {item['feature']} | {item['importance']:.6f} |"
+                    )
                 
-                if plot_results.get('importance_plot'):
-                    importance_filename = os.path.basename(plot_results['importance_plot'])
-                    report_lines.extend([
-                        "### Feature Importance Ranking",
-                        f"![Feature Importance]({importance_filename})",
-                        "",
-                        "This chart ranks the security rules by their overall importance in the threat detection decision.",
-                        ""
-                    ])
-            
-            # Add top features table
-            report_lines.extend([
-                "## Top Contributing Security Rules",
-                "",
-                "| Rank | Feature | Rule Description | Importance Score |",
-                "|------|---------|------------------|------------------|"
-            ])
-            
-            for item in ranking[:15]:  # Top 15 features
-                report_lines.append(
-                    f"| {item['rank']} | {item['feature']} | {item['rule']} | {item['importance']:.6f} |"
-                )
-            
-            # Add detailed analysis
-            if ranking:
-                top_rule = ranking[0]
+                # Add key findings
                 report_lines.extend([
                     "",
                     "## Key Findings",
                     "",
-                    f"- **Most Critical Rule:** {top_rule['rule']} (importance: {top_rule['importance']:.4f})",
-                    f"- **Analysis Scope:** Top {min(15, len(ranking))} out of {len(ranking)} total features",
-                    f"- **Detection Confidence:** {probabilities.max():.1%}",
+                    f"- **Most Critical Feature:** {top_features[0]['feature']}",
+                    f"- **Highest Importance Score:** {top_features[0]['importance']:.4f}",
+                    f"- **Analysis Scope:** Top {len(top_features)} out of {len(results['feature_importance'])} total features",
                     ""
                 ])
             
-            report_lines.extend([
-                "## Analysis Notes",
-                "",
-                "- **Importance Scores:** Higher values indicate features that contributed more to the malicious prediction",
-                "- **Security Rules:** Each feature represents a security rule or detection pattern",
-                "- **Threat Analysis:** Review the top contributing rules for threat hunting and rule refinement",
-                "- **Model Explainability:** SHAP values provide local explanations for individual predictions",
-                ""
-            ])
+            # Add visualizations section if files exist
+            if results['output_files']:
+                report_lines.extend([
+                    "## Generated Visualizations",
+                    ""
+                ])
+                
+                for viz_type, file_path in results['output_files'].items():
+                    if viz_type != 'summary_report' and file_path:
+                        filename = os.path.basename(file_path)
+                        viz_name = viz_type.replace('_', ' ').title()
+                        report_lines.extend([
+                            f"### {viz_name}",
+                            f"![{viz_name}]({filename})",
+                            ""
+                        ])
             
             # Add technical details
             report_lines.extend([
                 "## Technical Details",
                 "",
-                f"- **SHAP Library Version:** {shap.__version__ if hasattr(shap, '__version__') else 'Unknown'}",
-                f"- **Background Data Size:** {len(self.background_data)} instances",
-                f"- **Feature Count:** {len(self.feature_names)}",
-                f"- **Analysis Timestamp:** {datetime.now().isoformat()}",
+                f"- **SHAP Analysis Timestamp:** {results['timestamp']}",
+                f"- **Background Data Shape:** {background_data.shape}",
+                f"- **Instance Data Shape:** {instance_data.shape}",
+                f"- **Feature Count:** {results['features_count']}",
+                f"- **Samples Analyzed:** {results['samples_analyzed']}",
                 ""
             ])
             
-            markdown_report = "\n".join(report_lines)
+            # Write report to file
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(report_lines))
             
-            # Save to file if path provided
-            if output_path:
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    f.write(markdown_report)
-                self.logger.info(f"SHAP report saved to {output_path}")
-            
-            return markdown_report
+            self.logger.info(f"Summary report saved to {report_path}")
+            return report_path
             
         except Exception as e:
-            self.logger.error(f"Error generating markdown report: {str(e)}")
-            return f"# Error\n\nCould not generate report: {str(e)}"
-
-    def __str__(self):
+            self.logger.error(f"Error generating summary report: {e}")
+            return None
+    
+    def __str__(self) -> str:
         """String representation of the explainer."""
-        return (f"SHAP Explainer(model={type(self.model).__name__}, "
-                f"features={len(self.feature_names)}, "
-                f"background_size={len(self.background_data)})")
-
-    def __repr__(self):
+        return "SHAP Explainer (ready to use with explain() method)"
+    
+    def __repr__(self) -> str:
         """Detailed representation of the explainer."""
         return self.__str__()

@@ -392,15 +392,16 @@ class UnifiedPipeline:
             shap_explainer = None
             try:
                 from system.shap_explainer import Explainer as ShapExplainer
-                shap_explainer = ShapExplainer(
-                    getattr(predictor, 'model', None),
-                    X if hasattr(X, 'shape') and X.shape[0] > 1 else (X if hasattr(X, 'shape') else []),
-                    feature_names=feature_names
-                )
+                shap_explainer = ShapExplainer()
+                
+                # Ensure output directory exists for SHAP explanations
+                shap_output_base = "./output/shap_explanations"
+                os.makedirs(shap_output_base, exist_ok=True)
+                
+                self.logger.info("SHAP explainer initialized and ready for alert explanations")
             except Exception as e:
                 self.logger.warning(f"SHAP explainer unavailable: {e}")
             
-            explainer = Explainer(predictor, X) #Explainer class initialization
             # Process results; persist alerts to MongoDB
             results = []
             try:
@@ -434,45 +435,13 @@ class UnifiedPipeline:
                     # Unified detection logging
                     try:
                         label_str = 'malicious' if int(pred) == 1 else 'normal'
-                        
-                        # Create unique output directory for this window_id and timestamp
-                        window_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        window_id = df_agg.iloc[idx]['window_id']
-                        hostname = df_agg.iloc[idx]['hostname']
-                        
-                        # Clean hostname for filesystem safety
-                        safe_hostname = "".join(c for c in hostname if c.isalnum() or c in ('-', '_')).rstrip()
-                        output_subdir = f"detection_output/{safe_hostname}_{window_id}_{window_timestamp}"
-                        os.makedirs(output_subdir, exist_ok=True)
-                        
-                        # Generate SHAP plots in the unique directory
-                        shap_values = explainer.explain(X, generate_plots=True, output_dir=output_subdir, show_terminal=False)
-                        ranking = explainer.get_feature_importance(X)
-                        
-                        # Generate markdown report in the same directory
-                        report_filename = f"threat_report_{safe_hostname}_{window_id}_{window_timestamp}.md"
-                        report_path = os.path.join(output_subdir, report_filename)
-                        report = explainer.generate_markdown_report(X, report_path)
-                        
                         logging_utils.log_detection(
                             hostname=result['hostname'],
                             window_id=result['window_id'],
                             prediction=label_str,
                             confidence=result['probability']
                         )
-                        logging_utils.log_shap_results(
-                            hostname=result['hostname'],
-                            window_id=result['window_id'],
-                            top_rules=[item['rule'] for item in ranking[:10]],
-                            shap_values=[item['importance'] for item in ranking[:10]],
-                            prediction=label_str,
-                            confidence=result['probability']
-                        )
-                        
-                        self.logger.info(f"SHAP analysis saved to: {output_subdir}")
-                        
                     except Exception as e:
-                        self.logger.warning(f"SHAP analysis failed for window {result.get('window_id', 'unknown')}: {str(e)}")
                         pass
 
                     # On alert, add detailed top-10 rules and SHAP explanation
@@ -512,41 +481,128 @@ class UnifiedPipeline:
                             except Exception:
                                 pass
 
-                            # SHAP explanation (top-N contributing features)
+                            # Enhanced SHAP explanation for this specific alert instance
                             if shap_explainer is not None and hasattr(X, 'shape'):
                                 try:
-                                    # Explain single instance
-                                    shap_vals = shap_explainer.explain(row_vec.reshape(1, -1), log_results=False)
-
-                                    # Build ranking from explainer util to align features
-                                    ranking = []
+                                    self.logger.info(f"Applying SHAP explanation for alert instance {result['window_id']}")
+                                    
+                                    # Create single instance data for explanation
+                                    instance_data = row_vec.reshape(1, -1)
+                                    
+                                    # Apply SHAP explainer to this specific alert instance
+                                    # Use a subset of X as background data for efficiency
+                                    background_sample_size = min(100, X.shape[0])
+                                    background_indices = np.random.choice(X.shape[0], size=background_sample_size, replace=False)
+                                    background_data = X[background_indices]
+                                    
+                                    shap_results = shap_explainer.explain(
+                                        model=predictor.model,
+                                        background_data=background_data,  # Background data for SHAP baseline
+                                        instance_data=instance_data,  # Single alert instance to explain
+                                        feature_name_list=feature_names,
+                                        output_dir=os.path.join("./output", "shap_explanations", f"alert_{result['window_id']}"),
+                                        plot=False,  # Generate visualizations for this alert
+                                        plot_in_terminal=False,  # Don't clutter terminal during detection
+                                        summary_report=False  # Generate detailed report for this alert
+                                    )
+                                    
+                                    if shap_results and 'feature_importance' in shap_results:
+                                        # Extract top contributing features for this alert
+                                        alert_top_features = shap_results['feature_importance'][:top_n]
+                                        
+                                        # Log SHAP-based feature importance
+                                        shap_top_rules = []
+                                        shap_top_values = []
+                                        
+                                        for feature_info in alert_top_features:
+                                            feature_name = feature_info.get('feature', '')
+                                            importance = feature_info.get('importance', 0.0)
+                                            
+                                            # Extract rule ID from feature name
+                                            if feature_name.startswith('rule_'):
+                                                try:
+                                                    rule_id = int(feature_name.replace('rule_', ''))
+                                                except ValueError:
+                                                    rule_id = feature_name
+                                            else:
+                                                rule_id = feature_name
+                                            
+                                            shap_top_rules.append(rule_id)
+                                            shap_top_values.append(float(importance))
+                                        
+                                        # Enhanced logging with SHAP results
+                                        try:
+                                            logging_utils.log_shap_results(
+                                                hostname=result['hostname'],
+                                                window_id=result['window_id'],
+                                                top_rules=shap_top_rules,
+                                                shap_values=shap_top_values,
+                                                prediction='malicious',
+                                                confidence=result['probability']
+                                            )
+                                            
+                                            # Additional detailed SHAP logging
+                                            logging_utils.run_log(
+                                                "SHAP_EXPLANATION",
+                                                f"SHAP explanation for alert | hostname={result['hostname']} | window_id={result['window_id']}",
+                                                payload={
+                                                    'hostname': result['hostname'],
+                                                    'window_id': result['window_id'],
+                                                    'confidence': result['probability'],
+                                                    'shap_top_features': alert_top_features,
+                                                    'shap_output_files': shap_results.get('output_files', {}),
+                                                    'shap_summary': {
+                                                        'most_important_feature': alert_top_features[0]['feature'] if alert_top_features else None,
+                                                        'max_importance_score': alert_top_features[0]['importance'] if alert_top_features else 0,
+                                                        'features_analyzed': len(shap_results.get('feature_importance', [])),
+                                                        'explanation_timestamp': shap_results.get('timestamp')
+                                                    }
+                                                }
+                                            )
+                                        except Exception as log_e:
+                                            self.logger.warning(f"Failed to log SHAP results for {result['window_id']}: {log_e}")
+                                        
+                                        # Store SHAP results in the result for potential further use
+                                        result['shap_explanation'] = {
+                                            'top_features': alert_top_features,
+                                            'output_files': shap_results.get('output_files', {}),
+                                            'explanation_available': True
+                                        }
+                                        
+                                        self.logger.info(f"SHAP explanation completed for alert {result['window_id']} - "
+                                                       f"Top feature: {alert_top_features[0]['feature'] if alert_top_features else 'N/A'}")
+                                    
+                                    else:
+                                        self.logger.warning(f"SHAP explanation returned no results for {result['window_id']}")
+                                        result['shap_explanation'] = {'explanation_available': False, 'error': 'No SHAP results'}
+                                
+                                except Exception as shap_e:
+                                    self.logger.error(f"SHAP explanation failed for alert {result['window_id']}: {shap_e}")
+                                    result['shap_explanation'] = {'explanation_available': False, 'error': str(shap_e)}
+                                    
+                                    # Fallback to basic feature importance logging
                                     try:
-                                        ranking = shap_explainer.get_feature_importance(row_vec.reshape(1, -1))
+                                        if top_rules:
+                                            basic_rules = [rule['rule_id'] for rule in top_rules[:top_n]]
+                                            basic_values = [rule['value'] for rule in top_rules[:top_n]]
+                                            logging_utils.log_shap_results(
+                                                hostname=result['hostname'],
+                                                window_id=result['window_id'],
+                                                top_rules=basic_rules,
+                                                shap_values=basic_values,
+                                                prediction='malicious',
+                                                confidence=result['probability']
+                                            )
                                     except Exception:
                                         pass
+                            
+                            else:
+                                self.logger.info(f"SHAP explainer not available for alert {result['window_id']}")
+                                result['shap_explanation'] = {'explanation_available': False, 'error': 'SHAP explainer not initialized'}
 
-                                    top_r = ranking[:top_n] if ranking else []
-                                    shap_top_rules = [
-                                        int(str(item.get('feature', '').replace('rule_', ''))) if str(item.get('feature', '')).startswith('rule_') else item.get('feature')
-                                        for item in top_r
-                                    ]
-                                    shap_top_values = [float(item.get('importance', 0.0)) for item in top_r]
-
-                                    try:
-                                        logging_utils.log_shap_results(
-                                            hostname=result['hostname'],
-                                            window_id=result['window_id'],
-                                            top_rules=shap_top_rules,
-                                            shap_values=shap_top_values,
-                                            prediction=label_str,
-                                            confidence=result['probability']
-                                        )
-                                    except Exception:
-                                        pass
-                                except Exception as e:
-                                    self.logger.warning(f"SHAP explanation failed for {result['window_id']}: {e}")
                         except Exception as e:
-                            self.logger.warning(f"Alert detail logging failed: {e}")
+                            self.logger.warning(f"Alert detail processing failed for {result['window_id']}: {e}")
+                            result['shap_explanation'] = {'explanation_available': False, 'error': f'Processing failed: {str(e)}'}
 
                     # Persist alerts to detection_results
                     if is_alert and manager:
