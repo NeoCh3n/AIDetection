@@ -465,7 +465,8 @@ class UnifiedPipeline:
                             window_id=result['window_id'],
                             top_rules=[item['rule'] for item in ranking[:10]],
                             shap_values=[item['importance'] for item in ranking[:10]],
-                            report_path=report_path
+                            prediction=label_str,
+                            confidence=result['probability']
                         )
                         
                         self.logger.info(f"SHAP analysis saved to: {output_subdir}")
