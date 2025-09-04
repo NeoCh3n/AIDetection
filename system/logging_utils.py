@@ -20,6 +20,10 @@ header_log = config.SYSLOG_HEADER_LOG
 
 SUPPRESS_STDOUT = True  # avoid duplicate console noise; rely on app logger
 
+# Cache for root-level file handler to avoid duplicates
+_ROOT_FILE_HANDLER_PATH: Optional[str] = None
+_ROOT_FILE_HANDLER: Optional[logging.Handler] = None
+
 def run_log(level, message, payload = None):
     # Ensure log directory exists
     Path(log_dir_path).mkdir(parents=True, exist_ok=True)
@@ -78,6 +82,70 @@ def run_log(level, message, payload = None):
         # Fallback: write a local error note
         with open(filepath_today, "a+") as logfile_today:
             logfile_today.write(f"| {'ERROR'.ljust(10)} | {time_now} | Syslog send failed: {e}\n")
+
+
+def _daily_log_filepath() -> str:
+    """Compute the daily log file path consistent with run_log naming."""
+    Path(log_dir_path).mkdir(parents=True, exist_ok=True)
+    date_15mins_ago = str(datetime.datetime.now() - datetime.timedelta(minutes=15))[:10]
+    # Preserve behavior where log_dir_path may include a trailing slash
+    base_dir = log_dir_path.rstrip("/\\")
+    return os.path.join(base_dir, f"{date_15mins_ago}.log")
+
+
+def setup_global_daily_file_logging(level: int = logging.INFO, include_stdout: bool = True) -> None:
+    """
+    Attach a FileHandler to the root logger that writes all Python logging
+    records to running_log/YYYY-MM-DD.log. This ensures that logs emitted via
+    the standard logging module and via this utility converge to the same file.
+
+    Args:
+        level: Logging level to apply to the root logger.
+        include_stdout: If True, ensure a StreamHandler exists for console output.
+    """
+    global _ROOT_FILE_HANDLER_PATH, _ROOT_FILE_HANDLER
+
+    target_path = _daily_log_filepath()
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Ensure a single FileHandler for the daily log
+    handler_exists = False
+    for h in list(root_logger.handlers):
+        if isinstance(h, logging.FileHandler):
+            try:
+                if os.path.abspath(getattr(h, 'baseFilename', '')) == os.path.abspath(target_path):
+                    handler_exists = True
+                    _ROOT_FILE_HANDLER_PATH = target_path
+                    _ROOT_FILE_HANDLER = h
+                    break
+            except Exception:
+                continue
+
+    if not handler_exists:
+        try:
+            fh = logging.FileHandler(target_path, mode='a', encoding='utf-8', delay=True)
+            fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            fh.setFormatter(fmt)
+            root_logger.addHandler(fh)
+            _ROOT_FILE_HANDLER_PATH = target_path
+            _ROOT_FILE_HANDLER = fh
+        except Exception:
+            # Best effort; do not raise to callers
+            pass
+
+    # Ensure console output if requested
+    if include_stdout:
+        has_stream = any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+                         for h in root_logger.handlers)
+        if not has_stream:
+            try:
+                sh = logging.StreamHandler()
+                sh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+                root_logger.addHandler(sh)
+            except Exception:
+                pass
 
 def log_detection(hostname, window_id, prediction, confidence, timestamp=None):
     """
