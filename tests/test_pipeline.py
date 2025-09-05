@@ -8,18 +8,22 @@ import os
 import pandas as pd
 from datetime import datetime
 
-# Add necessary paths
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Training_data'))
+# Get the project root directory (parent of tests folder)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+
+# Add necessary paths using absolute paths
+sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.join(project_root, 'shared_utils'))
+sys.path.insert(0, os.path.join(project_root, 'Training_data'))
 
 def test_training_mode():
     """Test training mode with existing CSV data"""
     print("Testing training mode...")
     
     try:
-        # Check if training data exists
-        training_path = "../Training_data"
+        # Check if training data exists using absolute path
+        training_path = os.path.join(project_root, "Training_data")
         if os.path.exists(training_path):
             print(f"✓ Training data directory exists: {training_path}")
             
@@ -57,8 +61,8 @@ def test_detection_mode():
     print("\nTesting detection mode...")
     
     try:
-        # Check API integration files
-        api_path = "../api_integration"
+        # Check API integration files using absolute path
+        api_path = os.path.join(project_root, "api_integration")
         if os.path.exists(api_path):
             print(f"✓ API integration directory exists: {api_path}")
             
@@ -76,8 +80,8 @@ def test_detection_mode():
                 else:
                     print(f"  ✗ {file} not found")
         
-        # Check MongoDB files
-        mongodb_path = "../mongodb"
+        # Check MongoDB files using absolute path
+        mongodb_path = os.path.join(project_root, "mongodb")
         if os.path.exists(mongodb_path):
             print(f"✓ MongoDB directory exists: {mongodb_path}")
             
@@ -112,7 +116,7 @@ def test_shared_utils():
         print("✓ time_utils import successful")
         
         # Test rule_manager import
-        from shared_utils.rule_manager import get_rule_list
+        from shared_utils.qradar_rule_manager import get_rule_list
         print("✓ rule_manager import successful")
         
         return True
@@ -125,6 +129,7 @@ def main():
     """Run all tests"""
     print("=== Pipeline Integration Test ===")
     print(f"Working directory: {os.getcwd()}")
+    print(f"Project root: {project_root}")
     
     # Test training mode
     training_ok = test_training_mode()

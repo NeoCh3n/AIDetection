@@ -1,4 +1,4 @@
-sysmon_hostname (custom) (Unique Count),Custom Rule,Log Source Time (Minimum),Count
+sysmon_hostname (custom),Custom Rule,Log Source Time (Minimum),Count
 "DESKTOP-64-EDR","100221","Aug 08, 2025, 9:07:50 AM","5661.0"
 "DESKTOP-64-EDR","100227","Aug 08, 2025, 9:07:50 AM","5661.0"
 "DESKTOP-64-EDR","100225","Aug 08, 2025, 9:07:50 AM","5660.0"
