@@ -502,7 +502,7 @@ class UnifiedPipeline:
                                         feature_name_list=feature_names,
                                         output_dir=os.path.join("./output", "shap_explanations", f"alert_{result['window_id']}"),
                                         plot=False,  # Generate visualizations for this alert
-                                        plot_in_terminal=False,  # Don't clutter terminal during detection
+                                        plot_in_terminal=True,  # Don't clutter terminal during detection
                                         summary_report=False  # Generate detailed report for this alert
                                     )
                                     
