@@ -1,4 +1,4 @@
-sysmon_hostname (custom) (Unique Count),Custom Rule,Log Source Time (Minimum),Count
+sysmon_hostname (custom),Custom Rule,Log Source Time (Minimum),Count
 "192.168.153.166","100265","Aug 08, 2025, 10:43:53 AM","1015.0"
 "192.168.153.166","100272","Aug 08, 2025, 10:43:53 AM","1015.0"
 "192.168.153.166","100215","Aug 08, 2025, 10:43:53 AM","1015.0"
