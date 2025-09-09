@@ -2,34 +2,34 @@
   "classification_report": {
     "0": {
       "precision": 1.0,
-      "recall": 0.8,
-      "f1-score": 0.888888888888889,
+      "recall": 0.6,
+      "f1-score": 0.7499999999999999,
       "support": 5
     },
     "1": {
-      "precision": 0.8571428571428571,
+      "precision": 0.75,
       "recall": 1.0,
-      "f1-score": 0.923076923076923,
+      "f1-score": 0.8571428571428571,
       "support": 6
     },
-    "accuracy": 0.9090909090909091,
+    "accuracy": 0.8181818181818182,
     "macro avg": {
-      "precision": 0.9285714285714286,
-      "recall": 0.9,
-      "f1-score": 0.905982905982906,
+      "precision": 0.875,
+      "recall": 0.8,
+      "f1-score": 0.8035714285714285,
       "support": 11
     },
     "weighted avg": {
-      "precision": 0.922077922077922,
-      "recall": 0.9090909090909091,
-      "f1-score": 0.9075369075369075,
+      "precision": 0.8636363636363636,
+      "recall": 0.8181818181818182,
+      "f1-score": 0.8084415584415584,
       "support": 11
     }
   },
   "confusion_matrix": [
     [
-      4,
-      1
+      3,
+      2
     ],
     [
       0,
@@ -41,85 +41,85 @@
   "feature_count": 742,
   "top_20_features": [
     {
-      "rule_id": 100215,
-      "importance": 0.07318438770536784
+      "rule_id": 100221,
+      "importance": 0.07434891272628906
     },
     {
       "rule_id": 100227,
-      "importance": 0.06662773535456971
+      "importance": 0.0667389141704672
     },
     {
-      "rule_id": 100221,
-      "importance": 0.06137437475738989
+      "rule_id": 100215,
+      "importance": 0.06524042482276207
     },
     {
       "rule_id": 100225,
-      "importance": 0.055628406293384246
-    },
-    {
-      "rule_id": 100218,
-      "importance": 0.05379784900163461
+      "importance": 0.05564140606586674
     },
     {
       "rule_id": 100272,
-      "importance": 0.04989504651151345
-    },
-    {
-      "rule_id": 100101,
-      "importance": 0.04193789470974359
-    },
-    {
-      "rule_id": 100277,
-      "importance": 0.03991708521489357
+      "importance": 0.05206725691657647
     },
     {
       "rule_id": 100273,
-      "importance": 0.03895667837928044
+      "importance": 0.04494015779627197
     },
     {
-      "rule_id": 100265,
-      "importance": 0.03570813094502076
+      "rule_id": 100218,
+      "importance": 0.040417948295488094
     },
     {
-      "rule_id": 100119,
-      "importance": 0.029732204139234
-    },
-    {
-      "rule_id": 100216,
-      "importance": 0.028405572343286126
+      "rule_id": 100101,
+      "importance": 0.04034434862687708
     },
     {
       "rule_id": 100005,
-      "importance": 0.028177394862663272
+      "importance": 0.03949460720867594
     },
     {
-      "rule_id": 100223,
-      "importance": 0.02471748363446856
+      "rule_id": 100265,
+      "importance": 0.03642538011262943
     },
     {
-      "rule_id": 100425,
-      "importance": 0.021249047997259036
+      "rule_id": 100277,
+      "importance": 0.03314754456785747
     },
     {
-      "rule_id": 100560,
-      "importance": 0.020624746338824242
+      "rule_id": 100119,
+      "importance": 0.030667231338087544
     },
     {
-      "rule_id": 100463,
-      "importance": 0.018535369322709345
-    },
-    {
-      "rule_id": 100103,
-      "importance": 0.017623781328978915
+      "rule_id": 100216,
+      "importance": 0.027622644913988977
     },
     {
       "rule_id": 100276,
-      "importance": 0.0175330164875654
+      "importance": 0.018344910939873914
     },
     {
-      "rule_id": 100217,
-      "importance": 0.015770637720956975
+      "rule_id": 100463,
+      "importance": 0.01727435851402585
+    },
+    {
+      "rule_id": 100223,
+      "importance": 0.016766260695431762
+    },
+    {
+      "rule_id": 100271,
+      "importance": 0.016545089256729525
+    },
+    {
+      "rule_id": 100601,
+      "importance": 0.01582170559348336
+    },
+    {
+      "rule_id": 100030,
+      "importance": 0.015414286704676516
+    },
+    {
+      "rule_id": 100560,
+      "importance": 0.014854600026152805
     }
   ],
-  "training_date": "2025-09-04T10:04:20.360895"
+  "training_date": "2025-09-09T14:39:25.943843"
 }

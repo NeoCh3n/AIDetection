@@ -49,10 +49,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api_integratio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'mongodb'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
 
-# Import existing pipeline modules
-from data_loader import load_data
-from feature_aggregator import aggregate_to_windows
-from feature_generator import FeatureGenerator
+# Import existing pipeline modules (support both package and script execution)
+try:
+    # When run as a package: python -m pipeline.main_pipeline
+    from .data_loader import load_data  # type: ignore
+    from .feature_aggregator import aggregate_to_windows  # type: ignore
+    from .feature_generator import FeatureGenerator  # type: ignore
+except Exception:
+    # When run as a script: python ./pipeline/main_pipeline.py
+    from data_loader import load_data  # type: ignore
+    from feature_aggregator import aggregate_to_windows  # type: ignore
+    from feature_generator import FeatureGenerator  # type: ignore
 from system.shap_explainer import Explainer
 
 # Training/Evaluation from model_training package

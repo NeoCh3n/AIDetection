@@ -1,8 +1,44 @@
 """
 Model Training - Pipeline Integration
 
-Integrated training module that uses the unified data pipeline to train
-Random Forest models for classification tasks using QRadar rule frequencies.
+Quick Guide
+- Use local venv only: `source venv/bin/activate` then `make install`.
+- Preferred run (via orchestrator):
+  - Train: `python -m pipeline.main_pipeline train --config pipeline/config.json`
+  - Detect: `python -m pipeline.main_pipeline detect --config pipeline/config.json`
+- Direct CLI (this file):
+  - `python model_training/model_training.py --config pipeline/config.json --evaluate`
+
+Enabling GridSearchCV
+- Add a `grid_search` block under the `training` section of your config, or pass it in
+  the `training_config` dict to `train_threat_detector(...)`.
+- Example (pipeline/config.json):
+  {
+    "training": {
+      "model_path": "./model/threat_detector.joblib",
+      "test_size": 0.2,
+      "random_state": 42,
+      "grid_search": {
+        "enabled": true,
+        "scoring": "roc_auc",
+        "cv": 3,
+        "verbose": 1,
+        "param_grid": {
+          "n_estimators": [200, 400],
+          "max_depth": [null, 20, 40],
+          "max_features": ["sqrt", "log2"],
+          "min_samples_split": [2, 5],
+          "min_samples_leaf": [1, 2],
+          "class_weight": ["balanced_subsample"]
+        }
+      }
+    }
+  }
+
+Notes
+- Python 3.6.8 and scikit-learn 0.24.2 required (see requirements.txt).
+- Data loader defaults to `./Training_data/normal` and `./Training_data/attack` for CSVs.
+- RandomForest default: n_estimators=200, class_weight='balanced_subsample', max_features='sqrt', n_jobs=-1.
 """
 
 import sys
@@ -23,7 +59,7 @@ from system import logging_utils
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 
 # Import pipeline modules
@@ -109,18 +145,92 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
         logger.info(f"Training set: {X_train.shape[0]} samples, {X_train.shape[1]} features")
         logger.info(f"Test set: {X_test.shape[0]} samples")
         
-        # Step 5: Train Random Forest with optimized specifications
-        logger.info("Training Random Forest with optimized specifications...")
-        rf_model = RandomForestClassifier(
-            n_estimators=200,
-            class_weight='balanced_subsample',  # Handle class imbalance
-            max_features='sqrt',
-            random_state=42,
-            n_jobs=-1
-        )
-        
-        rf_model.fit(X_train, y_train)
-        logger.info("Model training completed successfully")
+        # Step 5: Train model (optionally with GridSearchCV)
+        gs_cfg = training_config.get('grid_search', {}) if isinstance(training_config, dict) else {}
+        use_grid = bool(gs_cfg.get('enabled', False))
+
+        if use_grid:
+            logger.info("GridSearchCV enabled — tuning RandomForest hyperparameters...")
+
+            # Reasonable defaults compatible with sklearn 0.24.2
+            default_param_grid = {
+                'n_estimators': [200, 400],
+                'max_depth': [None, 20, 40],
+                'max_features': ['sqrt', 'log2'],
+                'min_samples_split': [2, 5],
+                'min_samples_leaf': [1, 2],
+                'class_weight': ['balanced_subsample'],
+            }
+
+            param_grid = gs_cfg.get('param_grid', default_param_grid)
+            scoring = gs_cfg.get('scoring', 'roc_auc')
+            n_splits = int(gs_cfg.get('cv', 3))
+            verbose = int(gs_cfg.get('verbose', 1))
+
+            base_rf = RandomForestClassifier(
+                random_state=42,
+                n_jobs=-1,
+            )
+            cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+            grid = GridSearchCV(
+                estimator=base_rf,
+                param_grid=param_grid,
+                scoring=scoring,
+                cv=cv,
+                n_jobs=-1,
+                refit=True,
+                verbose=verbose,
+            )
+
+            grid.fit(X_train, y_train)
+            rf_model = grid.best_estimator_
+            try:
+                logger.info(f"GridSearch best params: {grid.best_params_}")
+                logger.info(f"GridSearch best {scoring}: {grid.best_score_:.4f}")
+            except Exception:
+                pass
+
+            # Persist full grid search results for auditability
+            try:
+                model_dir = os.path.dirname(model_save_path) or "."
+                base_name = os.path.splitext(os.path.basename(model_save_path))[0]
+
+                # Save full cv_results_ as CSV sorted by rank_test_score
+                results_df = pd.DataFrame(grid.cv_results_)
+                if 'rank_test_score' in results_df.columns:
+                    results_df = results_df.sort_values('rank_test_score')
+                csv_path = os.path.join(model_dir, f"{base_name}_gridsearch_results.csv")
+                results_df.to_csv(csv_path, index=False)
+                logger.info(f"GridSearchCV results saved to: {csv_path}")
+
+                # Save concise summary JSON (best params and top-10 rows)
+                summary = {
+                    'scoring': scoring,
+                    'cv': n_splits,
+                    'n_candidates': int(len(results_df)) if hasattr(results_df, '__len__') else None,
+                    'best_params': getattr(grid, 'best_params_', {}),
+                    'best_score': float(getattr(grid, 'best_score_', 0.0)),
+                    'top10': results_df.head(10).to_dict(orient='records') if hasattr(results_df, 'head') else []
+                }
+                summary_path = os.path.join(model_dir, f"{base_name}_gridsearch_summary.json")
+                with open(summary_path, 'w') as f:
+                    json.dump(summary, f, indent=2)
+                logger.info(f"GridSearchCV summary saved to: {summary_path}")
+            except Exception as e:
+                logger.warning(f"Failed to persist grid search results: {e}")
+            logger.info("GridSearchCV training completed successfully")
+        else:
+            logger.info("Training RandomForest with fixed hyperparameters...")
+            rf_model = RandomForestClassifier(
+                n_estimators=200,
+                class_weight='balanced_subsample',  # Handle class imbalance
+                max_features='sqrt',
+                random_state=42,
+                n_jobs=-1
+            )
+            rf_model.fit(X_train, y_train)
+            logger.info("Model training completed successfully")
         
         # Step 6: Save trained model
         logger.info(f"Saving model to: {model_save_path}")
