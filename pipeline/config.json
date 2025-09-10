@@ -4,6 +4,13 @@
     "model_path": "./model/threat_detector.joblib",
     "test_size": 0.2,
     "random_state": 42,
+    "feature_names": {
+      "include_rule_names": true,
+      "csv_paths": [
+        "./Qradar_rule/qradar_customrules.csv",
+        "./Qradar_rule/qradar_BBrules.csv"
+      ]
+    },
     "grid_search": {
       "enabled": true,
       "scoring": "roc_auc",

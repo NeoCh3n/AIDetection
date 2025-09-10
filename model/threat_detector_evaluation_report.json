@@ -42,84 +42,104 @@
   "top_20_features": [
     {
       "rule_id": 100221,
-      "importance": 0.07434891272628906
+      "importance": 0.07434891272628906,
+      "rule_name": "Destination Asset Weight is Low"
     },
     {
       "rule_id": 100227,
-      "importance": 0.0667389141704672
+      "importance": 0.0667389141704672,
+      "rule_name": "Source Asset Weight is Low"
     },
     {
       "rule_id": 100215,
-      "importance": 0.06524042482276207
+      "importance": 0.06524042482276207,
+      "rule_name": "Context is Local to Local"
     },
     {
       "rule_id": 100225,
-      "importance": 0.05564140606586674
+      "importance": 0.05564140606586674,
+      "rule_name": "Source Asset Exists"
     },
     {
       "rule_id": 100272,
-      "importance": 0.05206725691657647
+      "importance": 0.05206725691657647,
+      "rule_name": "Load Basic Building Blocks"
     },
     {
       "rule_id": 100273,
-      "importance": 0.04494015779627197
+      "importance": 0.04494015779627197,
+      "rule_name": "BB:CategoryDefinition: Logout Events"
     },
     {
       "rule_id": 100218,
-      "importance": 0.040417948295488094
+      "importance": 0.040417948295488094,
+      "rule_name": "Destination Asset Exists"
     },
     {
       "rule_id": 100101,
-      "importance": 0.04034434862687708
+      "importance": 0.04034434862687708,
+      "rule_name": "BB:NetworkDefinition: Honeypot like Addresses"
     },
     {
       "rule_id": 100005,
-      "importance": 0.03949460720867594
+      "importance": 0.03949460720867594,
+      "rule_name": "BB:CategoryDefinition: Authentication Success"
     },
     {
       "rule_id": 100265,
-      "importance": 0.03642538011262943
+      "importance": 0.03642538011262943,
+      "rule_name": "BB:DeviceDefinition: Operating System"
     },
     {
       "rule_id": 100277,
-      "importance": 0.03314754456785747
+      "importance": 0.03314754456785747,
+      "rule_name": "BB:NetworkDefinition: Darknet Addresses"
     },
     {
       "rule_id": 100119,
-      "importance": 0.030667231338087544
+      "importance": 0.030667231338087544,
+      "rule_name": "BB:CategoryDefinition: Post Exploit Account Activity"
     },
     {
       "rule_id": 100216,
-      "importance": 0.027622644913988977
+      "importance": 0.027622644913988977,
+      "rule_name": "Context is Local to Remote"
     },
     {
       "rule_id": 100276,
-      "importance": 0.018344910939873914
+      "importance": 0.018344910939873914,
+      "rule_name": "BB:CategoryDefinition: System Configuration"
     },
     {
       "rule_id": 100463,
-      "importance": 0.01727435851402585
+      "importance": 0.01727435851402585,
+      "rule_name": "UAC Bypass - Scheduled Task Configured to Run with Highest Privileges"
     },
     {
       "rule_id": 100223,
-      "importance": 0.016766260695431762
+      "importance": 0.016766260695431762,
+      "rule_name": "Source Address is a Bogon IP"
     },
     {
       "rule_id": 100271,
-      "importance": 0.016545089256729525
+      "importance": 0.016545089256729525,
+      "rule_name": "System: Notification"
     },
     {
       "rule_id": 100601,
-      "importance": 0.01582170559348336
+      "importance": 0.01582170559348336,
+      "rule_name": "BB:BehaviorDefinition: Regular Endpoint Administration"
     },
     {
       "rule_id": 100030,
-      "importance": 0.015414286704676516
+      "importance": 0.015414286704676516,
+      "rule_name": "BB:PortDefinition: Web Ports"
     },
     {
       "rule_id": 100560,
-      "importance": 0.014854600026152805
+      "importance": 0.014854600026152805,
+      "rule_name": "BB:BehaviorDefinition: Multiple File Deletions on Endpoint System"
     }
   ],
-  "training_date": "2025-09-09T14:39:25.943843"
+  "training_date": "2025-09-10T09:49:01.560224"
 }

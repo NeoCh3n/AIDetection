@@ -167,7 +167,9 @@ class UnifiedPipeline:
                 config=rm_cfg.get('api_config', {}),
             )
             rule_list = rule_manager.get_rule_list()
-            _report = evaluate_and_report(model, X_test, y_test, rule_list, model_path)
+            # Optional feature name enrichment for top features
+            fname_opts = training_cfg.get('feature_names', {}) if isinstance(training_cfg, dict) else None
+            _report = evaluate_and_report(model, X_test, y_test, rule_list, model_path, feature_name_options=fname_opts)
 
             self.logger.info("Training pipeline completed successfully")
             return True

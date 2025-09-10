@@ -305,7 +305,8 @@ def train_threat_detector_from_csv(feature_data_path: str, model_save_path: str)
     return model_save_path
 
 def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_test: pd.Series, 
-                       rule_list: list, model_save_path: str) -> Dict:
+                       rule_list: list, model_save_path: str,
+                       feature_name_options: Optional[Dict] = None) -> Dict:
     """
     Evaluate the trained model and generate comprehensive reports.
     
@@ -358,24 +359,67 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         # Feature importance analysis
         logger.info("Extracting feature importance...")
         feature_importances = model.feature_importances_
-        
-        # Create rule importance mapping
+
+        # Configure rule name mapping via feature_name_options
+        include_names = False
+        csv_paths: list = []
+        direct_map: Dict[int, str] = {}
+        if isinstance(feature_name_options, dict):
+            include_names = bool(feature_name_options.get('include_rule_names', False))
+            csv_paths = feature_name_options.get('csv_paths', []) or []
+            raw_map = feature_name_options.get('name_map') or {}
+            try:
+                direct_map = {int(k): str(v) for k, v in raw_map.items()}
+            except Exception:
+                direct_map = {}
+
+        # Build rule_id -> rule_name map from provided sources
+        rule_name_map: Dict[int, str] = {}
+        if include_names:
+            # Prefer direct map entries
+            if direct_map:
+                rule_name_map.update(direct_map)
+            # Then load from CSVs if provided
+            for path in csv_paths:
+                try:
+                    if path and os.path.exists(path):
+                        df_rules = pd.read_csv(path)
+                        if 'id' in df_rules.columns and 'name' in df_rules.columns:
+                            for rid, nm in zip(df_rules['id'], df_rules['name']):
+                                try:
+                                    rid_int = int(rid)
+                                    if rid_int not in rule_name_map:
+                                        rule_name_map[rid_int] = str(nm)
+                                except Exception:
+                                    continue
+                except Exception:
+                    continue
+
+        # Create rule importance mapping and enrich with rule names
         importance_df = pd.DataFrame({
             'rule_id': rule_list,
             'importance': feature_importances
-        }).sort_values('importance', ascending=False)
-        
+        })
+        if include_names:
+            importance_df['rule_name'] = [
+                rule_name_map.get(int(rid), f"Rule {rid}") for rid in importance_df['rule_id']
+            ]
+        importance_df = importance_df.sort_values('importance', ascending=False)
+
         # Get top 20 most important features
         top_20_features = importance_df.head(20)
         logger.info("Top 20 most important features:")
         for _, row in top_20_features.iterrows():
-            logger.info(f"  Rule {row['rule_id']}: {row['importance']:.4f}")
+            if include_names and 'rule_name' in row:
+                logger.info(f"  {row['rule_id']} | {row['rule_name']}: {row['importance']:.4f}")
+            else:
+                logger.info(f"  Rule {row['rule_id']}: {row['importance']:.4f}")
         
         # Save evaluation reports
         model_dir = os.path.dirname(model_save_path)
         base_name = os.path.splitext(os.path.basename(model_save_path))[0]
         
-        # Save top 20 features
+        # Save top 20 features (with names)
         top_features_path = os.path.join(model_dir, f"{base_name}_top_20_features.csv")
         top_20_features.to_csv(top_features_path, index=False)
         logger.info(f"Top 20 features saved to: {top_features_path}")
