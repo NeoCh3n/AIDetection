@@ -382,10 +382,40 @@ class UnifiedPipeline:
                     f"rule_{rid}" if rid >= 0 else f"feature_{k}"
                     for k, rid in enumerate(index_to_rule)
                 ]
+                # Optional rule name enrichment from config
+                fn_cfg = (self.config.get('detection', {}) or {}).get('feature_names', {}) or {}
+                include_rule_names = bool(fn_cfg.get('include_rule_names', False))
+                rule_name_map: dict = {}
+                if include_rule_names:
+                    # Start with direct name map if provided
+                    raw_map = fn_cfg.get('name_map') or {}
+                    try:
+                        rule_name_map.update({int(k): str(v) for k, v in raw_map.items()})
+                    except Exception:
+                        pass
+                    # Add from CSV paths
+                    csv_paths = fn_cfg.get('csv_paths', []) or []
+                    for path in csv_paths:
+                        try:
+                            if path and os.path.exists(path):
+                                import pandas as _pdcsv
+                                df_rules = _pdcsv.read_csv(path)
+                                if 'id' in df_rules.columns and 'name' in df_rules.columns:
+                                    for rid, nm in zip(df_rules['id'], df_rules['name']):
+                                        try:
+                                            rid_int = int(rid)
+                                            if rid_int not in rule_name_map:
+                                                rule_name_map[rid_int] = str(nm)
+                                        except Exception:
+                                            continue
+                        except Exception:
+                            continue
             except Exception:
                 index_to_rule = []
                 n_features = X.shape[1] if hasattr(X, 'shape') else 0
                 feature_names = [f"feature_{k}" for k in range(int(n_features))]
+                include_rule_names = False
+                rule_name_map = {}
             
             # Make predictions
             try:
@@ -462,16 +492,22 @@ class UnifiedPipeline:
                                 row_vec = X[idx]
                                 # argsort descending
                                 top_idx = list(reversed(np.argsort(row_vec)[:top_n].tolist()))
-                                top_rules = []
-                                for j in top_idx:
-                                    val = float(row_vec[j])
-                                    if val <= 0:
-                                        continue
-                                    resolved_rule = j
-                                    if index_to_rule and j < len(index_to_rule):
-                                        rid_val = index_to_rule[j]
-                                        resolved_rule = int(rid_val) if isinstance(rid_val, int) and rid_val >= 0 else j
-                                    top_rules.append({'rule_id': resolved_rule, 'value': val})
+                            top_rules = []
+                            for j in top_idx:
+                                val = float(row_vec[j])
+                                if val <= 0:
+                                    continue
+                                resolved_rule = j
+                                if index_to_rule and j < len(index_to_rule):
+                                    rid_val = index_to_rule[j]
+                                    resolved_rule = int(rid_val) if isinstance(rid_val, int) and rid_val >= 0 else j
+                                rule_name = None
+                                if 'include_rule_names' in locals() and include_rule_names and isinstance(resolved_rule, int):
+                                    rule_name = rule_name_map.get(int(resolved_rule))
+                                entry = {'rule_id': resolved_rule, 'value': val}
+                                if rule_name is not None:
+                                    entry['rule_name'] = rule_name
+                                top_rules.append(entry)
                             else:
                                 top_rules = []
 
@@ -504,6 +540,10 @@ class UnifiedPipeline:
                                     background_indices = np.random.choice(X.shape[0], size=background_sample_size, replace=False)
                                     background_data = X[background_indices]
                                     
+                                    # SHAP frequent path mining options from config (optional)
+                                    shap_cfg = (self.config.get('detection', {}) or {}).get('shap', {}) or {}
+                                    fpm_opts = shap_cfg.get('frequent_path_mining', None)
+
                                     shap_results = shap_explainer.explain(
                                         model=predictor.model,
                                         background_data=background_data,  # Background data for SHAP baseline
@@ -512,12 +552,31 @@ class UnifiedPipeline:
                                         output_dir=os.path.join("./output", "shap_explanations", f"alert_{result['window_id']}"),
                                         plot=False,  # Generate visualizations for this alert
                                         plot_in_terminal=True,  # Don't clutter terminal during detection
-                                        summary_report=False  # Generate detailed report for this alert
+                                        summary_report=False,  # Generate detailed report for this alert
+                                        frequent_path_mining=fpm_opts
                                     )
                                     
                                     if shap_results and 'feature_importance' in shap_results:
                                         # Extract top contributing features for this alert
                                         alert_top_features = shap_results['feature_importance'][:top_n]
+                                        # Enrich with rule_id and rule_name when available
+                                        enriched_shap = []
+                                        for fi in alert_top_features:
+                                            fname = fi.get('feature', '')
+                                            rid_val = None
+                                            if isinstance(fname, str) and fname.startswith('rule_'):
+                                                try:
+                                                    rid_val = int(fname.replace('rule_', ''))
+                                                except Exception:
+                                                    rid_val = None
+                                            fi_en = dict(fi)
+                                            if rid_val is not None:
+                                                fi_en['rule_id'] = rid_val
+                                                if 'include_rule_names' in locals() and include_rule_names:
+                                                    name = rule_name_map.get(int(rid_val))
+                                                    if name is not None:
+                                                        fi_en['rule_name'] = name
+                                            enriched_shap.append(fi_en)
                                         
                                         # Log SHAP-based feature importance
                                         shap_top_rules = []
@@ -558,10 +617,10 @@ class UnifiedPipeline:
                                                     'hostname': result['hostname'],
                                                     'window_id': result['window_id'],
                                                     'confidence': result['probability'],
-                                                    'shap_top_features': alert_top_features,
+                                                    'shap_top_features': enriched_shap,
                                                     'shap_output_files': shap_results.get('output_files', {}),
                                                     'shap_summary': {
-                                                        'most_important_feature': alert_top_features[0]['feature'] if alert_top_features else None,
+                                                        'most_important_feature': enriched_shap[0].get('rule_name', enriched_shap[0].get('feature')) if enriched_shap else None,
                                                         'max_importance_score': alert_top_features[0]['importance'] if alert_top_features else 0,
                                                         'features_analyzed': len(shap_results.get('feature_importance', [])),
                                                         'explanation_timestamp': shap_results.get('timestamp')
@@ -573,7 +632,7 @@ class UnifiedPipeline:
                                         
                                         # Store SHAP results in the result for potential further use
                                         result['shap_explanation'] = {
-                                            'top_features': alert_top_features,
+                                            'top_features': enriched_shap,
                                             'output_files': shap_results.get('output_files', {}),
                                             'explanation_available': True
                                         }

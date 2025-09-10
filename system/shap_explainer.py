@@ -23,7 +23,14 @@ Usage:
         output_dir="./results",
         plot=True,
         plot_in_terminal=True,
-        summary_report=True
+        summary_report=True,
+        frequent_path_mining={
+            'enabled': True,
+            'max_trees': 50,
+            'itemset_sizes': [2, 3],
+            'top_k': 20,
+            'min_support': 0.05
+        }
     )
 """
 
@@ -69,7 +76,8 @@ class Explainer:
                 output_dir: str,
                 plot: bool = False,
                 plot_in_terminal: bool = False, 
-                summary_report: bool = False) -> Dict[str, Any]:
+                summary_report: bool = False,
+                frequent_path_mining: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Explain a machine learning model using SHAP values for specific instances.
         
@@ -111,6 +119,13 @@ class Explainer:
             
             # Calculate feature importance
             feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+
+            # Optional: Frequent Path Mining over RandomForest decision paths
+            fpm_results = None
+            try:
+                fpm_results = self._maybe_mine_frequent_paths(model, feature_names, frequent_path_mining)
+            except Exception as e:
+                self.logger.warning(f"Frequent path mining skipped due to error: {e}")
             
             # Build results
             results = {
@@ -125,6 +140,8 @@ class Explainer:
                 'timestamp': datetime.now().isoformat(),
                 'output_files': {}
             }
+            if fpm_results is not None:
+                results['frequent_paths'] = fpm_results
             
             # Generate visualizations if requested
             if plot:
@@ -147,6 +164,142 @@ class Explainer:
         except Exception as e:
             self.logger.error(f"Error in SHAP explanation: {e}")
             raise
+
+    def _maybe_mine_frequent_paths(self, model, feature_names: List[str], options: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Optionally mine frequent feature combinations from RandomForest decision paths.
+
+        Controls via 'options' dict:
+        - enabled (bool): turn mining on/off
+        - max_trees (int): analyze at most this many trees (None=all)
+        - max_depth (int): limit path depth considered (None=full path)
+        - itemset_sizes (List[int]): sizes of combinations to count (e.g., [2,3])
+        - top_k (int): number of top itemsets to return
+        - min_support (float): minimum support threshold (0..1)
+        """
+        try:
+            if not isinstance(options, dict) or not options.get('enabled', False):
+                return None
+
+            estimators = getattr(model, 'estimators_', None)
+            if estimators is None or not hasattr(model, 'n_features_in_'):
+                return None
+
+            # Defaults
+            max_trees = options.get('max_trees', 100)
+            max_depth = options.get('max_depth', None)
+            itemset_sizes = options.get('itemset_sizes', [2])
+            top_k = int(options.get('top_k', 20))
+            min_support = float(options.get('min_support', 0.01))
+
+            # Select trees
+            if isinstance(max_trees, int) and max_trees > 0:
+                trees = estimators[:max_trees]
+            else:
+                trees = estimators
+
+            from itertools import combinations
+            from collections import Counter
+
+            path_counter = Counter()
+            total_paths = 0
+
+            for est in trees:
+                tree_ = getattr(est, 'tree_', None)
+                if tree_ is None:
+                    continue
+                children_left = tree_.children_left
+                children_right = tree_.children_right
+                features = tree_.feature
+
+                # DFS: (node_id, depth, features_on_path)
+                stack = [(0, 0, [])]
+                while stack:
+                    node_id, depth, feats = stack.pop()
+
+                    is_leaf = (children_left[node_id] == -1 and children_right[node_id] == -1)
+                    if is_leaf:
+                        feat_set = sorted(set([f for f in feats if f is not None and f >= 0]))
+                        if feat_set:
+                            for k in itemset_sizes:
+                                if k <= 0:
+                                    continue
+                                if len(feat_set) >= k:
+                                    for combo in combinations(feat_set, k):
+                                        path_counter[combo] += 1
+                            total_paths += 1
+                        continue
+
+                    # Depth pruning
+                    if isinstance(max_depth, int) and max_depth >= 0 and depth >= max_depth:
+                        feat_set = sorted(set([f for f in feats if f is not None and f >= 0]))
+                        if feat_set:
+                            for k in itemset_sizes:
+                                if k <= 0:
+                                    continue
+                                if len(feat_set) >= k:
+                                    for combo in combinations(feat_set, k):
+                                        path_counter[combo] += 1
+                            total_paths += 1
+                        continue
+
+                    # Descend
+                    feat_idx = features[node_id]
+                    next_feats = feats
+                    if feat_idx is not None and int(feat_idx) >= 0:
+                        next_feats = feats + [int(feat_idx)]
+                    left = children_left[node_id]
+                    right = children_right[node_id]
+                    if left != -1:
+                        stack.append((left, depth + 1, next_feats))
+                    if right != -1:
+                        stack.append((right, depth + 1, next_feats))
+
+            # Build results
+            items = []
+            if total_paths > 0 and path_counter:
+                for combo, count in path_counter.items():
+                    support = float(count) / float(total_paths)
+                    if support >= min_support:
+                        combo_names = []
+                        combo_rule_ids = []
+                        for idx in combo:
+                            name = feature_names[idx] if 0 <= idx < len(feature_names) else f"feature_{idx}"
+                            combo_names.append(name)
+                            rid = None
+                            if isinstance(name, str) and name.startswith('rule_'):
+                                try:
+                                    rid = int(name.replace('rule_', ''))
+                                except Exception:
+                                    rid = None
+                            combo_rule_ids.append(rid)
+                        items.append({
+                            'features': combo_names,
+                            'feature_indices': list(combo),
+                            'rule_ids': combo_rule_ids,
+                            'count': int(count),
+                            'support': support
+                        })
+
+                # Sort and truncate
+                items.sort(key=lambda x: (-x['count'], -x['support']))
+                if top_k and top_k > 0:
+                    items = items[:top_k]
+
+            return {
+                'parameters': {
+                    'enabled': True,
+                    'max_trees': max_trees,
+                    'max_depth': max_depth,
+                    'itemset_sizes': itemset_sizes,
+                    'top_k': top_k,
+                    'min_support': min_support,
+                    'total_paths': total_paths
+                },
+                'top_itemsets': items
+            }
+        except Exception:
+            return None
     
     def _validate_inputs(self, model, background_data, instance_data, feature_name_list, output_dir):
         """Validate all input parameters."""

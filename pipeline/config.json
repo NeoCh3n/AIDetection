@@ -51,7 +51,24 @@
     "retention_days": 7,
     "alert_threshold": 0,
     "window_size_minutes": 30,
-    "max_detection_age_hours": 24
+    "max_detection_age_hours": 24,
+    "feature_names": {
+      "include_rule_names": true,
+      "csv_paths": [
+        "./Qradar_rule/qradar_customrules.csv",
+        "./Qradar_rule/qradar_BBrules.csv"
+      ]
+    },
+    "shap": {
+      "frequent_path_mining": {
+        "enabled": false,
+        "max_trees": 50,
+        "max_depth": null,
+        "itemset_sizes": [2],
+        "top_k": 20,
+        "min_support": 0.05
+      }
+    }
   },
   "rule_manager": {
     "mode": "file",
