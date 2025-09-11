@@ -16,17 +16,17 @@
       "scoring": "roc_auc",
       "cv": 3,
       "verbose": 1,
-      "param_grid" : {
-                "n_estimators": [300, 320, 340, 360, 380, 400, 420, 440, 460, 480, 500, 520, 540, 560, 580, 600, 620, 640, 660, 680, 700, 720, 740, 760, 780, 800, 820, 840, 860, 880, 900, 920, 940, 960, 980],
-                "max_depth": [8, 10, 12, 14, 16, 18],
-                "max_features": ["sqrt", "log2"],
-                "min_samples_split": [10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48],
-                "min_samples_leaf": [10, 12, 14, 16, 18],
-                "class_weight": ["balanced_subsample"],
-                "min_impurity_decrease": [0.0, 0.0001, 0.001, 0.01],
-                "ccp_alpha": [0.0, 0.0001, 0.001, 0.01],
-                "criterion": ["gini", "entropy"]
-           }
+       "param_grid": {
+        "n_estimators": [300, 400, 500, 600, 700, 800, 900, 1000],
+        "max_depth": [8, 12, 16, 20, null],
+        "max_features": ["sqrt", "log2"],
+        "min_samples_split": [10, 20, 30, 40, 50],
+        "min_samples_leaf": [10, 15, 20],
+        "class_weight": ["none", "balanced", "balanced_subsample"],
+        "min_impurity_decrease": [0.0, 0.0001, 0.001, 0.01],
+        "ccp_alpha": [0.0, 0.0001, 0.001, 0.01],
+        "criterion": ["gini", "entropy"]
+      }
     },
     "model_params": {
       "n_estimators": 200,
