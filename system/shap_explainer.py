@@ -44,7 +44,8 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import plotext as plt_terminal
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Dict, Any, Optional, Union, Tuple, Set
+from pathlib import Path
 
 class Explainer:
     """
@@ -67,6 +68,8 @@ class Explainer:
         # Initialize logging
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("SHAP Explainer initialized and ready to use")
+        # Lazy cache for BOC rule IDs discovered from rule CSVs
+        self._boc_rule_ids: Optional[Set[int]] = None
     
     def explain(self, 
                 model, 
@@ -117,8 +120,15 @@ class Explainer:
             self.logger.info(f"Calculating SHAP values for {instance_array.shape[0]} instance(s)")
             shap_values = explainer.shap_values(instance_array)
             
-            # Calculate feature importance
-            feature_importance = self._calculate_feature_importance(shap_values, feature_names)
+            # Calculate feature importance (full ranking)
+            feature_importance_full = self._calculate_feature_importance(shap_values, feature_names)
+
+            # Prioritize BOC-related rules and keep only top 5 for output
+            feature_importance = self._prioritize_boc_and_top_k(
+                feature_importance_full,
+                feature_names,
+                top_k=5
+            )
 
             # Optional: Frequent Path Mining over RandomForest decision paths
             fpm_results = None
@@ -130,6 +140,7 @@ class Explainer:
             # Build results
             results = {
                 'shap_values': shap_values,
+                # Only output top-5 rules; BOC-related first by priority
                 'feature_importance': feature_importance,
                 'feature_names': feature_names,
                 'instance_shape': instance_array.shape,
@@ -788,7 +799,7 @@ class Explainer:
         except Exception as e:
             self.logger.error(f"Error generating summary report: {e}")
             return None
-    
+
     def __str__(self) -> str:
         """String representation of the explainer."""
         return "SHAP Explainer (ready to use with explain() method)"
@@ -846,3 +857,110 @@ class Explainer:
         except Exception:
             # If all else fails, assume no non-finite values
             return False
+
+    # ------------------------
+    # BOC prioritization utils
+    # ------------------------
+    def _extract_rule_id(self, feature_name: str) -> Optional[int]:
+        """Extract integer rule_id from a feature name like 'rule_100392'."""
+        try:
+            if isinstance(feature_name, str) and feature_name.startswith('rule_'):
+                rid = int(feature_name.replace('rule_', ''))
+                return rid
+        except Exception:
+            pass
+        return None
+
+    def _load_boc_rule_ids(self) -> Set[int]:
+        """Discover rule IDs whose names contain 'BOC' from Qradar_rule CSVs.
+
+        Searches the repository's Qradar_rule directory for CSVs containing
+        columns 'id' and 'name', and returns a set of rule IDs where the name
+        has the substring 'BOC' (case-insensitive).
+        """
+        if self._boc_rule_ids is not None:
+            return self._boc_rule_ids
+
+        boc_ids: Set[int] = set()
+        try:
+            # Locate Qradar_rule directory relative to this file
+            sys_dir = os.path.dirname(__file__)
+            project_root = os.path.abspath(os.path.join(sys_dir, '..'))
+            qradar_dir = os.path.join(project_root, 'Qradar_rule')
+
+            if not os.path.isdir(qradar_dir):
+                self._boc_rule_ids = set()
+                return self._boc_rule_ids
+
+            # Scan all CSV files in Qradar_rule
+            for fname in os.listdir(qradar_dir):
+                if not fname.lower().endswith('.csv'):
+                    continue
+                fpath = os.path.join(qradar_dir, fname)
+                try:
+                    df_rules = pd.read_csv(fpath)
+                except Exception:
+                    continue
+                if 'id' not in df_rules.columns or 'name' not in df_rules.columns:
+                    continue
+                for rid_val, nm in zip(df_rules['id'], df_rules['name']):
+                    try:
+                        rid_int = int(rid_val)
+                        name_str = str(nm) if nm is not None else ''
+                        if 'boc' in name_str.lower():
+                            boc_ids.add(rid_int)
+                    except Exception:
+                        continue
+
+            self._boc_rule_ids = boc_ids
+            return self._boc_rule_ids
+        except Exception:
+            # On any error, default to empty set and proceed without prioritization
+            self._boc_rule_ids = set()
+            return self._boc_rule_ids
+
+    def _is_boc_rule(self, rule_id: Optional[int]) -> bool:
+        """Return True if rule_id is in the discovered BOC rule set."""
+        if rule_id is None:
+            return False
+        try:
+            boc_ids = self._load_boc_rule_ids()
+            return int(rule_id) in boc_ids
+        except Exception:
+            return False
+
+    def _prioritize_boc_and_top_k(
+        self,
+        feature_importance: List[Dict[str, Any]],
+        feature_names: List[str],
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Reorder importance list to put BOC-related rules first and limit to top_k.
+
+        - Determines BOC-related rules via Qradar_rule CSV names containing 'BOC'.
+        - Keeps original relative order within BOC group and within others.
+        - Returns only the first top_k items from the reordered list.
+        """
+        if not feature_importance:
+            return []
+
+        # Stable partition based on BOC membership
+        boc_items: List[Dict[str, Any]] = []
+        other_items: List[Dict[str, Any]] = []
+
+        for item in feature_importance:
+            feat_name = str(item.get('feature', ''))
+            rid = self._extract_rule_id(feat_name)
+            if self._is_boc_rule(rid):
+                boc_items.append(item)
+            else:
+                other_items.append(item)
+
+        # If no BOC items at all, just take top_k from original
+        if not boc_items:
+            return feature_importance[:max(0, int(top_k))]
+
+        # Combine BOC-first then others, limit to top_k
+        combined = boc_items + other_items
+        k = max(0, int(top_k))
+        return combined[:k]
