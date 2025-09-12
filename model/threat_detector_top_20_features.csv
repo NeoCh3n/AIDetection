@@ -1,21 +1,21 @@
 rule_id,importance,rule_name
-100221,0.07434891272628906,Destination Asset Weight is Low
-100227,0.0667389141704672,Source Asset Weight is Low
-100215,0.06524042482276207,Context is Local to Local
-100225,0.05564140606586674,Source Asset Exists
-100272,0.05206725691657647,Load Basic Building Blocks
-100273,0.04494015779627197,BB:CategoryDefinition: Logout Events
-100218,0.040417948295488094,Destination Asset Exists
-100101,0.04034434862687708,BB:NetworkDefinition: Honeypot like Addresses
-100005,0.03949460720867594,BB:CategoryDefinition: Authentication Success
-100265,0.03642538011262943,BB:DeviceDefinition: Operating System
-100277,0.03314754456785747,BB:NetworkDefinition: Darknet Addresses
-100119,0.030667231338087544,BB:CategoryDefinition: Post Exploit Account Activity
-100216,0.027622644913988977,Context is Local to Remote
-100276,0.018344910939873914,BB:CategoryDefinition: System Configuration
-100463,0.01727435851402585,UAC Bypass - Scheduled Task Configured to Run with Highest Privileges
-100223,0.016766260695431762,Source Address is a Bogon IP
-100271,0.016545089256729525,System: Notification
-100601,0.01582170559348336,BB:BehaviorDefinition: Regular Endpoint Administration
-100030,0.015414286704676516,BB:PortDefinition: Web Ports
-100560,0.014854600026152805,BB:BehaviorDefinition: Multiple File Deletions on Endpoint System
+100218,0.11678832116788318,Destination Asset Exists
+100221,0.09489051094890508,Destination Asset Weight is Low
+100216,0.07299270072992699,Context is Local to Remote
+100215,0.07299270072992699,Context is Local to Local
+100272,0.0656934306569343,Load Basic Building Blocks
+100225,0.05839416058394159,Source Asset Exists
+100217,0.05839416058394159,Context is Remote to Local
+100277,0.05839416058394159,BB:NetworkDefinition: Darknet Addresses
+100101,0.05655185280194026,BB:NetworkDefinition: Honeypot like Addresses
+100119,0.05109489051094889,BB:CategoryDefinition: Post Exploit Account Activity
+100276,0.05109489051094889,BB:CategoryDefinition: System Configuration
+100227,0.05069825277979584,Source Asset Weight is Low
+100223,0.0437956204379562,Source Address is a Bogon IP
+100273,0.029197080291970795,BB:CategoryDefinition: Logout Events
+100265,0.029197080291970795,BB:DeviceDefinition: Operating System
+100601,0.02229444795013115,BB:BehaviorDefinition: Regular Endpoint Administration
+100196,0.0218978102189781,BB:PortDefinition: Syslog Ports
+100560,0.014598540145985398,BB:BehaviorDefinition: Multiple File Deletions on Endpoint System
+100005,0.014598540145985398,BB:CategoryDefinition: Authentication Success
+100297,0.009141577854994034,BB:PortDefinition: Authorized L2R Ports

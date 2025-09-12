@@ -2,144 +2,144 @@
   "classification_report": {
     "0": {
       "precision": 1.0,
-      "recall": 0.6,
-      "f1-score": 0.7499999999999999,
+      "recall": 0.4,
+      "f1-score": 0.5714285714285715,
       "support": 5
     },
     "1": {
-      "precision": 0.75,
+      "precision": 0.6666666666666666,
       "recall": 1.0,
-      "f1-score": 0.8571428571428571,
+      "f1-score": 0.8,
       "support": 6
     },
-    "accuracy": 0.8181818181818182,
+    "accuracy": 0.7272727272727273,
     "macro avg": {
-      "precision": 0.875,
-      "recall": 0.8,
-      "f1-score": 0.8035714285714285,
+      "precision": 0.8333333333333333,
+      "recall": 0.7,
+      "f1-score": 0.6857142857142857,
       "support": 11
     },
     "weighted avg": {
-      "precision": 0.8636363636363636,
-      "recall": 0.8181818181818182,
-      "f1-score": 0.8084415584415584,
+      "precision": 0.8181818181818182,
+      "recall": 0.7272727272727273,
+      "f1-score": 0.6961038961038962,
       "support": 11
     }
   },
   "confusion_matrix": [
     [
-      3,
-      2
+      2,
+      3
     ],
     [
       0,
       6
     ]
   ],
-  "roc_auc_score": 0.8666666666666667,
+  "roc_auc_score": 0.7,
   "model_path": "./model/threat_detector.joblib",
   "feature_count": 742,
   "top_20_features": [
     {
-      "rule_id": 100221,
-      "importance": 0.07434891272628906,
-      "rule_name": "Destination Asset Weight is Low"
-    },
-    {
-      "rule_id": 100227,
-      "importance": 0.0667389141704672,
-      "rule_name": "Source Asset Weight is Low"
-    },
-    {
-      "rule_id": 100215,
-      "importance": 0.06524042482276207,
-      "rule_name": "Context is Local to Local"
-    },
-    {
-      "rule_id": 100225,
-      "importance": 0.05564140606586674,
-      "rule_name": "Source Asset Exists"
-    },
-    {
-      "rule_id": 100272,
-      "importance": 0.05206725691657647,
-      "rule_name": "Load Basic Building Blocks"
-    },
-    {
-      "rule_id": 100273,
-      "importance": 0.04494015779627197,
-      "rule_name": "BB:CategoryDefinition: Logout Events"
-    },
-    {
       "rule_id": 100218,
-      "importance": 0.040417948295488094,
+      "importance": 0.11678832116788318,
       "rule_name": "Destination Asset Exists"
     },
     {
-      "rule_id": 100101,
-      "importance": 0.04034434862687708,
-      "rule_name": "BB:NetworkDefinition: Honeypot like Addresses"
-    },
-    {
-      "rule_id": 100005,
-      "importance": 0.03949460720867594,
-      "rule_name": "BB:CategoryDefinition: Authentication Success"
-    },
-    {
-      "rule_id": 100265,
-      "importance": 0.03642538011262943,
-      "rule_name": "BB:DeviceDefinition: Operating System"
-    },
-    {
-      "rule_id": 100277,
-      "importance": 0.03314754456785747,
-      "rule_name": "BB:NetworkDefinition: Darknet Addresses"
-    },
-    {
-      "rule_id": 100119,
-      "importance": 0.030667231338087544,
-      "rule_name": "BB:CategoryDefinition: Post Exploit Account Activity"
+      "rule_id": 100221,
+      "importance": 0.09489051094890508,
+      "rule_name": "Destination Asset Weight is Low"
     },
     {
       "rule_id": 100216,
-      "importance": 0.027622644913988977,
+      "importance": 0.07299270072992699,
       "rule_name": "Context is Local to Remote"
     },
     {
+      "rule_id": 100215,
+      "importance": 0.07299270072992699,
+      "rule_name": "Context is Local to Local"
+    },
+    {
+      "rule_id": 100272,
+      "importance": 0.0656934306569343,
+      "rule_name": "Load Basic Building Blocks"
+    },
+    {
+      "rule_id": 100225,
+      "importance": 0.05839416058394159,
+      "rule_name": "Source Asset Exists"
+    },
+    {
+      "rule_id": 100217,
+      "importance": 0.05839416058394159,
+      "rule_name": "Context is Remote to Local"
+    },
+    {
+      "rule_id": 100277,
+      "importance": 0.05839416058394159,
+      "rule_name": "BB:NetworkDefinition: Darknet Addresses"
+    },
+    {
+      "rule_id": 100101,
+      "importance": 0.05655185280194026,
+      "rule_name": "BB:NetworkDefinition: Honeypot like Addresses"
+    },
+    {
+      "rule_id": 100119,
+      "importance": 0.05109489051094889,
+      "rule_name": "BB:CategoryDefinition: Post Exploit Account Activity"
+    },
+    {
       "rule_id": 100276,
-      "importance": 0.018344910939873914,
+      "importance": 0.05109489051094889,
       "rule_name": "BB:CategoryDefinition: System Configuration"
     },
     {
-      "rule_id": 100463,
-      "importance": 0.01727435851402585,
-      "rule_name": "UAC Bypass - Scheduled Task Configured to Run with Highest Privileges"
+      "rule_id": 100227,
+      "importance": 0.05069825277979584,
+      "rule_name": "Source Asset Weight is Low"
     },
     {
       "rule_id": 100223,
-      "importance": 0.016766260695431762,
+      "importance": 0.0437956204379562,
       "rule_name": "Source Address is a Bogon IP"
     },
     {
-      "rule_id": 100271,
-      "importance": 0.016545089256729525,
-      "rule_name": "System: Notification"
+      "rule_id": 100273,
+      "importance": 0.029197080291970795,
+      "rule_name": "BB:CategoryDefinition: Logout Events"
+    },
+    {
+      "rule_id": 100265,
+      "importance": 0.029197080291970795,
+      "rule_name": "BB:DeviceDefinition: Operating System"
     },
     {
       "rule_id": 100601,
-      "importance": 0.01582170559348336,
+      "importance": 0.02229444795013115,
       "rule_name": "BB:BehaviorDefinition: Regular Endpoint Administration"
     },
     {
-      "rule_id": 100030,
-      "importance": 0.015414286704676516,
-      "rule_name": "BB:PortDefinition: Web Ports"
+      "rule_id": 100196,
+      "importance": 0.0218978102189781,
+      "rule_name": "BB:PortDefinition: Syslog Ports"
     },
     {
       "rule_id": 100560,
-      "importance": 0.014854600026152805,
+      "importance": 0.014598540145985398,
       "rule_name": "BB:BehaviorDefinition: Multiple File Deletions on Endpoint System"
+    },
+    {
+      "rule_id": 100005,
+      "importance": 0.014598540145985398,
+      "rule_name": "BB:CategoryDefinition: Authentication Success"
+    },
+    {
+      "rule_id": 100297,
+      "importance": 0.009141577854994034,
+      "rule_name": "BB:PortDefinition: Authorized L2R Ports"
     }
   ],
-  "training_date": "2025-09-11T17:08:42.634228"
+  "training_date": "2025-09-12T14:52:15.143181"
 }
