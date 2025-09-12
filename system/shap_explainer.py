@@ -70,6 +70,7 @@ class Explainer:
         self.logger.info("SHAP Explainer initialized and ready to use")
         # Lazy cache for BOC rule IDs discovered from rule CSVs
         self._boc_rule_ids: Optional[Set[int]] = None
+        self._rule_name_map: Optional[Dict[int, str]] = None
     
     def explain(self, 
                 model, 
@@ -871,28 +872,20 @@ class Explainer:
             pass
         return None
 
-    def _load_boc_rule_ids(self) -> Set[int]:
-        """Discover rule IDs whose names contain 'BOC' from Qradar_rule CSVs.
+    def _get_rule_name_map(self) -> Dict[int, str]:
+        """Build and cache a mapping of rule_id -> rule_name from Qradar_rule CSVs."""
+        if self._rule_name_map is not None:
+            return self._rule_name_map
 
-        Searches the repository's Qradar_rule directory for CSVs containing
-        columns 'id' and 'name', and returns a set of rule IDs where the name
-        has the substring 'BOC' (case-insensitive).
-        """
-        if self._boc_rule_ids is not None:
-            return self._boc_rule_ids
-
-        boc_ids: Set[int] = set()
+        name_map: Dict[int, str] = {}
         try:
-            # Locate Qradar_rule directory relative to this file
             sys_dir = os.path.dirname(__file__)
             project_root = os.path.abspath(os.path.join(sys_dir, '..'))
             qradar_dir = os.path.join(project_root, 'Qradar_rule')
-
             if not os.path.isdir(qradar_dir):
-                self._boc_rule_ids = set()
-                return self._boc_rule_ids
+                self._rule_name_map = {}
+                return self._rule_name_map
 
-            # Scan all CSV files in Qradar_rule
             for fname in os.listdir(qradar_dir):
                 if not fname.lower().endswith('.csv'):
                     continue
@@ -906,16 +899,27 @@ class Explainer:
                 for rid_val, nm in zip(df_rules['id'], df_rules['name']):
                     try:
                         rid_int = int(rid_val)
-                        name_str = str(nm) if nm is not None else ''
-                        if 'boc' in name_str.lower():
-                            boc_ids.add(rid_int)
+                        if rid_int not in name_map:
+                            name_map[rid_int] = str(nm) if nm is not None else ''
                     except Exception:
                         continue
 
+            self._rule_name_map = name_map
+            return self._rule_name_map
+        except Exception:
+            self._rule_name_map = {}
+            return self._rule_name_map
+
+    def _load_boc_rule_ids(self) -> Set[int]:
+        """Return cached BOC rule IDs (names containing 'BOC') discovered from CSVs."""
+        if self._boc_rule_ids is not None:
+            return self._boc_rule_ids
+        try:
+            name_map = self._get_rule_name_map()
+            boc_ids = {rid for rid, nm in name_map.items() if 'boc' in str(nm).lower()}
             self._boc_rule_ids = boc_ids
             return self._boc_rule_ids
         except Exception:
-            # On any error, default to empty set and proceed without prioritization
             self._boc_rule_ids = set()
             return self._boc_rule_ids
 
@@ -944,11 +948,19 @@ class Explainer:
         if not feature_importance:
             return []
 
+        # Remove zero-importance items first
+        filtered: List[Dict[str, Any]] = [
+            item for item in feature_importance
+            if float(item.get('importance', 0.0)) > 0.0
+        ]
+        if not filtered:
+            return []
+
         # Stable partition based on BOC membership
         boc_items: List[Dict[str, Any]] = []
         other_items: List[Dict[str, Any]] = []
 
-        for item in feature_importance:
+        for item in filtered:
             feat_name = str(item.get('feature', ''))
             rid = self._extract_rule_id(feat_name)
             if self._is_boc_rule(rid):
@@ -963,4 +975,20 @@ class Explainer:
         # Combine BOC-first then others, limit to top_k
         combined = boc_items + other_items
         k = max(0, int(top_k))
-        return combined[:k]
+        limited = combined[:k]
+
+        # Enrich with rule_id and rule_name; fix ranks after filtering
+        name_map = self._get_rule_name_map()
+        enriched: List[Dict[str, Any]] = []
+        for new_rank, item in enumerate(limited, start=1):
+            feat_name = str(item.get('feature', ''))
+            rid = self._extract_rule_id(feat_name)
+            rule_name = name_map.get(int(rid)) if rid is not None else None
+            out = dict(item)
+            out['rank'] = int(new_rank)
+            if rid is not None:
+                out['rule_id'] = int(rid)
+            if rule_name is not None:
+                out['rule_name'] = str(rule_name)
+            enriched.append(out)
+        return enriched
