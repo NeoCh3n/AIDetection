@@ -77,6 +77,65 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+# --- Lightweight joblib progress bar (no extra dependencies) ---
+from contextlib import contextmanager
+import time
+
+
+@contextmanager
+def joblib_progress_bar(total: int, desc: str = "GridSearchCV", width: int = 30):
+    """
+    Render a simple in-place text progress bar for joblib-backed tasks.
+
+    Parameters
+    ----------
+    total : int
+        Total number of tasks (e.g., n_candidates * cv_splits).
+    desc : str
+        Description prefix for the progress bar.
+    width : int
+        Width of the progress bar in characters.
+    """
+    import joblib as _joblib
+
+    start_time = time.time()
+    completed = [0]
+
+    def _render(final: bool = False):
+        done = min(completed[0], total)
+        pct = (float(done) / total) if total else 1.0
+        filled = int(width * pct)
+        bar = f"[{'#' * filled}{'-' * (width - filled)}]"
+        elapsed = time.time() - start_time
+        rate = (done / elapsed) if elapsed > 0 else 0.0
+        msg = f"\r{desc} {bar} {done}/{total} ({pct*100:5.1f}%) | {rate:.1f} it/s"
+        try:
+            sys.stdout.write(msg)
+            if final:
+                sys.stdout.write("\n")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    class _PBCallback(_joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            try:
+                completed[0] += self.batch_size
+                _render()
+            except Exception:
+                pass
+            return super(_PBCallback, self).__call__(*args, **kwargs)
+
+    old_cb = _joblib.parallel.BatchCompletionCallBack
+    _joblib.parallel.BatchCompletionCallBack = _PBCallback
+    try:
+        _render()
+        yield
+    finally:
+        _joblib.parallel.BatchCompletionCallBack = old_cb
+        _render(final=True)
+
+
 def train_threat_detector(training_config: Dict, model_save_path: str = "./model/threat_detector.joblib") -> Optional[Tuple[RandomForestClassifier, pd.DataFrame, pd.Series]]:
     """
     Train Random Forest model using the unified data pipeline.
@@ -185,8 +244,27 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 refit=True,
                 verbose=verbose,
             )
+            
+            # Compute expected total fits for progress bar
+            def _count_candidates(pg) -> int:
+                if isinstance(pg, dict):
+                    sizes = [len(v) for v in pg.values()] if pg else [0]
+                    prod = int(np.prod(sizes)) if sizes else 0
+                    return prod
+                if isinstance(pg, (list, tuple)):
+                    return int(sum(_count_candidates(p) for p in pg))
+                return 0
 
-            grid.fit(X_train, y_train)
+            try:
+                n_candidates = _count_candidates(param_grid)
+                n_splits_effective = cv.get_n_splits(X_train, y_train)
+                total_fits = int(n_candidates * n_splits_effective)
+            except Exception:
+                total_fits = 0
+
+            # Wrap fit in a joblib progress bar (no external deps)
+            with joblib_progress_bar(total=total_fits, desc="GridSearchCV"):
+                grid.fit(X_train, y_train)
             rf_model = grid.best_estimator_
             try:
                 logger.info(f"GridSearch best params: {grid.best_params_}")
