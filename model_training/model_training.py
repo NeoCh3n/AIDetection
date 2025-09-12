@@ -154,15 +154,15 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
 
             # Reasonable defaults compatible with sklearn 0.24.2
             default_param_grid = {
-                'n_estimators': [i for i in range(300, 1000, 100)],
-                'max_depth': [i for i in range(8, 20, 4)] + [None],
+                'n_estimators': [i for i in range(300, 1000, 200)],
+                'max_depth': [i for i in range(10, 20, 5)] + [None],
                 'max_features': ['sqrt', 'log2'],
                 'min_samples_split': [i for i in range(10, 50, 10)],
                 'min_samples_leaf': [i for i in range(10, 20, 5)],
-                'class_weight': ['none', 'balanced', 'balanced_subsample'],
-                'min_impurity_decrease': [0.0, 0.0001, 0.001, 0.01],
-                'ccp_alpha': [0.0, 0.0001, 0.001, 0.01],
-                'criterion': ['gini', 'entropy'],
+                'class_weight': ['balanced'],
+                #'min_impurity_decrease': [0.0, 0.0001, 0.001, 0.01],
+                #'ccp_alpha': [0.0, 0.0001, 0.001, 0.01],
+                #'criterion': ['gini', 'entropy'],
                 }
 
             param_grid = gs_cfg.get('param_grid', default_param_grid)
