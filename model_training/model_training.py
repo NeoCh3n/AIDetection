@@ -60,7 +60,7 @@ from system import logging_utils
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, average_precision_score
 
 # Import pipeline modules
 from pipeline.data_loader import load_data
@@ -225,9 +225,36 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 }
 
             param_grid = gs_cfg.get('param_grid', default_param_grid)
-            scoring = gs_cfg.get('scoring', 'roc_auc')
+            # Enable composite multi-metric scoring (ROC AUC + PR AUC) by default
+            # Users can override via grid_search.use_composite=false
+            use_composite = bool(gs_cfg.get('use_composite', True))
+            # Composite weights can be customized in config; default to equal weights
+            composite_weights = gs_cfg.get('composite_weights', {'roc_auc': 0.5, 'average_precision': 0.5})
             n_splits = int(gs_cfg.get('cv', 3))
             verbose = int(gs_cfg.get('verbose', 1))
+
+            if use_composite:
+                scoring = {
+                    'roc_auc': 'roc_auc',
+                    'average_precision': 'average_precision'
+                }
+                def _refit_composite(cv_results):
+                    try:
+                        roc = np.array(cv_results['mean_test_roc_auc'], dtype=float)
+                        ap = np.array(cv_results['mean_test_average_precision'], dtype=float)
+                        w_roc = float(composite_weights.get('roc_auc', 0.5))
+                        w_ap = float(composite_weights.get('average_precision', 0.5))
+                        comp = w_roc * roc + w_ap * ap
+                        # Return index of best candidate
+                        return int(np.nanargmax(comp))
+                    except Exception:
+                        # Fallback to best ROC AUC if composite fails
+                        return int(np.nanargmax(cv_results.get('mean_test_roc_auc', [0.0])))
+                refit_arg = _refit_composite
+            else:
+                # Single metric path (backward compatible)
+                scoring = gs_cfg.get('scoring', 'roc_auc')
+                refit_arg = True
 
             base_rf = RandomForestClassifier(
                 random_state=42,
@@ -241,7 +268,7 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 scoring=scoring,
                 cv=cv,
                 n_jobs=-1,
-                refit=True,
+                refit=refit_arg,
                 verbose=verbose,
             )
             
@@ -268,9 +295,49 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             rf_model = grid.best_estimator_
             try:
                 logger.info(f"GridSearch best params: {grid.best_params_}")
-                logger.info(f"GridSearch best {scoring}: {grid.best_score_:.4f}")
             except Exception:
                 pass
+            # Log best scores for both metrics (if available) and composite
+            try:
+                best_idx = int(getattr(grid, 'best_index_', -1))
+            except Exception:
+                best_idx = -1
+            try:
+                cvres = grid.cv_results_
+                if best_idx >= 0 and isinstance(cvres, dict):
+                    roc_list = cvres.get('mean_test_roc_auc')
+                    ap_list = cvres.get('mean_test_average_precision')
+                    if roc_list is not None and ap_list is not None:
+                        w_roc = float(composite_weights.get('roc_auc', 0.5))
+                        w_ap = float(composite_weights.get('average_precision', 0.5))
+                        best_roc = float(roc_list[best_idx])
+                        best_ap = float(ap_list[best_idx])
+                        best_comp = w_roc * best_roc + w_ap * best_ap
+                        logger.info(f"GridSearch best ROC AUC: {best_roc:.4f}, best PR AUC (AP): {best_ap:.4f}, composite: {best_comp:.4f}")
+                # If single metric, keep legacy logging
+                elif hasattr(grid, 'best_score_'):
+                    logger.info(f"GridSearch best score: {getattr(grid, 'best_score_', 0.0):.4f}")
+            except Exception:
+                pass
+
+            # Compute held-out test scores for the selected best estimator
+            test_roc_auc = None
+            test_ap = None
+            test_comp = None
+            try:
+                y_test_proba = rf_model.predict_proba(X_test)[:, 1]
+                test_roc_auc = float(roc_auc_score(y_test, y_test_proba))
+                test_ap = float(average_precision_score(y_test, y_test_proba))
+                if use_composite:
+                    w_roc = float(composite_weights.get('roc_auc', 0.5))
+                    w_ap = float(composite_weights.get('average_precision', 0.5))
+                    test_comp = w_roc * test_roc_auc + w_ap * test_ap
+                logger.info(
+                    f"Held-out test scores — ROC AUC: {test_roc_auc:.4f}, PR AUC (AP): {test_ap:.4f}"
+                    + (f", composite: {test_comp:.4f}" if test_comp is not None else "")
+                )
+            except Exception as e:
+                logger.warning(f"Failed to compute held-out test scores: {e}")
 
             # Persist full grid search results for auditability
             try:
@@ -279,8 +346,29 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
 
                 # Save full cv_results_ as CSV sorted by rank_test_score
                 results_df = pd.DataFrame(grid.cv_results_)
-                if 'rank_test_score' in results_df.columns:
+                # If composite multi-metric, compute composite_score column and sort by it
+                if use_composite and 'mean_test_roc_auc' in results_df.columns and 'mean_test_average_precision' in results_df.columns:
+                    w_roc = float(composite_weights.get('roc_auc', 0.5))
+                    w_ap = float(composite_weights.get('average_precision', 0.5))
+                    results_df['composite_score'] = (
+                        w_roc * results_df['mean_test_roc_auc'].astype(float) +
+                        w_ap * results_df['mean_test_average_precision'].astype(float)
+                    )
+                    results_df = results_df.sort_values('composite_score', ascending=False)
+                elif 'rank_test_score' in results_df.columns:
+                    # Single-metric legacy ranking
                     results_df = results_df.sort_values('rank_test_score')
+
+                # Insert held-out test scores as the left-most columns for quick visibility
+                try:
+                    if test_ap is not None:
+                        results_df.insert(0, 'best_test_average_precision', test_ap)
+                    if test_roc_auc is not None:
+                        results_df.insert(0, 'best_test_roc_auc', test_roc_auc)
+                    if test_comp is not None:
+                        results_df.insert(0, 'best_test_composite', test_comp)
+                except Exception:
+                    pass
                 csv_path = os.path.join(model_dir, f"{base_name}_gridsearch_results.csv")
                 results_df.to_csv(csv_path, index=False)
                 logger.info(f"GridSearchCV results saved to: {csv_path}")
@@ -291,9 +379,32 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                     'cv': n_splits,
                     'n_candidates': int(len(results_df)) if hasattr(results_df, '__len__') else None,
                     'best_params': getattr(grid, 'best_params_', {}),
-                    'best_score': float(getattr(grid, 'best_score_', 0.0)),
                     'top10': results_df.head(10).to_dict(orient='records') if hasattr(results_df, 'head') else []
                 }
+                # Add best scores including composite when available
+                try:
+                    best_idx = int(getattr(grid, 'best_index_', -1))
+                    cvres = grid.cv_results_
+                    if best_idx >= 0 and isinstance(cvres, dict):
+                        best_roc = float(cvres.get('mean_test_roc_auc', [None])[best_idx]) if 'mean_test_roc_auc' in cvres else None
+                        best_ap = float(cvres.get('mean_test_average_precision', [None])[best_idx]) if 'mean_test_average_precision' in cvres else None
+                        if best_roc is not None or best_ap is not None:
+                            w_roc = float(composite_weights.get('roc_auc', 0.5))
+                            w_ap = float(composite_weights.get('average_precision', 0.5))
+                            comp = (w_roc * best_roc + w_ap * best_ap) if (best_roc is not None and best_ap is not None) else None
+                            summary['best_scores'] = {
+                                'roc_auc': best_roc,
+                                'average_precision': best_ap,
+                                'composite': comp,
+                                'composite_weights': {'roc_auc': w_roc, 'average_precision': w_ap}
+                            }
+                            # Backward-compat: expose composite as best_score when using composite
+                            if comp is not None:
+                                summary['best_score'] = comp
+                    if not use_composite and hasattr(grid, 'best_score_'):
+                        summary['best_score'] = float(getattr(grid, 'best_score_', 0.0))
+                except Exception:
+                    pass
                 summary_path = os.path.join(model_dir, f"{base_name}_gridsearch_summary.json")
                 with open(summary_path, 'w') as f:
                     json.dump(summary, f, indent=2)
@@ -421,10 +532,12 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         report = classification_report(y_test, y_pred, output_dict=True)
         conf_matrix = confusion_matrix(y_test, y_pred)
         roc_auc = roc_auc_score(y_test, y_pred_proba)
+        pr_auc = average_precision_score(y_test, y_pred_proba)
         
         # Log key metrics
         logger.info("=== Model Evaluation Results ===")
         logger.info(f"ROC AUC Score: {roc_auc:.4f}")
+        logger.info(f"PR AUC (Average Precision): {pr_auc:.4f}")
         logger.info(f"Confusion Matrix:\n{conf_matrix}")
         
         # Extract positive class metrics
@@ -485,12 +598,29 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             importance_df['rule_name'] = [
                 rule_name_map.get(int(rid), f"Rule {rid}") for rid in importance_df['rule_id']
             ]
+
+        # Filter out zero-importance features
+        importance_df = importance_df[importance_df['importance'] > 0]
+        # Sort by importance descending
         importance_df = importance_df.sort_values('importance', ascending=False)
 
-        # Get top 20 most important features
-        top_20_features = importance_df.head(20)
-        logger.info("Top 20 most important features:")
-        for _, row in top_20_features.iterrows():
+        # Prioritize BOC-related features if rule names are available
+        # Heuristic keywords; can be extended via feature_name_options in future
+        def _is_boc(name: str) -> bool:
+            try:
+                n = str(name).lower()
+                return any(k in n for k in ['boc', 'behavior of compromise', 'behaviordefinition'])
+            except Exception:
+                return False
+
+        if include_names and 'rule_name' in importance_df.columns:
+            importance_df['boc_priority'] = importance_df['rule_name'].apply(_is_boc).astype(int)
+            importance_df = importance_df.sort_values(['boc_priority', 'importance'], ascending=[False, False])
+
+        # Select Top-10 after filtering and prioritization
+        top_10_features = importance_df.head(10)
+        logger.info("Top 10 most important features (non-zero, BOC prioritized):")
+        for _, row in top_10_features.iterrows():
             if include_names and 'rule_name' in row:
                 logger.info(f"  {row['rule_id']} | {row['rule_name']}: {row['importance']:.4f}")
             else:
@@ -500,19 +630,29 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         model_dir = os.path.dirname(model_save_path)
         base_name = os.path.splitext(os.path.basename(model_save_path))[0]
         
-        # Save top 20 features (with names)
-        top_features_path = os.path.join(model_dir, f"{base_name}_top_20_features.csv")
-        top_20_features.to_csv(top_features_path, index=False)
-        logger.info(f"Top 20 features saved to: {top_features_path}")
+        # Save top features (Top-10). Keep legacy Top-20 filename for compatibility; also write a Top-10 file.
+        top10_path = os.path.join(model_dir, f"{base_name}_top_10_features.csv")
+        top_10_features.to_csv(top10_path, index=False)
+        logger.info(f"Top 10 features saved to: {top10_path}")
+        # Backward compatibility file
+        legacy_top_path = os.path.join(model_dir, f"{base_name}_top_20_features.csv")
+        try:
+            top_10_features.to_csv(legacy_top_path, index=False)
+            logger.info(f"(Compat) Also wrote: {legacy_top_path}")
+        except Exception:
+            pass
         
         # Save comprehensive evaluation report
         evaluation_report = {
             'classification_report': report,
             'confusion_matrix': conf_matrix.tolist(),
             'roc_auc_score': roc_auc,
+            'pr_auc_average_precision': pr_auc,
             'model_path': model_save_path,
             'feature_count': len(rule_list),
-            'top_20_features': top_20_features.to_dict('records'),
+            'top_10_features': top_10_features.to_dict('records'),
+            # Backward compatibility key with Top-10 content
+            'top_20_features': top_10_features.to_dict('records'),
             'training_date': pd.Timestamp.now().isoformat()
         }
         

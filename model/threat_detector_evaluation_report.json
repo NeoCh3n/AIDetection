@@ -36,110 +36,133 @@
       6
     ]
   ],
-  "roc_auc_score": 0.7,
+  "roc_auc_score": 0.6333333333333333,
+  "pr_auc_average_precision": 0.736111111111111,
   "model_path": "./model/threat_detector.joblib",
   "feature_count": 742,
-  "top_20_features": [
+  "top_10_features": [
     {
-      "rule_id": 100218,
-      "importance": 0.11678832116788318,
-      "rule_name": "Destination Asset Exists"
-    },
-    {
-      "rule_id": 100221,
-      "importance": 0.09489051094890508,
-      "rule_name": "Destination Asset Weight is Low"
-    },
-    {
-      "rule_id": 100216,
-      "importance": 0.07299270072992699,
-      "rule_name": "Context is Local to Remote"
-    },
-    {
-      "rule_id": 100215,
-      "importance": 0.07299270072992699,
-      "rule_name": "Context is Local to Local"
-    },
-    {
-      "rule_id": 100272,
-      "importance": 0.0656934306569343,
-      "rule_name": "Load Basic Building Blocks"
-    },
-    {
-      "rule_id": 100225,
-      "importance": 0.05839416058394159,
-      "rule_name": "Source Asset Exists"
-    },
-    {
-      "rule_id": 100217,
-      "importance": 0.05839416058394159,
-      "rule_name": "Context is Remote to Local"
-    },
-    {
-      "rule_id": 100277,
-      "importance": 0.05839416058394159,
-      "rule_name": "BB:NetworkDefinition: Darknet Addresses"
-    },
-    {
-      "rule_id": 100101,
-      "importance": 0.05655185280194026,
-      "rule_name": "BB:NetworkDefinition: Honeypot like Addresses"
-    },
-    {
-      "rule_id": 100119,
-      "importance": 0.05109489051094889,
-      "rule_name": "BB:CategoryDefinition: Post Exploit Account Activity"
-    },
-    {
-      "rule_id": 100276,
-      "importance": 0.05109489051094889,
-      "rule_name": "BB:CategoryDefinition: System Configuration"
-    },
-    {
-      "rule_id": 100227,
-      "importance": 0.05069825277979584,
-      "rule_name": "Source Asset Weight is Low"
-    },
-    {
-      "rule_id": 100223,
-      "importance": 0.0437956204379562,
-      "rule_name": "Source Address is a Bogon IP"
-    },
-    {
-      "rule_id": 100273,
-      "importance": 0.029197080291970795,
-      "rule_name": "BB:CategoryDefinition: Logout Events"
-    },
-    {
-      "rule_id": 100265,
-      "importance": 0.029197080291970795,
-      "rule_name": "BB:DeviceDefinition: Operating System"
+      "rule_id": 100560,
+      "importance": 0.03571428571428572,
+      "rule_name": "BB:BehaviorDefinition: Multiple File Deletions on Endpoint System",
+      "boc_priority": 1
     },
     {
       "rule_id": 100601,
-      "importance": 0.02229444795013115,
-      "rule_name": "BB:BehaviorDefinition: Regular Endpoint Administration"
+      "importance": 0.0019406917559988482,
+      "rule_name": "BB:BehaviorDefinition: Regular Endpoint Administration",
+      "boc_priority": 1
+    },
+    {
+      "rule_id": 100215,
+      "importance": 0.25000000000000006,
+      "rule_name": "Context is Local to Local",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100221,
+      "importance": 0.14285714285714288,
+      "rule_name": "Destination Asset Weight is Low",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100119,
+      "importance": 0.07142857142857144,
+      "rule_name": "BB:CategoryDefinition: Post Exploit Account Activity",
+      "boc_priority": 0
     },
     {
       "rule_id": 100196,
-      "importance": 0.0218978102189781,
-      "rule_name": "BB:PortDefinition: Syslog Ports"
+      "importance": 0.07142857142857144,
+      "rule_name": "BB:PortDefinition: Syslog Ports",
+      "boc_priority": 0
     },
     {
-      "rule_id": 100560,
-      "importance": 0.014598540145985398,
-      "rule_name": "BB:BehaviorDefinition: Multiple File Deletions on Endpoint System"
+      "rule_id": 100217,
+      "importance": 0.07142857142857144,
+      "rule_name": "Context is Remote to Local",
+      "boc_priority": 0
     },
     {
-      "rule_id": 100005,
-      "importance": 0.014598540145985398,
-      "rule_name": "BB:CategoryDefinition: Authentication Success"
+      "rule_id": 100225,
+      "importance": 0.07142857142857144,
+      "rule_name": "Source Asset Exists",
+      "boc_priority": 0
     },
     {
-      "rule_id": 100297,
-      "importance": 0.009141577854994034,
-      "rule_name": "BB:PortDefinition: Authorized L2R Ports"
+      "rule_id": 100273,
+      "importance": 0.07142857142857144,
+      "rule_name": "BB:CategoryDefinition: Logout Events",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100101,
+      "importance": 0.062414422638064904,
+      "rule_name": "BB:NetworkDefinition: Honeypot like Addresses",
+      "boc_priority": 0
     }
   ],
-  "training_date": "2025-09-12T14:52:15.143181"
+  "top_20_features": [
+    {
+      "rule_id": 100560,
+      "importance": 0.03571428571428572,
+      "rule_name": "BB:BehaviorDefinition: Multiple File Deletions on Endpoint System",
+      "boc_priority": 1
+    },
+    {
+      "rule_id": 100601,
+      "importance": 0.0019406917559988482,
+      "rule_name": "BB:BehaviorDefinition: Regular Endpoint Administration",
+      "boc_priority": 1
+    },
+    {
+      "rule_id": 100215,
+      "importance": 0.25000000000000006,
+      "rule_name": "Context is Local to Local",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100221,
+      "importance": 0.14285714285714288,
+      "rule_name": "Destination Asset Weight is Low",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100119,
+      "importance": 0.07142857142857144,
+      "rule_name": "BB:CategoryDefinition: Post Exploit Account Activity",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100196,
+      "importance": 0.07142857142857144,
+      "rule_name": "BB:PortDefinition: Syslog Ports",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100217,
+      "importance": 0.07142857142857144,
+      "rule_name": "Context is Remote to Local",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100225,
+      "importance": 0.07142857142857144,
+      "rule_name": "Source Asset Exists",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100273,
+      "importance": 0.07142857142857144,
+      "rule_name": "BB:CategoryDefinition: Logout Events",
+      "boc_priority": 0
+    },
+    {
+      "rule_id": 100101,
+      "importance": 0.062414422638064904,
+      "rule_name": "BB:NetworkDefinition: Honeypot like Addresses",
+      "boc_priority": 0
+    }
+  ],
+  "training_date": "2025-09-15T10:49:21.240753"
 }

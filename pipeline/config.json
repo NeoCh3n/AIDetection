@@ -17,7 +17,7 @@
       "cv": 3,
       "verbose": 1,
        "param_grid": {
-        "n_estimators": [300, 500, 700, 900],
+        "n_estimators": [100, 300, 500, 700, 900],
         "max_depth": [8, 15, 20],
         "max_features": ["sqrt", "log2"],
         "min_samples_split": [10, 20, 30, 40, 50],
