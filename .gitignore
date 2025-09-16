@@ -32,6 +32,7 @@ dist/
 # JavaScript dependencies
 node_modules/
 package-lock.json
+package.json
 
 # Local datasets and artifacts
 Training_data/
