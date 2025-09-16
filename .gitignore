@@ -28,3 +28,11 @@ dist/
 # Logs & caches
 *.log
 .cache/
+
+# JavaScript dependencies
+node_modules/
+package-lock.json
+
+# Local datasets and artifacts
+Training_data/
+model/
