@@ -584,7 +584,11 @@ class QRadarRuleManager:
 
 
 # Convenience functions for backward compatibility
-def get_rule_list(mode: str = 'file', config: Dict = None, environment: str = 'prod') -> List[int]:
+def get_rule_list(
+    mode: str = 'file',
+    config: Optional[Dict[str, Any]] = None,
+    environment: str = 'prod',
+) -> List[int]:
     """
     Get rule list using specified mode
     
@@ -600,7 +604,11 @@ def get_rule_list(mode: str = 'file', config: Dict = None, environment: str = 'p
     return manager.get_rule_list()
 
 
-def get_rule_to_index_map(mode: str = 'file', config: Dict = None, environment: str = 'prod') -> Dict[int, int]:
+def get_rule_to_index_map(
+    mode: str = 'file',
+    config: Optional[Dict[str, Any]] = None,
+    environment: str = 'prod',
+) -> Dict[int, int]:
     """
     Get rule to index mapping using specified mode
     
@@ -616,7 +624,11 @@ def get_rule_to_index_map(mode: str = 'file', config: Dict = None, environment: 
     return manager.get_rule_to_index_map()
 
 
-def get_production_rule_list(mode: str = 'file', config: Dict = None, environment: str = 'prod') -> List[int]:
+def get_production_rule_list(
+    mode: str = 'file',
+    config: Optional[Dict[str, Any]] = None,
+    environment: str = 'prod',
+) -> List[int]:
     """
     Get production rule list as baseline for feature vectors
     
@@ -632,7 +644,11 @@ def get_production_rule_list(mode: str = 'file', config: Dict = None, environmen
     return manager.get_production_rule_list()
 
 
-def get_production_rule_to_index_map(mode: str = 'file', config: Dict = None, environment: str = 'prod') -> Dict[int, int]:
+def get_production_rule_to_index_map(
+    mode: str = 'file',
+    config: Optional[Dict[str, Any]] = None,
+    environment: str = 'prod',
+) -> Dict[int, int]:
     """
     Get production rule ID to index mapping
     
@@ -648,7 +664,7 @@ def get_production_rule_to_index_map(mode: str = 'file', config: Dict = None, en
     return manager.get_production_rule_to_index_map()
 
 
-def get_uat_to_prod_map(config: Dict = None) -> Dict[int, int]:
+def get_uat_to_prod_map(config: Optional[Dict[str, Any]] = None) -> Dict[int, int]:
     """
     Get UAT to Production rule ID mapping
     
