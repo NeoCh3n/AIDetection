@@ -534,7 +534,7 @@ class QRadarRuleManager:
         uat_to_prod = self.get_uat_to_prod_map()
         return uat_to_prod.get(uat_rule_id, uat_rule_id)
     
-    def validate_mapping_consistency(self) -> Dict[str, any]:
+    def validate_mapping_consistency(self) -> Dict[str, Any]:
         """
         Validate UAT-to-Production mapping consistency
         
