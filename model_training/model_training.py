@@ -46,7 +46,8 @@ import os
 import json
 import logging
 import argparse
-from typing import Optional, Dict, Tuple
+import math
+from typing import Optional, Dict, Tuple, cast
 import joblib
 import numpy as np
 
@@ -75,6 +76,26 @@ except Exception:
     pass
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def _safe_extract_metric(cvres: Dict, key: str, index: int) -> Optional[float]:
+    """Safely extract a float metric from GridSearchCV results."""
+    if not isinstance(cvres, dict) or key not in cvres:
+        return None
+    try:
+        values = cvres[key]
+        value = values[index]
+    except (TypeError, KeyError, IndexError):
+        return None
+    if value is None:
+        return None
+    try:
+        value_float = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(value_float):
+        return None
+    return value_float
 
 
 # --- Lightweight joblib progress bar (no extra dependencies) ---
@@ -386,8 +407,8 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                     best_idx = int(getattr(grid, 'best_index_', -1))
                     cvres = grid.cv_results_
                     if best_idx >= 0 and isinstance(cvres, dict):
-                        best_roc = float(cvres.get('mean_test_roc_auc', [None])[best_idx]) if 'mean_test_roc_auc' in cvres else None
-                        best_ap = float(cvres.get('mean_test_average_precision', [None])[best_idx]) if 'mean_test_average_precision' in cvres else None
+                        best_roc = _safe_extract_metric(cvres, 'mean_test_roc_auc', best_idx)
+                        best_ap = _safe_extract_metric(cvres, 'mean_test_average_precision', best_idx)
                         if best_roc is not None or best_ap is not None:
                             w_roc = float(composite_weights.get('roc_auc', 0.5))
                             w_ap = float(composite_weights.get('average_precision', 0.5))
@@ -600,9 +621,15 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             ]
 
         # Filter out zero-importance features
-        importance_df = importance_df[importance_df['importance'] > 0]
-        # Sort by importance descending
-        importance_df = importance_df.sort_values('importance', ascending=False)
+        # Drop entries with missing or non-positive importance values
+        importance_numeric = pd.to_numeric(importance_df['importance'], errors='coerce')
+        importance_df = importance_df.assign(importance=importance_numeric)
+        importance_df = importance_df.loc[importance_df['importance'].notna()].copy()
+        importance_df = importance_df.loc[importance_df['importance'] > 0].copy()
+        importance_df = cast(pd.DataFrame, importance_df)
+        # Sort by importance descending; ensure deterministic order for ties
+        if not importance_df.empty:
+            importance_df = importance_df.sort_values(by='importance', ascending=False, kind='mergesort')
 
         # Prioritize BOC-related features if rule names are available
         # Heuristic keywords; can be extended via feature_name_options in future
@@ -615,7 +642,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
 
         if include_names and 'rule_name' in importance_df.columns:
             importance_df['boc_priority'] = importance_df['rule_name'].apply(_is_boc).astype(int)
-            importance_df = importance_df.sort_values(['boc_priority', 'importance'], ascending=[False, False])
+            importance_df = importance_df.sort_values(by=['boc_priority', 'importance'], ascending=[False, False])
 
         # Select Top-10 after filtering and prioritization
         top_10_features = importance_df.head(10)
@@ -650,9 +677,9 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             'pr_auc_average_precision': pr_auc,
             'model_path': model_save_path,
             'feature_count': len(rule_list),
-            'top_10_features': top_10_features.to_dict('records'),
+            'top_10_features': top_10_features.to_dict(orient='records'),
             # Backward compatibility key with Top-10 content
-            'top_20_features': top_10_features.to_dict('records'),
+            'top_20_features': top_10_features.to_dict(orient='records'),
             'training_date': pd.Timestamp.now().isoformat()
         }
         
