@@ -10,7 +10,7 @@ import csv
 import glob
 import requests
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 from datetime import datetime
 
@@ -20,17 +20,22 @@ class QRadarRuleManager:
     with UAT-to-Production rule ID mapping
     """
     
-    def __init__(self, mode: str = 'api', config: Dict = None, environment: str = 'prod'):
+    def __init__(
+        self,
+        mode: str = 'api',
+        config: Optional[Dict[str, Any]] = None,
+        environment: str = 'prod',
+    ):
         """
         Initialize rule manager
         
         Args:
             mode: 'api' (fetch from QRadar) or 'file' (load from CSV)
-            config: Configuration dictionary with API/file settings
+            config: Optional configuration dictionary with API/file settings
             environment: 'prod' or 'uat' - determines baseline rule set
         """
         self.mode = mode
-        self.config = config or {}
+        self.config: Dict[str, Any] = config or {}
         self.environment = environment
         self.logger = logging.getLogger('QRadarRuleManager')
         
