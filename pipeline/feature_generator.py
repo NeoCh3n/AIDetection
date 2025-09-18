@@ -5,6 +5,9 @@ import logging
 import sys
 import os
 
+# Public exports for static analyzers
+__all__ = ["FeatureGenerator", "generate_feature_vectors"]
+
 # Import QRadarRuleManager from shared_utils
 from shared_utils.qradar_rule_manager import QRadarRuleManager
 

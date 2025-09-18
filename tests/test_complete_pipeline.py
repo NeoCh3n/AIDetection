@@ -11,19 +11,22 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-# Add system path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'system'))
-sys.path.append(os.path.join(os.path.dirname(__file__), 'mongodb'))
+# Configure import paths using the project root
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+
+sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, 'system'))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, 'mongodb'))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, 'shared_utils'))
 
 # Import required modules
-import run_log
 from pymongo import MongoClient
 
 # Import pipeline modules
-from mongodb.insert_DB import QRadarDataProcessor
-from feature_aggregator import aggregate_to_windows
-from feature_generator import generate_feature_vectors
-from rule_manager import get_rule_list, get_rule_to_index_map
+from pipeline.feature_aggregator import aggregate_to_windows
+from pipeline.feature_generator import generate_feature_vectors
+from shared_utils.qradar_rule_manager import get_rule_list, get_rule_to_index_map
 
 class PipelineTester:
     """Test the complete AQL → MongoDB → predictions pipeline"""
@@ -35,41 +38,49 @@ class PipelineTester:
         
     def test_data_flow(self):
         """Test the complete data flow from AQL to predictions"""
-        print("🚀 Starting complete pipeline test...")
+        print("Starting complete pipeline test...")
         
         # Step 1: Verify MongoDB data
-        print("\n📊 Step 1: Checking MongoDB data")
+        print("\nStep 1: Checking MongoDB data")
         total_docs = self.collection.count_documents({})
         print(f"   Total documents in qradar_events: {total_docs}")
         
         if total_docs == 0:
-            print("   ❌ No documents found, running AQL insertion test...")
+            print("   No documents found, running AQL insertion test...")
             self._insert_test_aql_data()
             total_docs = self.collection.count_documents({})
         
         # Step 2: Load data into DataFrame
-        print("\n📊 Step 2: Loading data into DataFrame")
+        print("\nStep 2: Loading data into DataFrame")
         cursor = self.collection.find({})
         df = pd.DataFrame(list(cursor))
         print(f"   Loaded {len(df)} documents")
         
         # Display schema info
         if not df.empty:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
             print(f"   Columns: {list(df.columns)}")
             print(f"   Sample rule IDs: {df['rule_id'].unique()[:5]}")
             print(f"   Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
         
+        # Prepare container for aggregated data
+        df_agg = pd.DataFrame()
+
         # Step 3: Feature aggregation
-        print("\n📊 Step 3: Feature aggregation (30-minute windows)")
+        print("\nStep 3: Feature aggregation (30-minute windows)")
         if not df.empty:
             # Prepare data for aggregation
             df_prepared = df[['hostname', 'rule_id', 'timestamp', 'count']].copy()
-            df_prepared = df_prepared.rename(columns={
-                'count': 'trigger_count'  # Rename for consistency
-            })
+
+            if 'source_label' in df.columns:
+                df_prepared['source_label'] = df['source_label'].values
+            elif 'source' in df.columns:
+                df_prepared['source_label'] = df['source'].values
+            else:
+                df_prepared['source_label'] = 'unknown'
             
             # Aggregate to windows
-            df_agg = aggregate_to_windows(df_prepared, window_size='30T')
+            df_agg = aggregate_to_windows(df_prepared, window_size_minutes=30, mode='detect')
             print(f"   Aggregated to {len(df_agg)} windows")
             
             if not df_agg.empty:
@@ -77,7 +88,7 @@ class PipelineTester:
                 print(df_agg.head())
         
         # Step 4: Feature generation
-        print("\n📊 Step 4: Feature generation")
+        print("\nStep 4: Feature generation")
         try:
             # Get rule mapping
             rule_list = get_rule_list()
@@ -94,20 +105,20 @@ class PipelineTester:
                 if X.shape[0] > 0:
                     print(f"   {X[0][:5]}")
             else:
-                print("   ⚠️ No aggregated data for feature generation")
-                
+                print("   No aggregated data for feature generation")
+        
         except Exception as e:
-            print(f"   ❌ Feature generation failed: {e}")
-            
+            print(f"   Feature generation failed: {e}")
+        
         # Step 5: Verify rule mapping consistency
-        print("\n📊 Step 5: Rule mapping verification")
+        print("\nStep 5: Rule mapping verification")
         self._verify_rule_mapping()
         
         # Step 6: Test detection pipeline
-        print("\n📊 Step 6: Detection pipeline test")
+        print("\nStep 6: Detection pipeline test")
         self._test_detection_pipeline()
         
-        print("\n✅ Pipeline test completed!")
+        print("\nPipeline test completed!")
         
     def _insert_test_aql_data(self):
         """Insert test AQL data if none exists"""
@@ -141,13 +152,13 @@ class PipelineTester:
                 
                 if documents:
                     self.collection.insert_many(documents)
-                    print(f"   ✅ Inserted {len(documents)} test documents")
+                    print(f"   Inserted {len(documents)} test documents")
             else:
-                print("   ⚠️ result.json not found, creating sample data")
+                print("   result.json not found, creating sample data")
                 self._create_sample_data()
                 
         except Exception as e:
-            print(f"   ❌ Failed to insert test data: {e}")
+            print(f"   Failed to insert test data: {e}")
     
     def _create_sample_data(self):
         """Create sample AQL-style data for testing"""
@@ -173,10 +184,10 @@ class PipelineTester:
             
             if sample_docs:
                 self.collection.insert_many(sample_docs)
-                print(f"   ✅ Created {len(sample_docs)} sample documents with real rule IDs")
+                print(f"   Created {len(sample_docs)} sample documents with real rule IDs")
                 
         except Exception as e:
-            print(f"   ❌ Failed to create sample data: {e}")
+            print(f"   Failed to create sample data: {e}")
     
     def _verify_rule_mapping(self):
         """Verify rule mapping consistency"""
@@ -199,15 +210,15 @@ class PipelineTester:
             missing_in_mongo = mapping_rules - mongo_rules
             
             if missing_in_mapping:
-                print(f"   ⚠️ Rules in MongoDB but not in mapping: {missing_in_mapping}")
+                print(f"   Rules in MongoDB but not in mapping: {missing_in_mapping}")
             if missing_in_mongo:
-                print(f"   ⚠️ Rules in mapping but not in MongoDB: {missing_in_mongo}")
+                print(f"   Rules in mapping but not in MongoDB: {missing_in_mongo}")
             
             if not missing_in_mapping and not missing_in_mongo:
-                print("   ✅ Rule mapping is consistent")
+                print("   Rule mapping is consistent")
                 
         except Exception as e:
-            print(f"   ❌ Rule mapping verification failed: {e}")
+            print(f"   Rule mapping verification failed: {e}")
     
     def _test_detection_pipeline(self):
         """Test the detection pipeline components"""
@@ -219,6 +230,7 @@ class PipelineTester:
             df = pd.DataFrame(list(cursor))
             
             if not df.empty:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
                 # Prepare for aggregation
                 df['hostname'] = df['hostname'].fillna('unknown')
                 
@@ -236,13 +248,13 @@ class PipelineTester:
                     fill_value=0
                 ).reset_index()
                 
-                print(f"   ✅ Detection pipeline ready: {len(pivot_df)} windows")
+                print(f"   Detection pipeline ready: {len(pivot_df)} windows")
                 print(f"   Sample detection window: {pivot_df.iloc[0].to_dict() if len(pivot_df) > 0 else 'No data'}")
             else:
-                print("   ⚠️ No data for detection pipeline")
+                print("   No data for detection pipeline")
                 
         except Exception as e:
-            print(f"   ❌ Detection pipeline test failed: {e}")
+            print(f"   Detection pipeline test failed: {e}")
     
     def cleanup(self):
         """Cleanup test data"""
