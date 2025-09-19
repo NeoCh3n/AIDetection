@@ -9,10 +9,18 @@ It handles both training and detection modes with consistent aggregation logic.
 import pandas as pd
 import numpy as np
 import os
+import sys
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, cast
 import logging
+
+# Ensure project root is on sys.path so "shared_utils" imports resolve when tests
+# execute from nested directories (e.g., tests/).
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from shared_utils.time_utils import get_window_id, get_window_start_end
-from shared_utils.qradar_rule_manager import get_production_rule_list, get_production_rule_to_index_map
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

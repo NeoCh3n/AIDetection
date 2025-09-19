@@ -25,7 +25,7 @@ from pymongo import MongoClient
 
 # Import pipeline modules
 from pipeline.feature_aggregator import aggregate_to_windows
-from pipeline.feature_generator import generate_feature_vectors
+from pipeline.feature_generator import FeatureGenerator
 from shared_utils.qradar_rule_manager import get_rule_list, get_rule_to_index_map
 
 class PipelineTester:
@@ -99,7 +99,8 @@ class PipelineTester:
             
             # Generate feature vectors
             if not df_agg.empty:
-                X, y = generate_feature_vectors(df_agg, mode='detect')
+                feature_generator = FeatureGenerator()
+                X, y = feature_generator.generate_feature_vectors(df_agg, mode='detect')
                 print(f"   Generated feature matrix: {X.shape}")
                 print(f"   Feature vector sample (first 5 values):")
                 if X.shape[0] > 0:
