@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 import logging
 import numpy as np
 from typing import List, Optional
+import importlib
 
 """
 Ensure project root is on sys.path so top-level packages (e.g., `system`,
@@ -57,9 +58,9 @@ try:
     from .feature_generator import FeatureGenerator  # type: ignore
 except Exception:
     # When run as a script: python ./pipeline/main_pipeline.py
-    from data_loader import load_data  # type: ignore
-    from feature_aggregator import aggregate_to_windows  # type: ignore
-    from feature_generator import FeatureGenerator  # type: ignore
+    load_data = importlib.import_module('data_loader').load_data  # type: ignore
+    aggregate_to_windows = importlib.import_module('feature_aggregator').aggregate_to_windows  # type: ignore
+    FeatureGenerator = importlib.import_module('feature_generator').FeatureGenerator  # type: ignore
 from system.shap_explainer import Explainer
 
 # Training/Evaluation from model_training package

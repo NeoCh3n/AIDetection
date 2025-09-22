@@ -11,16 +11,16 @@ import numpy as np
 from datetime import datetime, timedelta
 import json
 
-# Add pipeline to path
-sys.path.append('./pipeline')
-sys.path.append('./shared_utils')
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from feature_aggregator import (
-    aggregate_to_windows, 
-    validate_aggregated_data, 
+from pipeline.feature_aggregator import (
+    aggregate_to_windows,
+    validate_aggregated_data,
     get_window_statistics,
     save_aggregated_data,
-    load_aggregated_data
+    load_aggregated_data,
 )
 
 
@@ -440,7 +440,7 @@ def test_with_real_training_data():
     
     try:
         # Import here to avoid circular imports
-        from data_loader import load_data
+        from pipeline.data_loader import load_data
         
         print(f"Loading training data...")
         print(f"Normal data: {training_data_path}")
