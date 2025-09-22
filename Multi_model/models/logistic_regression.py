@@ -41,3 +41,12 @@ class LogisticRegressionModel(ModelBase):
     def needs_scaling(self) -> bool:
         """Logistic Regression benefits from feature scaling."""
         return True
+    
+    def get_grid_search_params(self) -> Dict[str, Any]:
+        """Get Logistic Regression grid search parameters."""
+        return {
+            'C': [0.01, 0.1, 1, 10, 100],
+            'penalty': ['l1', 'l2', 'elasticnet'],
+            'solver': ['liblinear', 'saga'],
+            'max_iter': [1000, 2000, 5000]
+        }

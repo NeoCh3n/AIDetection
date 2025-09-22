@@ -22,6 +22,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -57,13 +58,18 @@ class ModelBase(ABC):
         """Get model hyperparameters from config."""
         pass
     
-    def train(self, X: np.ndarray, y: np.ndarray) -> 'ModelBase':
+    def get_grid_search_params(self) -> Dict[str, Any]:
+        """Get grid search parameter grid. Override in subclasses for custom grids."""
+        return {}
+    
+    def train(self, X: np.ndarray, y: np.ndarray, use_grid_search: bool = False) -> 'ModelBase':
         """
         Train the model on provided data.
         
         Args:
             X: Feature matrix
             y: Target labels
+            use_grid_search: Whether to use GridSearchCV for hyperparameter tuning
             
         Returns:
             Self for method chaining
@@ -82,8 +88,33 @@ class ModelBase(ABC):
         else:
             X_scaled = X
         
-        # Train model
-        self.model.fit(X_scaled, y)
+        # Use GridSearchCV if requested and parameters are available
+        if use_grid_search:
+            param_grid = self.get_grid_search_params()
+            if param_grid:
+                self.logger.info("Using GridSearchCV for hyperparameter tuning...")
+                grid_config = self.config.get('training', {}).get('grid_search', {})
+                
+                grid_search = GridSearchCV(
+                    estimator=self.model,
+                    param_grid=param_grid,
+                    cv=grid_config.get('cv', 3),
+                    scoring=grid_config.get('scoring', 'roc_auc'),
+                    verbose=grid_config.get('verbose', 1),
+                    n_jobs=grid_config.get('n_jobs', -1)
+                )
+                
+                grid_search.fit(X_scaled, y)
+                self.model = grid_search.best_estimator_
+                
+                self.logger.info(f"Best parameters: {grid_search.best_params_}")
+                self.logger.info(f"Best score: {grid_search.best_score_:.4f}")
+            else:
+                self.logger.warning("GridSearch requested but no parameter grid defined")
+                self.model.fit(X_scaled, y)
+        else:
+            # Train model normally
+            self.model.fit(X_scaled, y)
         
         self.logger.info("Model training completed")
         return self

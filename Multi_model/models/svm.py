@@ -41,3 +41,11 @@ class SVMModel(ModelBase):
     def needs_scaling(self) -> bool:
         """SVM requires feature scaling."""
         return True
+    
+    def get_grid_search_params(self) -> Dict[str, Any]:
+        """Get SVM grid search parameters."""
+        return {
+            'C': [0.1, 1, 10, 100],
+            'kernel': ['rbf', 'poly', 'sigmoid'],
+            'gamma': ['scale', 'auto', 0.001, 0.01, 0.1, 1]
+        }

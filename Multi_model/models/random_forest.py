@@ -45,6 +45,17 @@ class RandomForestModel(ModelBase):
         """RandomForest doesn't require feature scaling."""
         return False
     
+    def get_grid_search_params(self) -> Dict[str, Any]:
+        """Get RandomForest grid search parameters."""
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [None, 10, 20, 30],
+            'max_features': ['sqrt', 'log2'],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'class_weight': ['balanced', 'balanced_subsample']
+        }
+    
     def get_feature_importance(self) -> np.ndarray:
         """Get feature importance scores."""
         if self.model is None:
