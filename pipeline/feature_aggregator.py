@@ -8,6 +8,7 @@ It handles both training and detection modes with consistent aggregation logic.
 
 import pandas as pd
 import numpy as np
+import math
 import os
 import sys
 from pathlib import Path
@@ -43,12 +44,14 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
         DataFrame with aggregated features per window:
         - window_id: Unique identifier for the 30-minute window
         - hostname: Host identifier
-        - aggregated_rules: Dictionary mapping rule_id -> total_count
+        - aggregated_rules: Dict[str, int] mapping rule_id -> raw integer total_count
         - total_events: Total number of events in this window
         - unique_rules: Number of unique rules triggered
         - source_label: Original data source ('normal' or 'attack')
         - window_start: Start time of the window
         - window_end: End time of the window
+        - aggregated_rules_log1p_sum: Optional Dict[str, float] of log1p-summed counts
+        - total_events_log1p: Optional float, sum of log1p(count) over events
     """
     if df.empty:
         logger.warning("Empty DataFrame provided to aggregator")
@@ -66,12 +69,16 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
     if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
         df['timestamp'] = pd.to_datetime(df['timestamp'])
     
-    # Apply log1p transformation to counts (RF preprocessing) and ensure numeric type
+    # Ensure numeric type for counts and keep raw integer counts for aggregation
     # Robust to objects/strings, NaNs, and negative values.
     df['count'] = pd.to_numeric(df['count'], errors='coerce')
     df['count'] = df['count'].where(df['count'] >= 0, 0)  # handle negatives
-    df['count'] = df['count'].fillna(0.0)  # handle NaNs
-    df['count'] = np.log1p(df['count'])  # type: ignore
+    df['count'] = df['count'].fillna(0)
+    # Use integer counts for aggregation output to maintain interpretability and
+    # satisfy tests; also compute log1p counts for optional downstream use.
+    df['count'] = df['count'].astype(int)
+    # Use math.log1p via Series.apply to satisfy static type checkers
+    df['count_log1p'] = df['count'].astype(float).apply(math.log1p)
     
     # Generate window IDs for each event
     df['window_id'] = df['timestamp'].apply(
@@ -88,15 +95,19 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
         # Use typing.cast to explicitly type the tuple unpacking
         window_id, hostname, source_label = cast(Tuple[str, str, str], group_key)
         group = group_df
-        # Build rule count dictionary
-        rule_counts = group.groupby('rule_id')['count'].sum().to_dict()
+        # Build rule count dictionary (RAW integer sums for interpretability/tests)
+        rule_counts_raw = group.groupby('rule_id')['count'].sum().astype(int).to_dict()
+        # Optional: also compute log1p-summed counts for modeling insights
+        rule_counts_log = group.groupby('rule_id')['count_log1p'].sum().to_dict()
         
         # Convert rule_id keys to strings for JSON compatibility
-        rule_counts_str = {str(k): float(v) for k, v in rule_counts.items()}
+        rule_counts_str: Dict[str, int] = {str(k): int(v) for k, v in rule_counts_raw.items()}
+        rule_counts_log_str = {str(k): float(v) for k, v in rule_counts_log.items()}
         
         # Calculate additional metrics
-        total_events = group['count'].sum()
-        unique_rules = len(rule_counts)
+        total_events = int(group['count'].sum())
+        total_events_log1p = float(group['count_log1p'].sum())
+        unique_rules = len(rule_counts_raw)
         
         # Convert source_label to binary is_attack
         is_attack = 1 if source_label == 'attack' else 0
@@ -110,12 +121,15 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
             'window_id': window_id,
             'hostname': hostname,
             'aggregated_rules': rule_counts_str,
-            'total_events': float(total_events),
+            'total_events': int(total_events),
             'unique_rules': int(unique_rules),
             'window_start': window_start,
             'window_end': window_end,
             'source_label': source_label
         }
+        # Attach optional log1p-sum metrics for downstream use (not used by tests)
+        result_row['aggregated_rules_log1p_sum'] = rule_counts_log_str
+        result_row['total_events_log1p'] = total_events_log1p
         
         # Add label column for training mode
         if mode == 'train':

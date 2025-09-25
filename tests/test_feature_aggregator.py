@@ -6,21 +6,23 @@ Tests 30-minute window aggregation functionality for threat detection pipeline
 
 import sys
 import os
+import numbers
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import json
+from typing import Any, Dict, cast
 
-# Add pipeline to path
-sys.path.append('./pipeline')
-sys.path.append('./shared_utils')
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from feature_aggregator import (
-    aggregate_to_windows, 
-    validate_aggregated_data, 
+from pipeline.feature_aggregator import (
+    aggregate_to_windows,
+    validate_aggregated_data,
     get_window_statistics,
     save_aggregated_data,
-    load_aggregated_data
+    load_aggregated_data,
 )
 
 
@@ -167,19 +169,24 @@ def test_rule_aggregation():
     # Should have exactly 1 window
     assert len(aggregated) == 1, f"Expected 1 window, got {len(aggregated)}"
     
-    # Get the aggregated data for the window
-    window_data = aggregated.iloc[0]
+    # Get the aggregated data for the window (use label-based access to avoid Series typing issues)
+    first_idx = aggregated.index[0]
     
     # Check rule counts
-    rules = window_data['aggregated_rules']
-    assert '100001' in rules, "Rule 100001 should be in aggregated rules"
-    assert '100002' in rules, "Rule 100002 should be in aggregated rules"
-    assert rules['100001'] == 9, f"Rule 100001 count should be 9, got {rules['100001']}"
-    assert rules['100002'] == 1, f"Rule 100002 count should be 1, got {rules['100002']}"
+    rules = aggregated.at[first_idx, 'aggregated_rules']
+    if not isinstance(rules, dict):
+        raise AssertionError("aggregated_rules should be a dict")
+    rules_dict = cast(Dict[str, Any], rules)
+    assert '100001' in rules_dict, "Rule 100001 should be in aggregated rules"
+    assert '100002' in rules_dict, "Rule 100002 should be in aggregated rules"
+    assert int(rules_dict['100001']) == 9, f"Rule 100001 count should be 9, got {rules_dict['100001']}"
+    assert int(rules_dict['100002']) == 1, f"Rule 100002 count should be 1, got {rules_dict['100002']}"
     
-    # Check totals
-    assert window_data['total_events'] == 10, f"Total events should be 10, got {window_data['total_events']}"
-    assert window_data['unique_rules'] == 2, f"Unique rules should be 2, got {window_data['unique_rules']}"
+    # Check totals (ensure scalar types for static analyzers)
+    total_events_val = int(cast(int, aggregated.at[first_idx, 'total_events']))
+    unique_rules_val = int(cast(int, aggregated.at[first_idx, 'unique_rules']))
+    assert total_events_val == 10, f"Total events should be 10, got {total_events_val}"
+    assert unique_rules_val == 2, f"Unique rules should be 2, got {unique_rules_val}"
     
     print("   Rule aggregation test passed")
     return True
@@ -207,14 +214,18 @@ def test_host_separation():
     hosts = aggregated['hostname'].unique()
     assert len(hosts) == 3, f"Expected 3 unique hosts, got {len(hosts)}"
     
-    # Check individual counts
-    for _, row in aggregated.iterrows():
-        if row['hostname'] == 'DESKTOP-01':
-            assert row['total_events'] == 5
-        elif row['hostname'] == 'DESKTOP-02':
-            assert row['total_events'] == 3
-        elif row['hostname'] == 'DESKTOP-03':
-            assert row['total_events'] == 1
+    # Check individual counts (avoid Series bool in conditionals)
+    expected_counts = {
+        'DESKTOP-01': 5,
+        'DESKTOP-02': 3,
+        'DESKTOP-03': 1,
+    }
+    actual_counts = (
+        aggregated.set_index('hostname')['total_events']
+        .astype(int)
+        .to_dict()
+    )
+    assert actual_counts == expected_counts, f"Counts per host mismatch: {actual_counts} vs {expected_counts}"
     
     print("   Host separation test passed")
     return True
@@ -323,11 +334,18 @@ def test_save_load_functionality():
         assert len(loaded) == len(aggregated), "Loaded data should have same length"
         assert set(loaded.columns) == set(aggregated.columns), "Columns should match"
         
-        # Check aggregated rules format
+        # Check aggregated rules format (avoid calling attributes that type checkers misinfer)
         for i, row in loaded.iterrows():
-            assert isinstance(row['aggregated_rules'], dict), "Aggregated rules should be dict"
-            assert all(isinstance(k, str) for k in row['aggregated_rules'].keys()), "Rule keys should be strings"
-            assert all(isinstance(v, int) for v in row['aggregated_rules'].values()), "Rule values should be integers"
+            rules_obj = row['aggregated_rules']
+            if not isinstance(rules_obj, dict):
+                raise AssertionError("Aggregated rules should be dict")
+            # Narrow type for static analysis and then use dict-specific APIs
+            rules_dict = cast(Dict[str, Any], rules_obj)
+            rule_keys = list(rules_dict.keys())
+            rule_vals = list(rules_dict.values())
+            assert all(isinstance(k, str) for k in rule_keys), "Rule keys should be strings"
+            # Accept numpy integer subclasses as ints
+            assert all(isinstance(v, numbers.Integral) for v in rule_vals), "Rule values should be integers"
         
         print("   Save/load test passed")
         return True
@@ -358,8 +376,11 @@ def test_edge_cases():
     
     result = aggregate_to_windows(single_event)
     assert len(result) == 1, "Single event should produce single window"
-    assert result.iloc[0]['total_events'] == 1, "Single event should have count 1"
-    assert result.iloc[0]['unique_rules'] == 1, "Single rule should have unique count 1"
+    first_idx = result.index[0]
+    total_single = int(cast(int, result.at[first_idx, 'total_events']))
+    unique_single = int(cast(int, result.at[first_idx, 'unique_rules']))
+    assert total_single == 1, f"Single event should have count 1, got {total_single}"
+    assert unique_single == 1, f"Single rule should have unique count 1, got {unique_single}"
     
     # Test with zero counts
     zero_count = pd.DataFrame([{
@@ -372,7 +393,9 @@ def test_edge_cases():
     
     result = aggregate_to_windows(zero_count)
     assert len(result) == 1, "Zero count should still produce window"
-    assert result.iloc[0]['total_events'] == 0, "Zero count should have total 0"
+    first_idx = result.index[0]
+    total_zero = int(cast(int, result.at[first_idx, 'total_events']))
+    assert total_zero == 0, f"Zero count should have total 0, got {total_zero}"
     
     print("   Edge cases test passed")
     return True
@@ -440,22 +463,22 @@ def test_with_real_training_data():
     
     try:
         # Import here to avoid circular imports
-        from data_loader import load_data
+        from pipeline.data_loader import load_data
         
         print(f"Loading training data...")
         print(f"Normal data: {training_data_path}")
         print(f"Attack data: {attack_data_path}")
         
         # Load a sample of training data (first 50 events from each source)
-        df = load_data('train', config)
+        df: pd.DataFrame = load_data('train', config)
         
         if len(df) > 100:
             # Sample 50 events from each source to keep test fast
-            normal_sample = df[df['source_label'] == 'normal'].head(50)
-            attack_sample = df[df['source_label'] == 'attack'].head(50)
-            df_sample = pd.concat([normal_sample, attack_sample])
+            normal_sample: pd.DataFrame = cast(pd.DataFrame, df[df['source_label'] == 'normal'].head(50))
+            attack_sample: pd.DataFrame = cast(pd.DataFrame, df[df['source_label'] == 'attack'].head(50))
+            df_sample: pd.DataFrame = pd.concat([normal_sample, attack_sample], ignore_index=True)
         else:
-            df_sample = df
+            df_sample: pd.DataFrame = cast(pd.DataFrame, df)
             
         print(f"Testing with {len(df_sample)} events from training data")
         
@@ -474,8 +497,13 @@ def test_with_real_training_data():
             return False
             
         # Check expected characteristics
-        expected_sources = set(df_sample['source_label'].unique())
-        actual_sources = set(aggregated['source_label'].unique())
+        # Convert ndarray from .unique() to list to satisfy type checkers
+        expected_sources = set(
+            df_sample['source_label'].dropna().astype(str).unique().tolist()
+        )
+        actual_sources = set(
+            aggregated['source_label'].dropna().astype(str).unique().tolist()
+        )
         
         if expected_sources != actual_sources:
             print(f"ERROR: Source mismatch - expected {expected_sources}, got {actual_sources}")

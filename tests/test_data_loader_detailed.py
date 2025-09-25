@@ -5,9 +5,12 @@ Detailed test script for data_loader.py - Pandas DataFrame validation
 
 import sys
 import os
-sys.path.append('./pipeline')
 
-from data_loader import load_data
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from pipeline.data_loader import load_data
 import pandas as pd
 
 def test_data_loader_detailed():

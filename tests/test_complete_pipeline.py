@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 import pandas as pd
 import numpy as np
+from typing import cast
 
 # Configure import paths using the project root
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -70,7 +71,7 @@ class PipelineTester:
         print("\nStep 3: Feature aggregation (30-minute windows)")
         if not df.empty:
             # Prepare data for aggregation
-            df_prepared = df[['hostname', 'rule_id', 'timestamp', 'count']].copy()
+            df_prepared = cast(pd.DataFrame, df[['hostname', 'rule_id', 'timestamp', 'count']].copy())
 
             if 'source_label' in df.columns:
                 df_prepared['source_label'] = df['source_label'].values

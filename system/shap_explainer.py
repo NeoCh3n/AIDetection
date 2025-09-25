@@ -38,13 +38,14 @@ import shap
 import json
 import os
 import logging
+import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import plotext as plt_terminal
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union, Tuple, Set
+from typing import List, Dict, Any, Optional, Union, Tuple, Set, cast
 from pathlib import Path
 
 class Explainer:
@@ -58,19 +59,53 @@ class Explainer:
     function that accepts all necessary inputs.
     """
     
-    def __init__(self):
+    def __init__(self,
+                 model: Optional[object] = None,
+                 background_data: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+                 feature_names: Optional[List[str]] = None,
+                 rule_mapping: Optional[Dict[str, str]] = None):
         """
-        Initialize SHAP explainer with no parameters.
-        
-        The explainer is ready to use with the explain() method which accepts
-        all necessary parameters for model explanation.
+        Initialize SHAP explainer; optionally preconfigure defaults.
+
+        Args:
+            model: Optional trained model to reuse in explain() calls
+            background_data: Optional background data for SHAP baseline
+            feature_names: Optional list of feature names
+            rule_mapping: Optional mapping feature_name -> human-friendly rule name
         """
         # Initialize logging
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("SHAP Explainer initialized and ready to use")
+        # Optional defaults used by convenience-style invocations
+        self._default_model = model
+        self._default_background = background_data
+        self._default_feature_names = feature_names
+        # Internal caches
+        self._rule_name_map: Optional[Dict[int, str]] = None
+        self._feature_name_map: Optional[Dict[str, str]] = None
+        # Accept external mapping if provided: coerce to int-keyed map when possible
+        if isinstance(rule_mapping, dict) and rule_mapping:
+            try:
+                # If keys are convertible to int, store as rule_id map
+                int_map: Dict[int, str] = {}
+                convertible = True
+                for k, v in rule_mapping.items():
+                    try:
+                        int_map[int(str(k).replace('rule_', '').replace('Security_Rule_', '').lstrip('0') or '0') if str(k).strip() else int(k)] = str(v)
+                    except Exception:
+                        convertible = False
+                        break
+                if convertible:
+                    self._rule_name_map = int_map
+                else:
+                    # Keep as feature-name map for potential future use
+                    self._feature_name_map = {str(k): str(v) for k, v in rule_mapping.items()}
+            except Exception:
+                # Fallback: ignore invalid external mapping
+                self._rule_name_map = None
+                self._feature_name_map = None
         # Lazy cache for BOC rule IDs discovered from rule CSVs
         self._boc_rule_ids: Optional[Set[int]] = None
-        self._rule_name_map: Optional[Dict[int, str]] = None
     
     def explain(self, 
                 model, 
@@ -874,8 +909,19 @@ class Explainer:
 
     def _get_rule_name_map(self) -> Dict[int, str]:
         """Build and cache a mapping of rule_id -> rule_name from Qradar_rule CSVs."""
-        if self._rule_name_map is not None:
-            return self._rule_name_map
+        if isinstance(self._rule_name_map, dict):
+            # Ensure int->str mapping
+            try:
+                # Coerce keys to int if needed (defensive)
+                coerced: Dict[int, str] = {}
+                for k, v in self._rule_name_map.items():
+                    coerced[int(k)] = str(v)
+                self._rule_name_map = coerced
+            except Exception:
+                # On failure, reset and rebuild from CSVs
+                self._rule_name_map = None
+            else:
+                return self._rule_name_map
 
         name_map: Dict[int, str] = {}
         try:
