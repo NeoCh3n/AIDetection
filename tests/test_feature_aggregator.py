@@ -470,15 +470,15 @@ def test_with_real_training_data():
         print(f"Attack data: {attack_data_path}")
         
         # Load a sample of training data (first 50 events from each source)
-        df = load_data('train', config)
+        df: pd.DataFrame = load_data('train', config)
         
         if len(df) > 100:
             # Sample 50 events from each source to keep test fast
-            normal_sample = df[df['source_label'] == 'normal'].head(50)
-            attack_sample = df[df['source_label'] == 'attack'].head(50)
-            df_sample = pd.concat([normal_sample, attack_sample])
+            normal_sample: pd.DataFrame = cast(pd.DataFrame, df[df['source_label'] == 'normal'].head(50))
+            attack_sample: pd.DataFrame = cast(pd.DataFrame, df[df['source_label'] == 'attack'].head(50))
+            df_sample: pd.DataFrame = pd.concat([normal_sample, attack_sample], ignore_index=True)
         else:
-            df_sample = df
+            df_sample: pd.DataFrame = cast(pd.DataFrame, df)
             
         print(f"Testing with {len(df_sample)} events from training data")
         
