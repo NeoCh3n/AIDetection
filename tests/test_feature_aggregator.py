@@ -6,10 +6,12 @@ Tests 30-minute window aggregation functionality for threat detection pipeline
 
 import sys
 import os
+import numbers
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import json
+from typing import Any, Dict, cast
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
@@ -327,11 +329,18 @@ def test_save_load_functionality():
         assert len(loaded) == len(aggregated), "Loaded data should have same length"
         assert set(loaded.columns) == set(aggregated.columns), "Columns should match"
         
-        # Check aggregated rules format
+        # Check aggregated rules format (avoid calling attributes that type checkers misinfer)
         for i, row in loaded.iterrows():
-            assert isinstance(row['aggregated_rules'], dict), "Aggregated rules should be dict"
-            assert all(isinstance(k, str) for k in row['aggregated_rules'].keys()), "Rule keys should be strings"
-            assert all(isinstance(v, int) for v in row['aggregated_rules'].values()), "Rule values should be integers"
+            rules_obj = row['aggregated_rules']
+            if not isinstance(rules_obj, dict):
+                raise AssertionError("Aggregated rules should be dict")
+            # Narrow type for static analysis and then use dict-specific APIs
+            rules_dict = cast(Dict[str, Any], rules_obj)
+            rule_keys = list(rules_dict.keys())
+            rule_vals = list(rules_dict.values())
+            assert all(isinstance(k, str) for k in rule_keys), "Rule keys should be strings"
+            # Accept numpy integer subclasses as ints
+            assert all(isinstance(v, numbers.Integral) for v in rule_vals), "Rule values should be integers"
         
         print("   Save/load test passed")
         return True
