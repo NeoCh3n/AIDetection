@@ -169,19 +169,24 @@ def test_rule_aggregation():
     # Should have exactly 1 window
     assert len(aggregated) == 1, f"Expected 1 window, got {len(aggregated)}"
     
-    # Get the aggregated data for the window
-    window_data = aggregated.iloc[0]
+    # Get the aggregated data for the window (use label-based access to avoid Series typing issues)
+    first_idx = aggregated.index[0]
     
     # Check rule counts
-    rules = window_data['aggregated_rules']
-    assert '100001' in rules, "Rule 100001 should be in aggregated rules"
-    assert '100002' in rules, "Rule 100002 should be in aggregated rules"
-    assert rules['100001'] == 9, f"Rule 100001 count should be 9, got {rules['100001']}"
-    assert rules['100002'] == 1, f"Rule 100002 count should be 1, got {rules['100002']}"
+    rules = aggregated.at[first_idx, 'aggregated_rules']
+    if not isinstance(rules, dict):
+        raise AssertionError("aggregated_rules should be a dict")
+    rules_dict = cast(Dict[str, Any], rules)
+    assert '100001' in rules_dict, "Rule 100001 should be in aggregated rules"
+    assert '100002' in rules_dict, "Rule 100002 should be in aggregated rules"
+    assert int(rules_dict['100001']) == 9, f"Rule 100001 count should be 9, got {rules_dict['100001']}"
+    assert int(rules_dict['100002']) == 1, f"Rule 100002 count should be 1, got {rules_dict['100002']}"
     
-    # Check totals
-    assert window_data['total_events'] == 10, f"Total events should be 10, got {window_data['total_events']}"
-    assert window_data['unique_rules'] == 2, f"Unique rules should be 2, got {window_data['unique_rules']}"
+    # Check totals (ensure scalar types for static analyzers)
+    total_events_val = int(cast(int, aggregated.at[first_idx, 'total_events']))
+    unique_rules_val = int(cast(int, aggregated.at[first_idx, 'unique_rules']))
+    assert total_events_val == 10, f"Total events should be 10, got {total_events_val}"
+    assert unique_rules_val == 2, f"Unique rules should be 2, got {unique_rules_val}"
     
     print("   Rule aggregation test passed")
     return True
