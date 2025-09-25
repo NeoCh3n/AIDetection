@@ -44,6 +44,7 @@ class ModelBase(ABC):
             config: Model-specific configuration parameters
         """
         self.config = config
+        self.grid_search_params = None
         self.model = None
         self.scaler = None
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")

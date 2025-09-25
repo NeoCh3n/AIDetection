@@ -1488,7 +1488,13 @@
     100742
   ],
   "total_rules": 742,
-  "mode": "file",
-  "generated_at": "2025-09-15 17:22:43.901995",
+  "mode": {
+    "mode": "file",
+    "rule_file_path": "Qradar_rule/production_rules.txt",
+    "uat_rule_file_path": "Qradar_rule/uat_rules.txt",
+    "mapping_file_path": "Qradar_rule/uat_to_prod_mapping.json",
+    "environment": "prod"
+  },
+  "generated_at": "2025-09-25 16:23:43.768815",
   "generated_by": "QRadarRuleManager"
 }

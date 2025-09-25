@@ -15,6 +15,9 @@ import logging
 from typing import Dict, Any, Optional
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
+from contextlib import contextmanager
+import time
 
 # Add project root to path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
@@ -22,15 +25,74 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # Import required modules
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.metrics import make_scorer, classification_report, confusion_matrix, roc_auc_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.base import clone
+from sklearn.model_selection import ParameterGrid
 
 # Import our modular components
 from data.data_handler import DataHandler
 from features.feature_manipulator import FeatureManipulator
 from models.model_factory import ModelFactory
 from models.base import ModelBase
+
+sys.path.insert(0, '..')
+from system.shap_explainer import Explainer
+
+
+@contextmanager
+def joblib_progress_bar(total: int, desc: str = "GridSearchCV", width: int = 30):
+    """
+    Render a simple in-place text progress bar for joblib-backed tasks.
+
+    Parameters
+    ----------
+    total : int
+        Total number of tasks (e.g., n_candidates * cv_splits).
+    desc : str
+        Description prefix for the progress bar.
+    width : int
+        Width of the progress bar in characters.
+    """
+    import joblib as _joblib
+
+    start_time = time.time()
+    completed = [0]
+
+    def _render(final: bool = False):
+        done = min(completed[0], total)
+        pct = (float(done) / total) if total else 1.0
+        filled = int(width * pct)
+        bar = f"[{'#' * filled}{'-' * (width - filled)}]"
+        elapsed = time.time() - start_time
+        rate = (done / elapsed) if elapsed > 0 else 0.0
+        msg = f"\r{desc} {bar} {done}/{total} ({pct*100:5.1f}%) | {rate:.1f} it/s"
+        try:
+            sys.stdout.write(msg)
+            if final:
+                sys.stdout.write("\n")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    class _PBCallback(_joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            try:
+                completed[0] += self.batch_size
+                _render()
+            except Exception:
+                pass
+            return super(_PBCallback, self).__call__(*args, **kwargs)
+
+    old_cb = _joblib.parallel.BatchCompletionCallBack
+    _joblib.parallel.BatchCompletionCallBack = _PBCallback
+    try:
+        _render()
+        yield
+    finally:
+        _joblib.parallel.BatchCompletionCallBack = old_cb
+        _render(final=True)
 
 
 class TrainingPipeline:
@@ -102,20 +164,13 @@ class TrainingPipeline:
         
         # Check for grid search configuration
         grid_search_config = self.config.get('training', {}).get('grid_search', {})
-        if grid_search_config.get('enabled', False):
-            self.model = self._train_with_grid_search(self.model, X_train, y_train, grid_search_config)
-        else:
-            self.model.train(X_train, y_train)
+        self.model = self._train_with_grid_search(self.model, X_train, y_train, grid_search_config)
         
         # Evaluate model
         evaluation_results = self._evaluate_supervised_model(X_test, y_test)
         
-        # Save model if path provided
+        # Prepare results dict
         model_path = save_path or self.config.get('training', {}).get('model_path', './model/threat_detector.joblib')
-        if model_path:
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            self.model.save_model(model_path)
-        
         results = {
             'model_type': model_type,
             'model_path': model_path,
@@ -123,6 +178,36 @@ class TrainingPipeline:
             'test_samples': len(X_test),
             'evaluation': evaluation_results
         }
+        
+        # Explain model using SHAP explainer
+        try:
+            explainer = Explainer()
+            rule_list = self.feature_manipulator.rule_manager.get_rule_list()
+            feature_name_list = [f"rule_{rid}" for rid in rule_list]
+            output_dir = os.path.join(PROJECT_ROOT, 'results')
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Use a sample of test data for explanation
+            sample_size = min(10, len(X_test))
+            explanation_results = explainer.explain(
+                model=self.model.model if not isinstance(self.model.model, tuple) else self.model.model[2],  # Handle scaler case
+                background_data=X_train,
+                instance_data=X_test[:sample_size],
+                feature_name_list=feature_name_list,
+                output_dir=output_dir,
+                plot=False,
+                plot_in_terminal=True,
+                summary_report=True
+            )
+            results['explanation'] = explanation_results
+        except Exception as e:
+            self.logger.warning(f"Model explanation failed: {e}")
+            results['explanation'] = {'error': str(e)}
+        
+        # Save model if path provided
+        if model_path:
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            self.model.save_model(model_path)
         
         self.logger.info("Supervised training pipeline completed successfully")
         return results
@@ -166,43 +251,65 @@ class TrainingPipeline:
     
     def _train_with_grid_search(self, model: ModelBase, X_train: np.ndarray, y_train: np.ndarray, 
                                grid_config: Dict[str, Any]) -> ModelBase:
-        """Train supervised model with grid search optimization."""
-        self.logger.info("Performing supervised grid search optimization...")
+        """Train supervised model with GridSearchCV optimization and joblib progress bar."""
+        self.logger.info("Performing supervised grid search optimization with GridSearchCV...")
         
         # Create base model
-        base_model = model.create_model()
+        base_estimator = model.create_model()
         
-        # Setup grid search
-        param_grid = grid_config.get('param_grid') or model.get_grid_search_params()
-        scoring = grid_config.get('scoring', 'roc_auc')
+        # Setup grid search parameters
+        param_grid = model.get_grid_search_params()
+        scoring_metric = grid_config.get('scoring', 'roc_auc')
         cv = grid_config.get('cv', 3)
-        verbose = grid_config.get('verbose', 1)
         
-        grid_search = GridSearchCV(
-            estimator=base_model,
-            param_grid=param_grid,
-            scoring=scoring,
-            cv=cv,
-            verbose=verbose,
-            n_jobs=-1
-        )
+        if not param_grid:
+            self.logger.warning("No parameter grid provided for grid search. Skipping.")
+            # Fit base model
+            if model.needs_scaling():
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                base_estimator.fit(X_train_scaled, y_train)
+                model.model = ('scaler', scaler, base_estimator)
+            else:
+                base_estimator.fit(X_train, y_train)
+                model.model = base_estimator
+            return model
         
-        # Apply scaling if needed
+        # Use GridSearchCV for optimization with joblib progress bar
         if model.needs_scaling():
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            model.scaler = scaler
+            # Use Pipeline for scaling
+            from sklearn.pipeline import Pipeline
+            pipeline = Pipeline([
+                ('scaler', StandardScaler()),
+                ('model', base_estimator)
+            ])
+            grid_search = GridSearchCV(
+                estimator=pipeline,
+                param_grid=param_grid,
+                scoring=scoring_metric,
+                cv=cv,
+                n_jobs=-1,
+                verbose=0
+            )
+            total_tasks = len(ParameterGrid(param_grid)) * cv
+            with joblib_progress_bar(total=total_tasks, desc="Grid Search"):
+                grid_search.fit(X_train, y_train)
+            model.model = grid_search.best_estimator_
         else:
-            X_train_scaled = X_train
+            grid_search = GridSearchCV(
+                estimator=base_estimator,
+                param_grid=param_grid,
+                scoring=scoring_metric,
+                cv=cv,
+                n_jobs=-1,
+                verbose=0
+            )
+            total_tasks = len(ParameterGrid(param_grid)) * cv
+            with joblib_progress_bar(total=total_tasks, desc="Grid Search"):
+                grid_search.fit(X_train, y_train)
+            model.model = grid_search.best_estimator_
         
-        # Perform grid search
-        grid_search.fit(X_train_scaled, y_train)
-        
-        # Update model with best parameters
-        model.model = grid_search.best_estimator_
-        
-        self.logger.info(f"Grid search completed. Best score: {grid_search.best_score_:.4f}")
-        self.logger.info(f"Best parameters: {grid_search.best_params_}")
+        self.logger.info(f"Grid search completed. Best score: {grid_search.best_score_:.4f} with params: {grid_search.best_params_}")
         
         return model
     
@@ -211,64 +318,68 @@ class TrainingPipeline:
         """Train clustering model with grid search optimization."""
         self.logger.info("Performing clustering grid search optimization...")
         
-        # For clustering, we need to use a different approach since there are no labels
-        # We'll use silhouette score as the default metric
-        from sklearn.metrics import silhouette_score
-        from sklearn.model_selection import ParameterGrid
-        
         param_grid = grid_config.get('param_grid') or model.get_grid_search_params()
-        scoring_metric = grid_config.get('scoring', 'silhouette')
-        model_type = model.__class__.__name__.lower().replace('model', '')  # Extract model type from class name
         
-        # Apply scaling if needed
-        if model.needs_scaling():
-            from sklearn.preprocessing import StandardScaler
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-            model.scaler = scaler
-        else:
-            X_scaled = X
+        if not param_grid:
+            self.logger.warning("No parameter grid provided for clustering grid search. Skipping.")
+            estimator = model.create_model()
+            if model.needs_scaling():
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X)
+                estimator.fit(X_scaled)
+                model.model = ('scaler', scaler, estimator)
+            else:
+                estimator.fit(X)
+                model.model = estimator
+            return model
         
-        best_score = -1
+        best_score = -np.inf
         best_params = None
-        best_model = None
+        best_estimator = None
         
-        # Manual grid search for clustering
-        for params in ParameterGrid(param_grid):
+        pg = list(ParameterGrid(param_grid))
+        self.logger.info(f"Clustering grid search: {len(pg)} parameter combinations")
+        
+        for params in tqdm(pg, desc="Clustering Grid Search", unit="combination"):
             try:
-                # Create model with these parameters
-                temp_config = self.config.copy()
-                temp_config['model'] = {model_type: params}
-                temp_model = ModelFactory.create_model(model_type, temp_config)
-                
-                # Fit model
-                temp_model.fit(X_scaled)
-                
-                # Get cluster labels
-                if hasattr(temp_model, 'predict'):
-                    labels = temp_model.predict(X_scaled)
-                else:
-                    labels = temp_model.fit_predict(X_scaled)
-                
-                # Calculate score
-                if scoring_metric == 'silhouette' and len(np.unique(labels)) > 1:
+                est = clone(model.create_model()).set_params(**params)
+                if model.needs_scaling():
+                    scaler = StandardScaler()
+                    X_scaled = scaler.fit_transform(X)
+                    est.fit(X_scaled)
+                    labels = est.predict(X_scaled)
                     score = silhouette_score(X_scaled, labels)
-                    if score > best_score:
-                        best_score = score
-                        best_params = params
-                        best_model = temp_model
+                else:
+                    est.fit(X)
+                    labels = est.predict(X)
+                    score = silhouette_score(X, labels)
+                
+                if score > best_score:
+                    best_score = score
+                    best_params = params
+                    if model.needs_scaling():
+                        best_estimator = ('scaler', scaler, est)
+                    else:
+                        best_estimator = est
                         
             except Exception as e:
-                self.logger.warning(f"Failed to evaluate params {params}: {e}")
+                self.logger.debug(f"Clustering failed on params {params}: {e}")
+                continue
         
-        if best_model is not None:
-            model = best_model
-            self.logger.info(f"Best clustering score ({scoring_metric}): {best_score:.4f}")
-            self.logger.info(f"Best parameters: {best_params}")
+        if best_params is None:
+            self.logger.warning("Clustering grid search found no valid combinations. Using default estimator.")
+            est = model.create_model()
+            if model.needs_scaling():
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X)
+                est.fit(X_scaled)
+                model.model = ('scaler', scaler, est)
+            else:
+                est.fit(X)
+                model.model = est
         else:
-            # Fallback to normal training
-            model.fit(X_scaled)
-            self.logger.warning("Grid search failed, using default parameters")
+            model.model = best_estimator
+            self.logger.info(f"Clustering grid search completed. Best score: {best_score:.4f} with params: {best_params}")
         
         return model
     
@@ -323,7 +434,7 @@ class TrainingPipeline:
         self.logger.info("Evaluating clustering model performance...")
         
         # Apply scaling if used during training
-        if self.model.scaler is not None:
+        if hasattr(self.model, 'scaler') and self.model.scaler is not None:
             X_scaled = self.model.scaler.transform(X)
         else:
             X_scaled = X

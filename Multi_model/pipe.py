@@ -131,20 +131,20 @@ Examples:
 
 def handle_training(orchestrator, args):
     """Handle training mode."""
-    print(f"🚀 Starting training with {args.model_type} model")
+    print(f"Starting training with {args.model_type} model")
     
     # Validate model type
     if not orchestrator.validate_model_type(args.model_type):
         available = orchestrator.list_available_models()
-        print(f"❌ Unknown model type: {args.model_type}")
+        print(f"Unknown model type: {args.model_type}")
         print(f"Available models: {', '.join(available)}")
         return 1
     
     # Show model type info
     if orchestrator.is_clustering_model(args.model_type):
-        print(f"📊 Training clustering model: {args.model_type}")
+        print(f"Training clustering model: {args.model_type}")
     else:
-        print(f"🎯 Training supervised model: {args.model_type}")
+        print(f"Training supervised model: {args.model_type}")
     
     # Training parameters
     train_kwargs = {}
