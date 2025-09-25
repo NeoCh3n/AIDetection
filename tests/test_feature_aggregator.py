@@ -207,14 +207,18 @@ def test_host_separation():
     hosts = aggregated['hostname'].unique()
     assert len(hosts) == 3, f"Expected 3 unique hosts, got {len(hosts)}"
     
-    # Check individual counts
-    for _, row in aggregated.iterrows():
-        if row['hostname'] == 'DESKTOP-01':
-            assert row['total_events'] == 5
-        elif row['hostname'] == 'DESKTOP-02':
-            assert row['total_events'] == 3
-        elif row['hostname'] == 'DESKTOP-03':
-            assert row['total_events'] == 1
+    # Check individual counts (avoid Series bool in conditionals)
+    expected_counts = {
+        'DESKTOP-01': 5,
+        'DESKTOP-02': 3,
+        'DESKTOP-03': 1,
+    }
+    actual_counts = (
+        aggregated.set_index('hostname')['total_events']
+        .astype(int)
+        .to_dict()
+    )
+    assert actual_counts == expected_counts, f"Counts per host mismatch: {actual_counts} vs {expected_counts}"
     
     print("   Host separation test passed")
     return True
