@@ -58,19 +58,30 @@ class Explainer:
     function that accepts all necessary inputs.
     """
     
-    def __init__(self):
+    def __init__(self,
+                 model: Optional[object] = None,
+                 background_data: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+                 feature_names: Optional[List[str]] = None,
+                 rule_mapping: Optional[Dict[str, str]] = None):
         """
-        Initialize SHAP explainer with no parameters.
-        
-        The explainer is ready to use with the explain() method which accepts
-        all necessary parameters for model explanation.
+        Initialize SHAP explainer; optionally preconfigure defaults.
+
+        Args:
+            model: Optional trained model to reuse in explain() calls
+            background_data: Optional background data for SHAP baseline
+            feature_names: Optional list of feature names
+            rule_mapping: Optional mapping feature_name -> human-friendly rule name
         """
         # Initialize logging
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("SHAP Explainer initialized and ready to use")
+        # Optional defaults used by convenience-style invocations
+        self._default_model = model
+        self._default_background = background_data
+        self._default_feature_names = feature_names
+        self._rule_name_map = rule_mapping
         # Lazy cache for BOC rule IDs discovered from rule CSVs
         self._boc_rule_ids: Optional[Set[int]] = None
-        self._rule_name_map: Optional[Dict[int, str]] = None
     
     def explain(self, 
                 model, 
