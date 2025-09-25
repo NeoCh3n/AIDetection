@@ -109,20 +109,25 @@ class FeatureGenerator:
         
         # Map aggregated rule counts to feature vectors
         for idx, row in df_agg.iterrows():
-            # Support both 'aggregated_rules' and legacy 'aggregated_rules_dict'
-            if 'aggregated_rules' in df_agg.columns or 'aggregated_rules_dict' in df_agg.columns:
+            # Choose which aggregated counts to use
+            if 'aggregated_rules_log1p_sum' in df_agg.columns:
+                rule_counts = row['aggregated_rules_log1p_sum']
+            elif 'aggregated_rules' in df_agg.columns or 'aggregated_rules_dict' in df_agg.columns:
                 rule_counts = row['aggregated_rules'] if 'aggregated_rules' in df_agg.columns else row['aggregated_rules_dict']
-                if isinstance(rule_counts, dict):
-                    for rule_id, count in rule_counts.items():
-                        rule_id_int = int(str(rule_id))
-                        # Map UAT rule to production rule if necessary
-                        prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
-                        
-                        if self._rule_to_index and prod_rule_id in self._rule_to_index:
-                            col_idx = self._rule_to_index[prod_rule_id]
-                            X[idx, col_idx] = float(count)
-                        else:
-                            logger.warning(f"Rule ID {prod_rule_id} not found in production baseline")
+            else:
+                rule_counts = None
+
+            if isinstance(rule_counts, dict):
+                for rule_id, count in rule_counts.items():
+                    rule_id_int = int(str(rule_id))
+                    # Map UAT rule to production rule if necessary
+                    prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
+                    
+                    if self._rule_to_index and prod_rule_id in self._rule_to_index:
+                        col_idx = self._rule_to_index[prod_rule_id]
+                        X[idx, col_idx] = float(count)
+                    else:
+                        logger.warning(f"Rule ID {prod_rule_id} not found in production baseline")
             elif 'rule_id' in df_agg.columns and 'count' in df_agg.columns:
                 # Handle direct rule_id/count format
                 rule_id = int(str(row['rule_id']))
