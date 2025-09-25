@@ -474,8 +474,13 @@ def test_with_real_training_data():
             return False
             
         # Check expected characteristics
-        expected_sources = set(df_sample['source_label'].unique())
-        actual_sources = set(aggregated['source_label'].unique())
+        # Convert ndarray from .unique() to list to satisfy type checkers
+        expected_sources = set(
+            df_sample['source_label'].dropna().astype(str).unique().tolist()
+        )
+        actual_sources = set(
+            aggregated['source_label'].dropna().astype(str).unique().tolist()
+        )
         
         if expected_sources != actual_sources:
             print(f"ERROR: Source mismatch - expected {expected_sources}, got {actual_sources}")
