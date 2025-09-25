@@ -376,8 +376,11 @@ def test_edge_cases():
     
     result = aggregate_to_windows(single_event)
     assert len(result) == 1, "Single event should produce single window"
-    assert result.iloc[0]['total_events'] == 1, "Single event should have count 1"
-    assert result.iloc[0]['unique_rules'] == 1, "Single rule should have unique count 1"
+    first_idx = result.index[0]
+    total_single = int(cast(int, result.at[first_idx, 'total_events']))
+    unique_single = int(cast(int, result.at[first_idx, 'unique_rules']))
+    assert total_single == 1, f"Single event should have count 1, got {total_single}"
+    assert unique_single == 1, f"Single rule should have unique count 1, got {unique_single}"
     
     # Test with zero counts
     zero_count = pd.DataFrame([{
@@ -390,7 +393,9 @@ def test_edge_cases():
     
     result = aggregate_to_windows(zero_count)
     assert len(result) == 1, "Zero count should still produce window"
-    assert result.iloc[0]['total_events'] == 0, "Zero count should have total 0"
+    first_idx = result.index[0]
+    total_zero = int(cast(int, result.at[first_idx, 'total_events']))
+    assert total_zero == 0, f"Zero count should have total 0, got {total_zero}"
     
     print("   Edge cases test passed")
     return True
