@@ -37,3 +37,8 @@ package.json
 # Local datasets and artifacts
 Training_data/
 model/
+
+# Local assistant tooling
+agents.md
+AGENTS.md
+.claude/
