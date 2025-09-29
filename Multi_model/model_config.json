@@ -1,0 +1,330 @@
+{
+  "description": "Comprehensive Model Configuration for OOP Threat Detection Pipeline",
+  "version": "1.0",
+  "scikit_learn_version": "0.24.2",
+  "python_version": "3.6.8",
+  
+  "models": {
+    "random_forest": {
+      "class_name": "RandomForestModel",
+      "sklearn_class": "sklearn.ensemble.RandomForestClassifier",
+      "description": "Random Forest classifier - ensemble method using multiple decision trees",
+      "requires_scaling": false,
+      "supports_feature_importance": true,
+      "supports_grid_search": true,
+      "recommended_for": ["tabular_data", "interpretability", "balanced_performance"],
+      "default_params": {
+        "n_estimators": 200,
+        "class_weight": "balanced_subsample",
+        "max_features": "sqrt",
+        "random_state": 42,
+        "n_jobs": -1,
+        "max_depth": null,
+        "min_samples_split": 2,
+        "min_samples_leaf": 1
+      },
+      "grid_search_params": {
+        "n_estimators": [100, 200, 300],
+        "max_depth": [null, 10, 20, 30],
+        "max_features": ["sqrt", "log2"],
+        "min_samples_split": [2, 5, 10],
+        "min_samples_leaf": [1, 2, 4],
+        "class_weight": ["balanced", "balanced_subsample"]
+      }
+    },
+    
+    "svm": {
+      "class_name": "SVMModel",
+      "sklearn_class": "sklearn.svm.SVC",
+      "description": "Support Vector Machine - effective for high-dimensional data",
+      "requires_scaling": true,
+      "supports_feature_importance": false,
+      "supports_grid_search": true,
+      "recommended_for": ["high_dimensional_data", "small_datasets", "non_linear_patterns"],
+      "default_params": {
+        "C": 1.0,
+        "kernel": "rbf",
+        "gamma": "scale",
+        "probability": true,
+        "random_state": 42,
+        "class_weight": "balanced"
+      },
+      "grid_search_params": {
+        "C": [0.1, 1, 10, 100],
+        "kernel": ["rbf", "poly", "sigmoid"],
+        "gamma": ["scale", "auto", 0.001, 0.01, 0.1, 1]
+      }
+    },
+    
+    "logistic_regression": {
+      "class_name": "LogisticRegressionModel",
+      "sklearn_class": "sklearn.linear_model.LogisticRegression",
+      "description": "Logistic Regression - linear model for binary classification",
+      "requires_scaling": true,
+      "supports_feature_importance": false,
+      "supports_grid_search": true,
+      "recommended_for": ["baseline_model", "interpretability", "fast_training"],
+      "default_params": {
+        "C": 1.0,
+        "penalty": "l2",
+        "solver": "liblinear",
+        "max_iter": 1000,
+        "random_state": 42,
+        "class_weight": "balanced"
+      },
+      "grid_search_params": {
+        "C": [0.01, 0.1, 1, 10, 100],
+        "penalty": ["l1", "l2", "elasticnet"],
+        "solver": ["liblinear", "saga"],
+        "max_iter": [1000, 2000, 5000]
+      }
+    },
+    
+    "gradient_boosting": {
+      "class_name": "GradientBoostingModel",
+      "sklearn_class": "sklearn.ensemble.GradientBoostingClassifier",
+      "description": "Gradient Boosting - sequential ensemble method",
+      "requires_scaling": false,
+      "supports_feature_importance": true,
+      "supports_grid_search": true,
+      "recommended_for": ["high_performance", "tabular_data", "careful_tuning"],
+      "availability": "conditional",
+      "availability_note": "Available in scikit-learn 0.24.2+",
+      "default_params": {
+        "n_estimators": 100,
+        "learning_rate": 0.1,
+        "max_depth": 3,
+        "min_samples_split": 2,
+        "min_samples_leaf": 1,
+        "random_state": 42
+      },
+      "grid_search_params": {
+        "n_estimators": [50, 100, 200],
+        "learning_rate": [0.01, 0.1, 0.2],
+        "max_depth": [3, 5, 7],
+        "min_samples_split": [2, 5, 10],
+        "min_samples_leaf": [1, 2, 4]
+      }
+    },
+    
+    "decision_tree": {
+      "class_name": "DecisionTreeModel",
+      "sklearn_class": "sklearn.tree.DecisionTreeClassifier",
+      "description": "Decision Tree - simple tree-based classifier",
+      "requires_scaling": false,
+      "supports_feature_importance": true,
+      "supports_grid_search": true,
+      "recommended_for": ["interpretability", "baseline_model", "rule_extraction"],
+      "default_params": {
+        "criterion": "gini",
+        "splitter": "best",
+        "max_depth": null,
+        "min_samples_split": 2,
+        "min_samples_leaf": 1,
+        "class_weight": "balanced",
+        "random_state": 42
+      },
+      "grid_search_params": {
+        "criterion": ["gini", "entropy"],
+        "splitter": ["best", "random"],
+        "max_depth": [null, 5, 10, 20],
+        "min_samples_split": [2, 5, 10],
+        "min_samples_leaf": [1, 2, 4],
+        "max_features": [null, "sqrt", "log2"]
+      }
+    },
+    
+    "adaboost": {
+      "class_name": "AdaBoostModel",
+      "sklearn_class": "sklearn.ensemble.AdaBoostClassifier",
+      "description": "AdaBoost - adaptive boosting ensemble method",
+      "requires_scaling": false,
+      "supports_feature_importance": true,
+      "supports_grid_search": true,
+      "recommended_for": ["ensemble_learning", "weak_learners", "moderate_datasets"],
+      "default_params": {
+        "n_estimators": 50,
+        "learning_rate": 1.0,
+        "algorithm": "SAMME.R",
+        "random_state": 42
+      },
+      "grid_search_params": {
+        "n_estimators": [25, 50, 100],
+        "learning_rate": [0.5, 1.0, 1.5],
+        "algorithm": ["SAMME", "SAMME.R"]
+      }
+    },
+    
+    "extra_trees": {
+      "class_name": "ExtraTreesModel",
+      "sklearn_class": "sklearn.ensemble.ExtraTreesClassifier",
+      "description": "Extra Trees - extremely randomized trees ensemble",
+      "requires_scaling": false,
+      "supports_feature_importance": true,
+      "supports_grid_search": true,
+      "recommended_for": ["fast_training", "high_variance_reduction", "large_datasets"],
+      "default_params": {
+        "n_estimators": 100,
+        "criterion": "gini",
+        "max_depth": null,
+        "min_samples_split": 2,
+        "min_samples_leaf": 1,
+        "max_features": "sqrt",
+        "bootstrap": false,
+        "class_weight": "balanced",
+        "random_state": 42,
+        "n_jobs": -1
+      },
+      "grid_search_params": {
+        "n_estimators": [50, 100, 200],
+        "criterion": ["gini", "entropy"],
+        "max_depth": [null, 10, 20],
+        "max_features": ["sqrt", "log2"],
+        "min_samples_split": [2, 5, 10],
+        "min_samples_leaf": [1, 2, 4]
+      }
+    },
+    
+    "naive_bayes": {
+      "class_name": "NaiveBayesModel",
+      "sklearn_class": "sklearn.naive_bayes.GaussianNB",
+      "description": "Naive Bayes - probabilistic classifier based on Bayes theorem",
+      "requires_scaling": true,
+      "supports_feature_importance": false,
+      "supports_grid_search": true,
+      "recommended_for": ["fast_training", "small_datasets", "text_classification"],
+      "default_params": {
+        "var_smoothing": 1e-9
+      },
+      "grid_search_params": {
+        "var_smoothing": [1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7]
+      }
+    }
+  },
+  
+  "clustering_models": {
+    "kmeans": {
+      "class_name": "KMeansModel",
+      "sklearn_class": "sklearn.cluster.KMeans",
+      "description": "K-Means clustering - partitional clustering algorithm",
+      "requires_scaling": true,
+      "supports_grid_search": true,
+      "model_type": "clustering",
+      "recommended_for": ["unsupervised_anomaly_detection", "data_exploration", "fast_clustering"],
+      "default_params": {
+        "n_clusters": 8,
+        "init": "k-means++",
+        "n_init": 10,
+        "max_iter": 300,
+        "tol": 1e-4,
+        "random_state": 42,
+        "algorithm": "auto"
+      },
+      "grid_search_params": {
+        "n_clusters": [2, 3, 5, 8, 10, 12, 15, 20],
+        "init": ["k-means++", "random"],
+        "n_init": [10, 20, 30],
+        "max_iter": [300, 500, 1000]
+      }
+    },
+    
+    "dbscan": {
+      "class_name": "DBSCANModel",
+      "sklearn_class": "sklearn.cluster.DBSCAN",
+      "description": "DBSCAN - density-based spatial clustering algorithm",
+      "requires_scaling": true,
+      "supports_grid_search": true,
+      "model_type": "clustering",
+      "recommended_for": ["anomaly_detection", "irregular_shapes", "noise_handling"],
+      "default_params": {
+        "eps": 0.5,
+        "min_samples": 5,
+        "metric": "euclidean",
+        "algorithm": "auto",
+        "leaf_size": 30,
+        "p": null,
+        "n_jobs": null
+      },
+      "grid_search_params": {
+        "eps": [0.1, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0],
+        "min_samples": [3, 5, 7, 10, 15, 20],
+        "metric": ["euclidean", "manhattan", "cosine"],
+        "algorithm": ["auto", "ball_tree", "kd_tree", "brute"]
+      }
+    },
+    
+    "gaussian_mixture": {
+      "class_name": "GaussianMixtureModel",
+      "sklearn_class": "sklearn.mixture.GaussianMixture",
+      "description": "Gaussian Mixture Model - probabilistic clustering algorithm",
+      "requires_scaling": true,
+      "supports_grid_search": true,
+      "model_type": "clustering",
+      "recommended_for": ["soft_clustering", "probability_estimates", "overlapping_clusters"],
+      "default_params": {
+        "n_components": 1,
+        "covariance_type": "full",
+        "tol": 1e-3,
+        "reg_covar": 1e-6,
+        "max_iter": 100,
+        "n_init": 1,
+        "init_params": "kmeans",
+        "random_state": 42
+      },
+      "grid_search_params": {
+        "n_components": [1, 2, 3, 4, 5, 6, 8, 10],
+        "covariance_type": ["full", "tied", "diag", "spherical"],
+        "max_iter": [100, 200, 300],
+        "init_params": ["kmeans", "random"]
+      }
+    }
+  },
+  
+  "grid_search_config": {
+    "enabled": false,
+    "scoring": "roc_auc",
+    "cv": 3,
+    "verbose": 1,
+    "n_jobs": -1,
+    "refit": true,
+    "return_train_score": false
+  },
+  
+  "model_selection_guidelines": {
+    "supervised": {
+      "for_interpretability": ["decision_tree", "random_forest", "logistic_regression"],
+      "for_performance": ["gradient_boosting", "random_forest", "extra_trees"],
+      "for_speed": ["naive_bayes", "logistic_regression", "decision_tree"],
+      "for_high_dimensional": ["svm", "logistic_regression", "naive_bayes"],
+      "for_large_datasets": ["extra_trees", "gradient_boosting", "random_forest"],
+      "for_small_datasets": ["svm", "naive_bayes", "decision_tree"],
+      "default_recommendation": "random_forest"
+    },
+    "clustering": {
+      "for_anomaly_detection": ["dbscan", "gaussian_mixture"],
+      "for_exploration": ["kmeans", "gaussian_mixture"],
+      "for_fast_clustering": ["kmeans"],
+      "for_irregular_shapes": ["dbscan"],
+      "for_probability_estimates": ["gaussian_mixture"],
+      "for_noise_handling": ["dbscan"],
+      "default_recommendation": "kmeans"
+    }
+  },
+  
+  "training_notes": {
+    "supervised_models": {
+      "class_imbalance": "All models configured with balanced class weights where applicable",
+      "feature_scaling": "Automatically applied for models that require it (SVM, Logistic Regression, Naive Bayes)",
+      "random_state": "Set to 42 for reproducibility across all models",
+      "grid_search": "Available for all models with predefined parameter grids",
+      "feature_importance": "Available for tree-based and ensemble models"
+    },
+    "clustering_models": {
+      "feature_scaling": "Automatically applied for all clustering models as they benefit from normalized features",
+      "random_state": "Set to 42 for reproducible clustering results where applicable",
+      "parameter_selection": "Use grid search or metrics like silhouette score to select optimal parameters",
+      "anomaly_detection": "DBSCAN automatically identifies outliers as noise points (-1 labels)",
+      "evaluation": "Use silhouette score, calinski_harabasz_score, or davies_bouldin_score for evaluation"
+    }
+  }
+}
