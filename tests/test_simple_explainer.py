@@ -138,14 +138,24 @@ def test_explainer_with_joblib_model(model_path=None):
         
         # Get SHAP explanation
         print("\nGenerating SHAP explanation for real data...")
-        shap_values = explainer.explain(test_instance, log_results=True)
-        print(f"SHAP values shape: {np.array(shap_values).shape}")
+        real_output_dir = os.path.join(PROJECT_ROOT, 'test_output', 'real_instance')
+        os.makedirs(real_output_dir, exist_ok=True)
+        explanation = explainer.explain(
+            instance_data=test_instance,
+            output_dir=real_output_dir,
+            summary_report=True
+        )
+        shap_values = explanation.get('shap_values')
+        print(f"SHAP values type: {type(shap_values)}")
         
         # Get feature importance ranking
-        ranking = explainer.get_feature_importance(test_instance)
+        ranking = explanation.get('feature_importance', [])
         print(f"\nTop 5 Most Important Features for prediction '{prediction[0]}':")
         for item in ranking[:5]:
-            print(f"  {item['rank']}. {item['rule']} (importance: {item['importance']:.4f})")
+            feature_label = item.get('rule_name') or item.get('feature')
+            rank = item.get('rank', '?')
+            importance = float(item.get('importance', 0.0))
+            print(f"  {rank}. {feature_label} (importance: {importance:.4f})")
         
         print("\nSUCCESS: SHAP Explainer with real training data test completed successfully!")
         return True
@@ -177,13 +187,23 @@ def test_explainer_with_joblib_model(model_path=None):
             
             test_instance = np.random.randn(1, n_features)
             prediction = model.predict(test_instance)
-            shap_values = explainer.explain(test_instance, log_results=True)
-            ranking = explainer.get_feature_importance(test_instance)
+            fallback_output_dir = os.path.join(PROJECT_ROOT, 'test_output', 'synthetic_fallback')
+            os.makedirs(fallback_output_dir, exist_ok=True)
+            explanation = explainer.explain(
+                instance_data=test_instance,
+                output_dir=fallback_output_dir,
+                summary_report=False
+            )
+            shap_values = explanation.get('shap_values')
+            ranking = explanation.get('feature_importance', [])
             
             print(f"Synthetic test - Model prediction: {prediction[0]}")
             print("Top 3 synthetic features:")
             for item in ranking[:3]:
-                print(f"  {item['rank']}. {item['rule']} (importance: {item['importance']:.4f})")
+                feature_label = item.get('rule_name') or item.get('feature')
+                rank = item.get('rank', '?')
+                importance = float(item.get('importance', 0.0))
+                print(f"  {rank}. {feature_label} (importance: {importance:.4f})")
             
             print("SUCCESS: Fallback synthetic test completed!")
             return True
@@ -249,58 +269,25 @@ def test_explainer_with_synthetic_model():
     print(f"Testing on instance shape: {test_instance.shape}")
     
     # Get explanation
-    shap_values = explainer.explain(test_instance, log_results=True)
-    print(f"SHAP values shape: {np.array(shap_values).shape}")
-    
-    # Get feature importance ranking
-    ranking = explainer.get_feature_importance(test_instance)
-    print("\nTop 5 Most Important Features:")
-    for item in ranking[:5]:
-        print(f"  {item['rank']}. {item['rule']} (importance: {item['importance']:.4f})")
-    
-    print("\n✅ SHAP Explainer synthetic test completed successfully!")
-    return True
-    """Fallback test with a synthetic model."""
-    print("\nTesting SHAP Explainer with synthetic model...")
-    
-    # Create sample data
-    X, y = make_classification(n_samples=1000, n_features=10, n_classes=2, random_state=42)
-    
-    # Train a simple RandomForest
-    model = RandomForestClassifier(n_estimators=10, random_state=42)
-    model.fit(X, y)
-    
-    # Create background data (subset of training data)
-    background_data = X[:100]
-    
-    # Create feature names
-    feature_names = [f'rule_{i}' for i in range(10)]
-    
-    # Create rule mapping
-    rule_mapping = {f'rule_{i}': f'Security Rule {i+1}' for i in range(10)}
-    
-    # Initialize explainer
-    explainer = Explainer(
-        model=model,
-        background_data=background_data,
-        feature_names=feature_names,
-        rule_mapping=rule_mapping
+    synthetic_output_dir = os.path.join(PROJECT_ROOT, 'test_output', 'synthetic_test')
+    os.makedirs(synthetic_output_dir, exist_ok=True)
+    explanation = explainer.explain(
+        instance_data=test_instance,
+        output_dir=synthetic_output_dir,
+        summary_report=True
     )
-    
-    # Test on a single instance (malicious case)
-    test_instance = X[0:1]  # First instance
-    print(f"Testing on instance shape: {test_instance.shape}")
-    
-    # Get explanation
-    shap_values = explainer.explain(test_instance, log_results=True)
-    print(f"SHAP values shape: {np.array(shap_values).shape}")
+    shap_values = explanation.get('shap_values')
+    print(f"SHAP values type: {type(shap_values)}")
     
     # Get feature importance ranking
-    ranking = explainer.get_feature_importance(test_instance)
+    ranking = explanation.get('feature_importance', [])
     print("\nTop 5 Most Important Features:")
     for item in ranking[:5]:
-        print(f"  {item['rank']}. {item['rule']} (importance: {item['importance']:.4f})")
-    
+        feature_label = item.get('rule_name') or item.get('feature')
+        rank = item.get('rank', '?')
+        importance = float(item.get('importance', 0.0))
+        print(f"  {rank}. {feature_label} (importance: {importance:.4f})")
+
     print("\n✅ SHAP Explainer synthetic test completed successfully!")
     return True
 

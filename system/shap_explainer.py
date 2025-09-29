@@ -107,16 +107,18 @@ class Explainer:
         # Lazy cache for BOC rule IDs discovered from rule CSVs
         self._boc_rule_ids: Optional[Set[int]] = None
     
-    def explain(self, 
-                model, 
-                background_data: Union[np.ndarray, pd.DataFrame], 
-                instance_data: Union[np.ndarray, pd.DataFrame],
-                feature_name_list: List[str], 
-                output_dir: str,
+    def explain(self,
+                *args,
+                model: Optional[object] = None,
+                background_data: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+                instance_data: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+                feature_name_list: Optional[List[str]] = None,
+                output_dir: Optional[str] = None,
                 plot: bool = False,
-                plot_in_terminal: bool = False, 
+                plot_in_terminal: bool = False,
                 summary_report: bool = False,
-                frequent_path_mining: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                frequent_path_mining: Optional[Dict[str, Any]] = None,
+                **legacy_kwargs) -> Dict[str, Any]:
         """
         Explain a machine learning model using SHAP values for specific instances.
         
@@ -137,20 +139,73 @@ class Explainer:
             ValueError: If inputs are invalid or incompatible
         """
         try:
+            # Support legacy positional usage where only instance data is provided
+            if args:
+                if len(args) == 1 and instance_data is None and model is None and background_data is None and feature_name_list is None:
+                    instance_data = args[0]
+                else:
+                    # Allow positional mapping for (model, background, instance, features, output_dir)
+                    positional = list(args)
+                    if model is None and positional:
+                        model = positional.pop(0)
+                    if background_data is None and positional:
+                        background_data = positional.pop(0)
+                    if instance_data is None and positional:
+                        instance_data = positional.pop(0)
+                    if feature_name_list is None and positional:
+                        feature_name_list = positional.pop(0)
+                    if output_dir is None and positional:
+                        output_dir = positional.pop(0)
+
+            # Backwards compatibility for legacy keyword arguments
+            if 'generate_plots' in legacy_kwargs:
+                plot = plot or bool(legacy_kwargs.pop('generate_plots'))
+            if 'show_terminal' in legacy_kwargs:
+                plot_in_terminal = plot_in_terminal or bool(legacy_kwargs.pop('show_terminal'))
+            if 'log_results' in legacy_kwargs:
+                summary_report = summary_report or bool(legacy_kwargs.pop('log_results'))
+
+            if legacy_kwargs:
+                # Keep a trace without breaking execution
+                self.logger.debug(
+                    "Ignoring unsupported legacy kwargs: %s",
+                    sorted(legacy_kwargs.keys())
+                )
+
+            # Use defaults from initialization when explicit parameters are missing
+            if instance_data is None and isinstance(model, (np.ndarray, pd.DataFrame, list, tuple)) and self._default_model is not None:
+                # Heuristic: legacy call provided only instance data; shift values
+                instance_data = model
+                model = None
+
+            model_to_use = model if model is not None else self._default_model
+            background_to_use = background_data if background_data is not None else self._default_background
+            feature_names_input = feature_name_list if feature_name_list is not None else self._default_feature_names
+            output_dir_to_use = output_dir if output_dir else os.path.join('.', 'shap_output')
+
+            if model_to_use is None:
+                raise ValueError("Model cannot be None and no default model was provided during initialization")
+            if background_to_use is None:
+                raise ValueError("Background data is required for SHAP explanations")
+            if instance_data is None:
+                raise ValueError("Instance data cannot be None")
+            if feature_names_input is None:
+                raise ValueError("Feature names must be provided for explanations")
+
             # Validate inputs
-            self._validate_inputs(model, background_data, instance_data, feature_name_list, output_dir)
+            self._validate_inputs(model_to_use, background_to_use, instance_data, feature_names_input, output_dir_to_use)
             
             # Prepare data
-            background_array = self._prepare_background_data(background_data)
+            background_array = self._prepare_background_data(background_to_use)
             instance_array = self._prepare_instance_data(instance_data)
-            feature_names = self._validate_feature_names(feature_name_list, background_array)
+            feature_names = self._validate_feature_names(feature_names_input, background_array)
             
             # Create output directory
-            os.makedirs(output_dir, exist_ok=True)
-            self.logger.info(f"Created output directory: {output_dir}")
+            os.makedirs(output_dir_to_use, exist_ok=True)
+            self.logger.info(f"Created output directory: {output_dir_to_use}")
             
             # Initialize SHAP explainer with background data
-            explainer = self._initialize_shap_explainer(model, background_array)
+            explainer = self._initialize_shap_explainer(model_to_use, background_array)
             
             # Calculate SHAP values for the specific instances
             self.logger.info(f"Calculating SHAP values for {instance_array.shape[0]} instance(s)")
@@ -169,7 +224,7 @@ class Explainer:
             # Optional: Frequent Path Mining over RandomForest decision paths
             fpm_results = None
             try:
-                fpm_results = self._maybe_mine_frequent_paths(model, feature_names, frequent_path_mining)
+                fpm_results = self._maybe_mine_frequent_paths(model_to_use, feature_names, frequent_path_mining)
             except Exception as e:
                 self.logger.warning(f"Frequent path mining skipped due to error: {e}")
             
@@ -183,7 +238,7 @@ class Explainer:
                 'background_shape': background_array.shape,
                 'samples_analyzed': instance_array.shape[0],
                 'features_count': len(feature_names),
-                'model_type': type(model).__name__,
+                'model_type': type(model_to_use).__name__,
                 'timestamp': datetime.now().isoformat(),
                 'output_files': {}
             }
@@ -192,16 +247,16 @@ class Explainer:
             
             # Generate visualizations if requested
             if plot:
-                plot_files = self._generate_plots(shap_values, feature_names, instance_array, output_dir)
+                plot_files = self._generate_plots(shap_values, feature_names, instance_array, output_dir_to_use)
                 results['output_files'].update(plot_files)
             
             # Terminal visualization
             if plot_in_terminal:
-                self._display_terminal_plots(shap_values, feature_names, model, instance_array)
+                self._display_terminal_plots(shap_values, feature_names, model_to_use, instance_array)
             
             # Summary report
             if summary_report:
-                report_path = self._generate_summary_report(results, model, background_array, instance_array, feature_names, output_dir)
+                report_path = self._generate_summary_report(results, model_to_use, background_array, instance_array, feature_names, output_dir_to_use)
                 if report_path:
                     results['output_files']['summary_report'] = report_path
             

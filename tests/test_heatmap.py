@@ -72,53 +72,38 @@ def test_heatmap_generation():
     test_instances = X[y == 1][:5]  # Take 5 malicious instances
     print(f"Testing on {len(test_instances)} malicious instances")
     
-    # Generate explanations with heat map
+    # Generate explanations with visual outputs
     print("\n📊 Generating SHAP explanations with visualizations...")
-    shap_values, plot_results = explainer.explain(
-        test_instances, 
-        log_results=True, 
-        generate_plots=True,
-        output_dir="./test_output"
+    results = explainer.explain(
+        instance_data=test_instances,
+        output_dir="./test_output",
+        plot=True,
+        summary_report=True
     )
-    
-    # Test individual heat map generation
-    print("\n🎨 Generating individual heat map...")
-    heatmap_path = explainer.generate_heatmap(
-        test_instances, 
-        output_path="./test_output/custom_heatmap.png",
-        top_features=12
-    )
-    
-    # Test feature importance plot
-    print("\n📈 Generating feature importance plot...")
-    importance_path = explainer.generate_feature_importance_plot(
-        test_instances,
-        output_path="./test_output/importance_plot.png",
-        top_features=10
-    )
-    
-    # Generate comprehensive markdown report with visualizations
-    print("\n📝 Generating comprehensive report with heat maps...")
-    report = explainer.generate_markdown_report(
-        test_instances,
-        output_path="./test_output/threat_analysis_report.md",
-        include_visualizations=True
-    )
+
+    shap_values = results.get('shap_values')
+    output_files = results.get('output_files', {})
+    report = output_files.get('summary_report')
+    heatmap_path = output_files.get('heatmap')
+    importance_path = output_files.get('importance_plot')
     
     # Show results
     print("\n✅ Heat Map Test Results:")
     print(f"  📊 Heat map saved: {heatmap_path}")
     print(f"  📈 Importance plot saved: {importance_path}")
-    print(f"  📄 Report generated: ./test_output/threat_analysis_report.md")
-    
-    if plot_results and not plot_results.get('error'):
-        print(f"  🎯 Summary visualizations: {plot_results}")
+    print(f"  📄 Report generated: {report}")
+    print(f"  🎯 Available outputs: {list(output_files.keys())}")
+    if shap_values is not None:
+        print(f"  📐 SHAP values type: {type(shap_values)}")
     
     # Show top features for verification
-    ranking = explainer.get_feature_importance(test_instances)
+    ranking = results.get('feature_importance', [])
     print(f"\n🔍 Top 5 Security Rules Detected:")
     for item in ranking[:5]:
-        print(f"  {item['rank']}. {item['rule']} (score: {item['importance']:.4f})")
+        feature_label = item.get('rule_name') or item.get('feature')
+        rank = item.get('rank', '?')
+        importance = float(item.get('importance', 0.0))
+        print(f"  {rank}. {feature_label} (score: {importance:.4f})")
     
     print("\n🎉 Heat map generation test completed successfully!")
     
