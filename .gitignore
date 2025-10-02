@@ -1,0 +1,12 @@
+.DS_Store
+node_modules/
+venv/
+__pycache__/
+running_log/
+model/
+.vscode/
+Training_data/**/*.csv
+Training_data/**/*.parquet
+AGENTS.md
+package.json
+package-lock.json
