@@ -11,14 +11,13 @@ import os
 import logging
 from datetime import datetime
 
-# Add paths for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'model_training'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'system'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'pipeline'))
+# Add project root to the import path so package imports resolve consistently.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from model_evaluation import evaluate_model
-from qradar_rule_manager import QRadarRuleManager
+from model_training.model_evaluation import evaluate_model
+from shared_utils.qradar_rule_manager import QRadarRuleManager
 
 def test_model_evaluation():
     """Test the model evaluation with the saved model"""
