@@ -100,7 +100,8 @@ def test_complete_pipeline():
             
         print(f"   Loaded {len(df)} documents")
         print(f"   Columns: {list(df.columns)}")
-        print(f"   Unique rule IDs: {sorted(df['rule_id'].unique())}")
+        unique_rule_ids = df["rule_id"].unique().tolist()
+        print(f"   Unique rule IDs: {sorted(unique_rule_ids)}")
         
         # Clean and prepare data
         df = df.fillna({'hostname': 'unknown'})
