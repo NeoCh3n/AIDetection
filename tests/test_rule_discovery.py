@@ -6,6 +6,7 @@ Validates rule detection from Qradar_rule folder and integration with Training_d
 
 import os
 import sys
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import unittest
@@ -14,7 +15,7 @@ from unittest.mock import patch, MagicMock
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared_utils.rule_manager import RuleManager
+from shared_utils.qradar_rule_manager import QRadarRuleManager
 from pipeline.feature_generator import FeatureGenerator
 
 class TestRuleDiscovery(unittest.TestCase):
@@ -38,8 +39,12 @@ class TestRuleDiscovery(unittest.TestCase):
         else:
             cls.training_data_folder = "Training_data"
             
-        cls.rule_manager = RuleManager(cls.rules_folder)
-        cls.feature_generator = FeatureGenerator(cls.rules_folder)
+        cls.rule_manager = QRadarRuleManager(mode='file', environment='prod')
+        rules_path = Path(os.path.abspath(cls.rules_folder))
+        if rules_path.exists():
+            cls.rule_manager.rule_dir = rules_path
+        cls.feature_generator = FeatureGenerator(environment='prod')
+        cls.feature_generator.rule_manager.rule_dir = cls.rule_manager.rule_dir
     
     def test_rule_files_exist(self):
         """Test that rule files exist and are accessible."""
@@ -51,7 +56,8 @@ class TestRuleDiscovery(unittest.TestCase):
     
     def test_rule_discovery(self):
         """Test rule discovery from CSV files."""
-        rule_list = self.rule_manager.discover_rules(use_cache=False)
+        self.rule_manager.switch_mode('file')
+        rule_list = self.rule_manager.discover_rules()
         
         self.assertIsInstance(rule_list, list, "Should return a list of rule IDs")
         self.assertGreater(len(rule_list), 0, "Should discover at least one rule")
@@ -80,7 +86,7 @@ class TestRuleDiscovery(unittest.TestCase):
     def test_vector_dimension(self):
         """Test that vector dimension matches actual rule count."""
         rule_list = self.rule_manager.get_rule_list()
-        vector_dimension = self.rule_manager.get_vector_dimension()
+        vector_dimension = len(self.rule_manager.get_production_rule_to_index_map())
         
         self.assertEqual(len(rule_list), vector_dimension,
                         "Vector dimension should match rule count")
@@ -112,7 +118,9 @@ class TestRuleDiscovery(unittest.TestCase):
             }])
             
             X, y = self.feature_generator.generate_feature_vectors(df_sample, mode='train')
-            
+            self.assertIsNotNone(y, "Expected label array in train mode")
+            assert y is not None
+
             self.assertEqual(X.shape[0], 1, "Should create 1 sample")
             self.assertEqual(X.shape[1], len(rule_list), 
                            f"Feature dimension should be {len(rule_list)}")
@@ -150,7 +158,7 @@ class TestRuleDiscovery(unittest.TestCase):
                             
                             if all(col in df.columns for col in expected_columns):
                                 # Test rule ID extraction
-                                rule_ids = df['Custom Rule'].dropna().astype(int).unique()
+                                rule_ids = df['Custom Rule'].dropna().astype(int).unique().tolist()
                                 
                                 # Verify rules are in discovered set
                                 discovered_rules = set(self.rule_manager.get_rule_list())
@@ -189,16 +197,13 @@ class TestRuleDiscovery(unittest.TestCase):
     
     def test_cache_functionality(self):
         """Test rule caching functionality."""
-        # Clear cache
-        self.rule_manager.clear_cache()
+        manager = QRadarRuleManager(mode='file', environment='prod')
+        manager.rule_dir = self.rule_manager.rule_dir
         
-        # Discover rules without cache
-        rules1 = self.rule_manager.discover_rules(use_cache=False)
+        fresh_rules = manager.get_rule_list(refresh=True)
+        cached_rules = manager.get_rule_list()
         
-        # Discover with cache (should use cached version)
-        rules2 = self.rule_manager.discover_rules(use_cache=True)
-        
-        self.assertEqual(rules1, rules2, "Cached rules should match original discovery")
+        self.assertEqual(fresh_rules, cached_rules, "Cached rules should match refreshed discovery")
     
     def test_empty_data_handling(self):
         """Test handling of empty data."""
