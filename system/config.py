@@ -81,7 +81,7 @@ def get_config() -> Dict[str, Any]:
             'environment': os.getenv('ENVIRONMENT', 'prod')
         },
         'feature_engineering': {
-            'expected_rules': 2898,
+            'expected_rules': 1128,
             'window_size_minutes': 30,
             'log_transform': True,
             'normalize_counts': False,

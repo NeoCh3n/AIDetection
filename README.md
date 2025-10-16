@@ -47,7 +47,7 @@ data_loader.py → feature_aggregator.py → feature_generator.py →
   - Provides both `aggregated_rules` and `aggregated_rules_dict` keys for downstream consumers.
 
 - `pipeline/feature_generator.py` – dense feature vectors:
-  - Uses `shared_utils/qradar_rule_manager.py` to obtain the ordered 2898-rule universe.
+  - Uses `shared_utils/qradar_rule_manager.py` to obtain the ordered rule universe defined by the latest mapping.
   - Generates consistent feature matrices (X) and labels (y, only in train mode).
 
 - `model_training/model_training.py` – training + evaluation helpers:

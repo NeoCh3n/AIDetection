@@ -56,10 +56,10 @@
     }
   },
   "rule_mapping": {
-    "total_rules": 2898,
+    "total_rules": 1128,
     "rule_ids": [],
     "source": "Production_baseline",
-    "description": "Fixed 2898 production rules as baseline for consistent feature vectors across environments",
+    "description": "Fixed 1128 production rules as baseline for consistent feature vectors across environments",
     "fixed_count": true,
     "uat_mapping": {
       "enabled": true,

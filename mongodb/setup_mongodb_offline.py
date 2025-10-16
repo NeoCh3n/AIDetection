@@ -10,20 +10,20 @@ ARCHITECTURE ALIGNMENT: Unified Processing Pipeline
 --------------------------------------------------
 This setup follows the unified data processing pipeline:
 - Detection-only mode with 30-minute sliding windows
-- 2898 production rules as fixed baseline
+- 1128 production rules as fixed baseline
 - Shared utilities: mongodb_connection.py, time_utils.py, rule_manager.py
 - 15-minute query frequency with 30-minute aggregation windows
 
 PHASE 1: RULE MANAGEMENT & VALIDATION
 ------------------------------------
 1. Rule Discovery via rule_manager.py:
-   - Fixed 2898 production rules (confirmed baseline)
+   - Fixed 1128 production rules (confirmed baseline)
    - Uses rule_manager.py for centralized rule ID management
    - Maps to Qradar_rule/ directory structure
    - Validates rule count consistency across environments
 
 2. Configuration Validation:
-   - mongodb_config.json contains 2898 total_rules
+   - mongodb_config.json contains 1128 total_rules
    - rule_mapping.json aligns with production baseline
    - UAT-to-Production mapping enabled via shared_utils/
 
@@ -53,7 +53,7 @@ EXECUTION ORDER (Unified Pipeline):
 ----------------------------------
 cd /Users/chaoyanchen/Desktop/AIDetection4Ransomware
 
-# Step 1: Validate rule setup (2898 rules)
+# Step 1: Validate rule setup (1128 rules)
 python shared_utils/rule_manager.py validate --count
 
 # Step 2: Run complete MongoDB setup
@@ -82,7 +82,7 @@ EXPECTED LOCATIONS:
 - MongoDB collections: Created via mongodb_connection.py
 - Time utilities: shared_utils/time_utils.py
 
-This setup ensures zero training-serving skew by using identical rule baseline (2898 rules) across all environments.
+This setup ensures zero training-serving skew by using identical rule baseline (1128 rules) across all environments.
 """
 
 import subprocess
@@ -170,10 +170,10 @@ class MongoDBOfflineSetup:
                 }
             },
             "rule_mapping": {
-                "total_rules": 2898,
+                "total_rules": 1128,
                 "comment": "Fixed production rule count - using production rule coordinates as baseline",
                 "source": "Production_baseline",
-                "description": "Using 2898 production rules as baseline for consistent feature vector dimensions across environments",
+                "description": "Using 1128 production rules as baseline for consistent feature vector dimensions across environments",
                 "uat_mapping": {
                     "enabled": True,
                     "mapping_file": "shared_utils/uat_to_prod_mapping.csv",
@@ -686,10 +686,10 @@ class MongoDBOfflineSetup:
                 }
             },
             "rule_mapping": {
-                "total_rules": 2898,
+                "total_rules": 1128,
                 "rule_ids": rule_ids,
                 "source": "Production_baseline",
-                "description": "Fixed 2898 production rules as baseline for consistent feature vectors across environments",
+                "description": "Fixed 1128 production rules as baseline for consistent feature vectors across environments",
                 "fixed_count": True,
                 "uat_mapping": {
                     "enabled": True,

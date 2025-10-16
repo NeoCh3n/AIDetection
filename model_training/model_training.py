@@ -164,7 +164,7 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
     This function orchestrates the complete training pipeline:
     1. Loads training data via data_loader
     2. Aggregates features into 30-minute windows
-    3. Generates 2898-dimensional feature vectors
+    3. Generates 1128-dimensional feature vectors
     4. Trains Random Forest with CLAUDE.md specifications
     5. Saves model and generates evaluation metrics
     
@@ -204,8 +204,8 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             raise ValueError("No aggregated windows generated")
         logger.info(f"Created {len(df_agg)} aggregated windows")
         
-        # Step 3: Generate 2898-dimensional feature vectors
-        logger.info("Generating 2898-dimensional feature vectors...")
+        # Step 3: Generate 1128-dimensional feature vectors
+        logger.info("Generating 1128-dimensional feature vectors...")
         feature_gen = FeatureGenerator()
         feature_gen.initialize_rules()
         X, y = feature_gen.generate_feature_vectors(df_agg, mode='train')

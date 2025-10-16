@@ -42,7 +42,7 @@
   },
   
   "feature_engineering": {
-    "expected_rules": 2898,
+    "expected_rules": 1128,
     "window_size_minutes": 30,
     "log_transform": true,
     "normalize_counts": false
