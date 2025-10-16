@@ -434,10 +434,6 @@ class UnifiedPipeline:
                 from system.shap_explainer import Explainer as ShapExplainer
                 shap_explainer = ShapExplainer()
                 
-                # Ensure output directory exists for SHAP explanations
-                shap_output_base = "./output/shap_explanations"
-                os.makedirs(shap_output_base, exist_ok=True)
-                
                 self.logger.info("SHAP explainer initialized and ready for alert explanations")
             except Exception as e:
                 self.logger.warning(f"SHAP explainer unavailable: {e}")
@@ -550,10 +546,10 @@ class UnifiedPipeline:
                                         background_data=background_data,  # Background data for SHAP baseline
                                         instance_data=instance_data,  # Single alert instance to explain
                                         feature_name_list=feature_names,
-                                        output_dir=os.path.join("./output", "shap_explanations", f"alert_{result['window_id']}"),
-                                        plot=False,  # Generate visualizations for this alert
-                                        plot_in_terminal=True,  # Don't clutter terminal during detection
-                                        summary_report=False,  # Generate detailed report for this alert
+                                        persist_outputs=False,
+                                        plot=False,
+                                        plot_in_terminal=True,
+                                        summary_report=False,
                                         frequent_path_mining=fpm_opts
                                     )
                                     

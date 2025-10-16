@@ -114,6 +114,7 @@ class Explainer:
                 instance_data: Optional[Union[np.ndarray, pd.DataFrame]] = None,
                 feature_name_list: Optional[List[str]] = None,
                 output_dir: Optional[str] = None,
+                persist_outputs: bool = True,
                 plot: bool = False,
                 plot_in_terminal: bool = False,
                 summary_report: bool = False,
@@ -181,7 +182,13 @@ class Explainer:
             model_to_use = model if model is not None else self._default_model
             background_to_use = background_data if background_data is not None else self._default_background
             feature_names_input = feature_name_list if feature_name_list is not None else self._default_feature_names
-            output_dir_to_use = output_dir if output_dir else os.path.join('.', 'shap_output')
+            if persist_outputs:
+                output_dir_to_use = output_dir if output_dir else os.path.join('.', 'shap_output')
+            else:
+                output_dir_to_use = output_dir if output_dir else os.path.join('.', 'shap_output')
+                # When not persisting, disable file-producing options defensively
+                plot = False
+                summary_report = False
 
             if model_to_use is None:
                 raise ValueError("Model cannot be None and no default model was provided during initialization")
@@ -193,7 +200,7 @@ class Explainer:
                 raise ValueError("Feature names must be provided for explanations")
 
             # Validate inputs
-            self._validate_inputs(model_to_use, background_to_use, instance_data, feature_names_input, output_dir_to_use)
+            self._validate_inputs(model_to_use, background_to_use, instance_data, feature_names_input, output_dir_to_use, persist_outputs)
             
             # Prepare data
             background_array = self._prepare_background_data(background_to_use)
@@ -201,8 +208,11 @@ class Explainer:
             feature_names = self._validate_feature_names(feature_names_input, background_array)
             
             # Create output directory
-            os.makedirs(output_dir_to_use, exist_ok=True)
-            self.logger.info(f"Created output directory: {output_dir_to_use}")
+            if persist_outputs:
+                os.makedirs(output_dir_to_use, exist_ok=True)
+                self.logger.info(f"Created output directory: {output_dir_to_use}")
+            else:
+                self.logger.info("persist_outputs=False; skipping SHAP output directory creation")
             
             # Initialize SHAP explainer with background data
             explainer = self._initialize_shap_explainer(model_to_use, background_array)
@@ -246,7 +256,7 @@ class Explainer:
                 results['frequent_paths'] = fpm_results
             
             # Generate visualizations if requested
-            if plot:
+            if plot and persist_outputs:
                 plot_files = self._generate_plots(shap_values, feature_names, instance_array, output_dir_to_use)
                 results['output_files'].update(plot_files)
             
@@ -255,7 +265,7 @@ class Explainer:
                 self._display_terminal_plots(shap_values, feature_names, model_to_use, instance_array)
             
             # Summary report
-            if summary_report:
+            if summary_report and persist_outputs:
                 report_path = self._generate_summary_report(results, model_to_use, background_array, instance_array, feature_names, output_dir_to_use)
                 if report_path:
                     results['output_files']['summary_report'] = report_path
@@ -403,7 +413,7 @@ class Explainer:
         except Exception:
             return None
     
-    def _validate_inputs(self, model, background_data, instance_data, feature_name_list, output_dir):
+    def _validate_inputs(self, model, background_data, instance_data, feature_name_list, output_dir, persist_outputs: bool):
         """Validate all input parameters."""
         # Validate model
         if model is None:
@@ -425,9 +435,10 @@ class Explainer:
         if not feature_name_list or not isinstance(feature_name_list, (list, tuple)):
             raise ValueError("feature_name_list must be a non-empty list or tuple")
         
-        # Validate output directory
-        if not output_dir or not isinstance(output_dir, str):
-            raise ValueError("output_dir must be a non-empty string")
+        # Validate output directory when persistence is enabled
+        if persist_outputs:
+            if not output_dir or not isinstance(output_dir, str):
+                raise ValueError("output_dir must be a non-empty string when persist_outputs is True")
         
         self.logger.info("Input validation completed successfully")
     
