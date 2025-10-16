@@ -768,21 +768,75 @@ class Explainer:
             feature_importance = self._calculate_feature_importance(shap_values, feature_names)
             top_features = feature_importance[:10]  # Top 10
             if top_features:
-                print(f"\nTop {len(top_features)} Most Important Features:")
-                print("-" * 70)
-                print(f"{'Rank':<4} {'Importance':<12} {'Feature':<50}")
-                print("-" * 70)
-                
+                # Restrict terminal output to BOC-related rules only
+                boc_features = []
                 for item in top_features:
-                    feature = item['feature']
-                    if len(feature) > 45:
-                        feature = feature[:42] + "..."
-                    
-                    print(f"{item['rank']:<4} {item['importance']:<12.4f} {feature:<50}")
-                
-                print("-" * 70)
-                print(f"Most critical feature: {top_features[0]['feature']}")
-                print(f"Importance score: {top_features[0]['importance']:.4f}")
+                    rule_id = item.get('rule_id')
+                    if rule_id is None:
+                        raw_feat = item.get('feature', '')
+                        if isinstance(raw_feat, str) and raw_feat.startswith('rule_'):
+                            try:
+                                rule_id = int(raw_feat.split('_', 1)[1])
+                            except Exception:
+                                rule_id = None
+                    if rule_id is not None and self._is_boc_rule(rule_id):
+                        boc_features.append(item)
+
+                if boc_features:
+                    boc_features = boc_features[:5]
+                    print(f"\nTop {len(boc_features)} BOC Features:")
+                    print("-" * 70)
+                    print(f"{'Rank':<4} {'Importance':<12} {'Feature (Rule Name)':<50}")
+                    print("-" * 70)
+
+                    # Build reusable rule name map once for terminal display
+                    rule_name_map = {}
+                    try:
+                        rule_name_map = self._get_rule_name_map()
+                    except Exception:
+                        rule_name_map = {}
+
+                    for item in boc_features:
+                        raw_feature = item.get('feature', '')
+                        display_feature = raw_feature
+
+                        # Prefer explicit rule_name in the item if already present
+                        rule_name = item.get('rule_name')
+
+                        # Otherwise, look up by rule_ prefix
+                        if not rule_name and isinstance(raw_feature, str) and raw_feature.startswith('rule_'):
+                            try:
+                                rid = int(raw_feature.split('_', 1)[1])
+                                rule_name = rule_name_map.get(rid)
+                            except Exception:
+                                rule_name = None
+
+                        if rule_name:
+                            display_feature = f"{raw_feature} | {rule_name}"
+
+                        if isinstance(display_feature, str) and len(display_feature) > 45:
+                            display_feature = display_feature[:42] + "..."
+
+                        print(f"{item.get('rank', ''):<4} {item.get('importance', 0.0):<12.4f} {display_feature:<50}")
+
+                    print("-" * 70)
+
+                    most_critical_feature = boc_features[0].get('feature', '')
+                    most_critical_name = boc_features[0].get('rule_name')
+                    if not most_critical_name and isinstance(most_critical_feature, str) and most_critical_feature.startswith('rule_'):
+                        try:
+                            rid = int(most_critical_feature.split('_', 1)[1])
+                            most_critical_name = rule_name_map.get(rid)
+                        except Exception:
+                            most_critical_name = None
+
+                    if most_critical_name:
+                        print(f"Most critical feature: {most_critical_feature} ({most_critical_name})")
+                    else:
+                        print(f"Most critical feature: {most_critical_feature}")
+                    print(f"Importance score: {boc_features[0].get('importance', 0.0):.4f}")
+                else:
+                    print("\nTop SHAP features contain no BOC-related rules.")
             
             print("=" * 70)
             
