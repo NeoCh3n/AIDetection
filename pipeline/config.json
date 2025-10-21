@@ -13,10 +13,18 @@
     },
     "grid_search": {
       "enabled": true,
-      "scoring": "roc_auc",
+      "strategy": "randomized",
+      "scoring": {
+        "f1": "f1",
+        "roc_auc": "roc_auc"
+      },
+      "refit": "f1",
       "cv": 3,
       "verbose": 1,
-       "param_grid": {
+      "use_composite": false,
+      "return_train_score": true,
+      "n_iter": 80,
+      "param_grid": {
         "n_estimators": [100, 300, 500, 700, 900],
         "max_depth": [8, 15, 20],
         "max_features": ["sqrt", "log2"],

@@ -60,8 +60,20 @@ from system import logging_utils
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, average_precision_score
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV, StratifiedKFold
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    roc_auc_score,
+    average_precision_score,
+    f1_score,
+    precision_recall_curve,
+    auc,
+)
+import matplotlib
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # Import pipeline modules
 from pipeline.data_loader import load_data
@@ -164,7 +176,7 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
     This function orchestrates the complete training pipeline:
     1. Loads training data via data_loader
     2. Aggregates features into 30-minute windows
-    3. Generates 1128-dimensional feature vectors
+    3. Generates dense feature vectors
     4. Trains Random Forest with CLAUDE.md specifications
     5. Saves model and generates evaluation metrics
     
@@ -204,8 +216,8 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             raise ValueError("No aggregated windows generated")
         logger.info(f"Created {len(df_agg)} aggregated windows")
         
-        # Step 3: Generate 1128-dimensional feature vectors
-        logger.info("Generating 1128-dimensional feature vectors...")
+        # Step 3: Generate dense feature vectors for each window
+        logger.info("Generating dense feature vectors...")
         feature_gen = FeatureGenerator()
         feature_gen.initialize_rules()
         X, y = feature_gen.generate_feature_vectors(df_agg, mode='train')
@@ -230,7 +242,10 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
         use_grid = bool(gs_cfg.get('enabled', False))
 
         if use_grid:
-            logger.info("GridSearchCV enabled — tuning RandomForest hyperparameters...")
+            search_strategy = str(gs_cfg.get('strategy', 'grid')).lower()
+            use_randomized = bool(gs_cfg.get('use_randomized', False)) or search_strategy in {'random', 'randomized', 'rand'}
+            search_label = "RandomizedSearchCV" if use_randomized else "GridSearchCV"
+            logger.info(f"{search_label} enabled — tuning RandomForest hyperparameters...")
 
             # Reasonable defaults compatible with sklearn 0.24.2
             default_param_grid = {
@@ -243,22 +258,31 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 #'min_impurity_decrease': [0.0, 0.0001, 0.001, 0.01],
                 #'ccp_alpha': [0.0, 0.0001, 0.001, 0.01],
                 #'criterion': ['gini', 'entropy'],
-                }
+            }
 
-            param_grid = gs_cfg.get('param_grid', default_param_grid)
-            # Enable composite multi-metric scoring (ROC AUC + PR AUC) by default
-            # Users can override via grid_search.use_composite=false
-            use_composite = bool(gs_cfg.get('use_composite', True))
-            # Composite weights can be customized in config; default to equal weights
+            param_key = 'param_distributions' if use_randomized else 'param_grid'
+            param_space = gs_cfg.get(param_key)
+            if not param_space:
+                alt_key = 'param_grid' if use_randomized else 'param_distributions'
+                param_space = gs_cfg.get(alt_key)
+            if not param_space:
+                param_space = default_param_grid
+
+            # Scoring / refit configuration
+            use_composite = bool(gs_cfg.get('use_composite', False))
+            scoring_cfg = gs_cfg.get('scoring', 'roc_auc')
             composite_weights = gs_cfg.get('composite_weights', {'roc_auc': 0.5, 'average_precision': 0.5})
             n_splits = int(gs_cfg.get('cv', 3))
             verbose = int(gs_cfg.get('verbose', 1))
+            return_train_score = bool(gs_cfg.get('return_train_score', False))
+            random_state = int(gs_cfg.get('random_state', 42))
 
             if use_composite:
                 scoring = {
                     'roc_auc': 'roc_auc',
                     'average_precision': 'average_precision'
                 }
+
                 def _refit_composite(cv_results):
                     try:
                         roc = np.array(cv_results['mean_test_roc_auc'], dtype=float)
@@ -266,33 +290,61 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                         w_roc = float(composite_weights.get('roc_auc', 0.5))
                         w_ap = float(composite_weights.get('average_precision', 0.5))
                         comp = w_roc * roc + w_ap * ap
-                        # Return index of best candidate
                         return int(np.nanargmax(comp))
                     except Exception:
-                        # Fallback to best ROC AUC if composite fails
                         return int(np.nanargmax(cv_results.get('mean_test_roc_auc', [0.0])))
+
                 refit_arg = _refit_composite
             else:
-                # Single metric path (backward compatible)
-                scoring = gs_cfg.get('scoring', 'roc_auc')
-                refit_arg = True
+                scoring = scoring_cfg
+                if isinstance(scoring, dict):
+                    default_refit = None
+                    if isinstance(gs_cfg.get('refit'), str):
+                        default_refit = gs_cfg.get('refit')
+                    elif 'f1' in scoring:
+                        default_refit = 'f1'
+                    else:
+                        try:
+                            default_refit = next(iter(scoring.keys()))
+                        except StopIteration:
+                            default_refit = None
+                    refit_arg = gs_cfg.get('refit', default_refit)
+                    if not isinstance(refit_arg, str):
+                        raise ValueError("For multi-metric scoring you must provide a string refit metric (e.g., 'f1').")
+                else:
+                    default_refit = scoring if isinstance(scoring, str) else True
+                    refit_arg = gs_cfg.get('refit', default_refit)
 
             base_rf = RandomForestClassifier(
-                random_state=42,
+                random_state=random_state,
                 n_jobs=-1,
             )
-            cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+            cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
-            grid = GridSearchCV(
-                estimator=base_rf,
-                param_grid=param_grid,
-                scoring=scoring,
-                cv=cv,
-                n_jobs=-1,
-                refit=refit_arg,
-                verbose=verbose,
-            )
-            
+            search_kwargs = {
+                'estimator': base_rf,
+                'scoring': scoring,
+                'cv': cv,
+                'n_jobs': -1,
+                'refit': refit_arg,
+                'verbose': verbose,
+                'return_train_score': return_train_score,
+            }
+
+            if use_randomized:
+                n_iter = int(gs_cfg.get('n_iter', 50))
+                search = RandomizedSearchCV(
+                    param_distributions=param_space,
+                    n_iter=n_iter,
+                    random_state=random_state,
+                    **search_kwargs,
+                )
+            else:
+                search = GridSearchCV(
+                    param_grid=param_space,
+                    **search_kwargs,
+                )
+
             # Compute expected total fits for progress bar
             def _count_candidates(pg) -> int:
                 if isinstance(pg, dict):
@@ -304,40 +356,67 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 return 0
 
             try:
-                n_candidates = _count_candidates(param_grid)
+                if use_randomized:
+                    n_candidates = int(getattr(search, 'n_iter', 0))
+                else:
+                    n_candidates = _count_candidates(param_space)
                 n_splits_effective = cv.get_n_splits(X_train, y_train)
                 total_fits = int(n_candidates * n_splits_effective)
             except Exception:
                 total_fits = 0
 
-            # Wrap fit in a joblib progress bar (no external deps)
-            with joblib_progress_bar(total=total_fits, desc="GridSearchCV"):
-                grid.fit(X_train, y_train)
-            rf_model = grid.best_estimator_
+            with joblib_progress_bar(total=total_fits, desc=search_label):
+                search.fit(X_train, y_train)
+            rf_model = search.best_estimator_
             try:
-                logger.info(f"GridSearch best params: {grid.best_params_}")
+                logger.info(f"{search_label} best params: {search.best_params_}")
             except Exception:
                 pass
-            # Log best scores for both metrics (if available) and composite
+
             try:
-                best_idx = int(getattr(grid, 'best_index_', -1))
+                best_idx = int(getattr(search, 'best_index_', -1))
             except Exception:
                 best_idx = -1
             try:
-                cvres = grid.cv_results_
-                if best_idx >= 0 and isinstance(cvres, dict):
-                    roc_list = cvres.get('mean_test_roc_auc')
-                    ap_list = cvres.get('mean_test_average_precision')
-                    if roc_list is not None and ap_list is not None:
-                        w_roc = float(composite_weights.get('roc_auc', 0.5))
-                        w_ap = float(composite_weights.get('average_precision', 0.5))
-                        best_roc = float(roc_list[best_idx])
-                        best_ap = float(ap_list[best_idx])
-                        best_comp = w_roc * best_roc + w_ap * best_ap
-                        logger.info(f"GridSearch best ROC AUC: {best_roc:.4f}, best PR AUC (AP): {best_ap:.4f}, composite: {best_comp:.4f}")
-                # If single metric, keep legacy logging
-                elif hasattr(grid, 'best_score_'):
-                    logger.info(f"GridSearch best score: {getattr(grid, 'best_score_', 0.0):.4f}")
+                cvres = search.cv_results_
+                if use_composite:
+                    if best_idx >= 0 and isinstance(cvres, dict):
+                        roc_list = cvres.get('mean_test_roc_auc')
+                        ap_list = cvres.get('mean_test_average_precision')
+                        if roc_list is not None and ap_list is not None:
+                            w_roc = float(composite_weights.get('roc_auc', 0.5))
+                            w_ap = float(composite_weights.get('average_precision', 0.5))
+                            best_roc = float(roc_list[best_idx])
+                            best_ap = float(ap_list[best_idx])
+                            best_comp = w_roc * best_roc + w_ap * best_ap
+                            logger.info(f"{search_label} best ROC AUC: {best_roc:.4f}, best PR AUC (AP): {best_ap:.4f}, composite: {best_comp:.4f}")
+                else:
+                    logged_metric = False
+                    metric_label = "score"
+                    metric_key = None
+                    if isinstance(scoring, str):
+                        metric_label = scoring
+                        metric_key = f"mean_test_{scoring}"
+                    elif isinstance(scoring, dict):
+                        if isinstance(refit_arg, str):
+                            metric_label = refit_arg
+                            metric_key = f"mean_test_{refit_arg}"
+                        else:
+                            metric_label = 'score'
+                    if metric_key is not None and best_idx >= 0:
+                        best_metric = _safe_extract_metric(cvres, metric_key, best_idx)
+                        if best_metric is not None:
+                            logger.info(f"{search_label} best {metric_label}: {best_metric:.4f}")
+                            logged_metric = True
+                    if not logged_metric and hasattr(search, 'best_score_'):
+                        try:
+                            best_metric = float(getattr(search, 'best_score_', 0.0))
+                            logger.info(f"{search_label} best {metric_label}: {best_metric:.4f}")
+                            logged_metric = True
+                        except Exception:
+                            pass
+                    if not logged_metric:
+                        logger.info(f"{search_label} completed but best score could not be determined from results.")
             except Exception:
                 pass
 
@@ -345,6 +424,12 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             test_roc_auc = None
             test_ap = None
             test_comp = None
+            test_f1 = None
+            try:
+                y_test_pred = rf_model.predict(X_test)
+                test_f1 = float(f1_score(y_test, y_test_pred))
+            except Exception as e:
+                logger.warning(f"Failed to compute held-out F1 score: {e}")
             try:
                 y_test_proba = rf_model.predict_proba(X_test)[:, 1]
                 test_roc_auc = float(roc_auc_score(y_test, y_test_proba))
@@ -353,20 +438,28 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                     w_roc = float(composite_weights.get('roc_auc', 0.5))
                     w_ap = float(composite_weights.get('average_precision', 0.5))
                     test_comp = w_roc * test_roc_auc + w_ap * test_ap
-                logger.info(
-                    f"Held-out test scores — ROC AUC: {test_roc_auc:.4f}, PR AUC (AP): {test_ap:.4f}"
-                    + (f", composite: {test_comp:.4f}" if test_comp is not None else "")
-                )
             except Exception as e:
-                logger.warning(f"Failed to compute held-out test scores: {e}")
+                logger.warning(f"Failed to compute held-out probability-based scores: {e}")
 
-            # Persist full grid search results for auditability
+            score_components = []
+            if test_roc_auc is not None:
+                score_components.append(f"ROC AUC: {test_roc_auc:.4f}")
+            if test_ap is not None:
+                score_components.append(f"PR AUC (AP): {test_ap:.4f}")
+            if test_comp is not None:
+                score_components.append(f"composite: {test_comp:.4f}")
+            if test_f1 is not None:
+                score_components.append(f"F1: {test_f1:.4f}")
+            if score_components:
+                logger.info("Held-out test scores — " + ", ".join(score_components))
+
+            # Persist full search results for auditability
             try:
                 model_dir = os.path.dirname(model_save_path) or "."
                 base_name = os.path.splitext(os.path.basename(model_save_path))[0]
 
-                # Save full cv_results_ as CSV sorted by rank_test_score
-                results_df = pd.DataFrame(grid.cv_results_)
+                # Save full cv_results_ as CSV sorted by rank_test_score/composite
+                results_df = pd.DataFrame(search.cv_results_)
                 # If composite multi-metric, compute composite_score column and sort by it
                 if use_composite and 'mean_test_roc_auc' in results_df.columns and 'mean_test_average_precision' in results_df.columns:
                     w_roc = float(composite_weights.get('roc_auc', 0.5))
@@ -382,6 +475,8 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
 
                 # Insert held-out test scores as the left-most columns for quick visibility
                 try:
+                    if test_f1 is not None:
+                        results_df.insert(0, 'best_test_f1', test_f1)
                     if test_ap is not None:
                         results_df.insert(0, 'best_test_average_precision', test_ap)
                     if test_roc_auc is not None:
@@ -392,47 +487,76 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                     pass
                 csv_path = os.path.join(model_dir, f"{base_name}_gridsearch_results.csv")
                 results_df.to_csv(csv_path, index=False)
-                logger.info(f"GridSearchCV results saved to: {csv_path}")
+                logger.info(f"{search_label} results saved to: {csv_path}")
 
                 # Save concise summary JSON (best params and top-10 rows)
                 summary = {
                     'scoring': scoring,
                     'cv': n_splits,
                     'n_candidates': int(len(results_df)) if hasattr(results_df, '__len__') else None,
-                    'best_params': getattr(grid, 'best_params_', {}),
+                    'best_params': getattr(search, 'best_params_', {}),
                     'top10': results_df.head(10).to_dict(orient='records') if hasattr(results_df, 'head') else []
                 }
                 # Add best scores including composite when available
                 try:
-                    best_idx = int(getattr(grid, 'best_index_', -1))
-                    cvres = grid.cv_results_
+                    best_idx = int(getattr(search, 'best_index_', -1))
+                    cvres = search.cv_results_
                     if best_idx >= 0 and isinstance(cvres, dict):
-                        best_roc = _safe_extract_metric(cvres, 'mean_test_roc_auc', best_idx)
-                        best_ap = _safe_extract_metric(cvres, 'mean_test_average_precision', best_idx)
-                        if best_roc is not None or best_ap is not None:
-                            w_roc = float(composite_weights.get('roc_auc', 0.5))
-                            w_ap = float(composite_weights.get('average_precision', 0.5))
-                            comp = (w_roc * best_roc + w_ap * best_ap) if (best_roc is not None and best_ap is not None) else None
-                            summary['best_scores'] = {
-                                'roc_auc': best_roc,
-                                'average_precision': best_ap,
-                                'composite': comp,
-                                'composite_weights': {'roc_auc': w_roc, 'average_precision': w_ap}
-                            }
-                            # Backward-compat: expose composite as best_score when using composite
-                            if comp is not None:
-                                summary['best_score'] = comp
-                    if not use_composite and hasattr(grid, 'best_score_'):
-                        summary['best_score'] = float(getattr(grid, 'best_score_', 0.0))
+                        if use_composite:
+                            best_roc = _safe_extract_metric(cvres, 'mean_test_roc_auc', best_idx)
+                            best_ap = _safe_extract_metric(cvres, 'mean_test_average_precision', best_idx)
+                            if best_roc is not None or best_ap is not None:
+                                w_roc = float(composite_weights.get('roc_auc', 0.5))
+                                w_ap = float(composite_weights.get('average_precision', 0.5))
+                                comp = (w_roc * best_roc + w_ap * best_ap) if (best_roc is not None and best_ap is not None) else None
+                                summary['best_scores'] = {
+                                    'roc_auc': best_roc,
+                                    'average_precision': best_ap,
+                                    'composite': comp,
+                                    'composite_weights': {'roc_auc': w_roc, 'average_precision': w_ap}
+                                }
+                                # Backward-compat: expose composite as best_score when using composite
+                                if comp is not None:
+                                    summary['best_score'] = comp
+                        else:
+                            metric_label = "score"
+                            best_metric = None
+                            if isinstance(scoring, str):
+                                metric_label = scoring
+                                metric_key = f"mean_test_{scoring}"
+                                best_metric = _safe_extract_metric(cvres, metric_key, best_idx)
+                            elif isinstance(scoring, dict):
+                                if isinstance(refit_arg, str):
+                                    metric_label = refit_arg
+                                    metric_key = f"mean_test_{refit_arg}"
+                                    best_metric = _safe_extract_metric(cvres, metric_key, best_idx)
+                            if best_metric is None and hasattr(search, 'best_score_'):
+                                try:
+                                    best_metric = float(getattr(search, 'best_score_', 0.0))
+                                except Exception:
+                                    best_metric = None
+                            if best_metric is not None:
+                                summary['best_scores'] = {metric_label: best_metric}
+                                summary['best_score'] = best_metric
+                    if test_f1 is not None or test_roc_auc is not None or test_ap is not None or test_comp is not None:
+                        summary['test_scores'] = {}
+                        if test_f1 is not None:
+                            summary['test_scores']['f1'] = test_f1
+                        if test_roc_auc is not None:
+                            summary['test_scores']['roc_auc'] = test_roc_auc
+                        if test_ap is not None:
+                            summary['test_scores']['average_precision'] = test_ap
+                        if test_comp is not None:
+                            summary['test_scores']['composite'] = test_comp
                 except Exception:
                     pass
                 summary_path = os.path.join(model_dir, f"{base_name}_gridsearch_summary.json")
                 with open(summary_path, 'w') as f:
                     json.dump(summary, f, indent=2)
-                logger.info(f"GridSearchCV summary saved to: {summary_path}")
+                logger.info(f"{search_label} summary saved to: {summary_path}")
             except Exception as e:
                 logger.warning(f"Failed to persist grid search results: {e}")
-            logger.info("GridSearchCV training completed successfully")
+            logger.info(f"{search_label} training completed successfully")
         else:
             logger.info("Training RandomForest with fixed hyperparameters...")
             rf_model = RandomForestClassifier(
@@ -550,20 +674,25 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         y_pred_proba = model.predict_proba(X_test)[:, 1]
         
         # Calculate metrics
-        report = classification_report(y_test, y_pred, output_dict=True)
+        report_dict = classification_report(y_test, y_pred, output_dict=True)
+        report_text = classification_report(y_test, y_pred, digits=4)
         conf_matrix = confusion_matrix(y_test, y_pred)
         roc_auc = roc_auc_score(y_test, y_pred_proba)
         pr_auc = average_precision_score(y_test, y_pred_proba)
-        
+        precision_vals, recall_vals, _ = precision_recall_curve(y_test, y_pred_proba)
+        prc_auc = auc(recall_vals, precision_vals)
+
         # Log key metrics
         logger.info("=== Model Evaluation Results ===")
         logger.info(f"ROC AUC Score: {roc_auc:.4f}")
         logger.info(f"PR AUC (Average Precision): {pr_auc:.4f}")
+        logger.info(f"PR Curve AUC: {prc_auc:.4f}")
         logger.info(f"Confusion Matrix:\n{conf_matrix}")
-        
+        logger.info("Classification Report:\n%s", report_text)
+
         # Extract positive class metrics
-        if isinstance(report, dict):
-            positive_metrics = report.get('1', {})
+        if isinstance(report_dict, dict):
+            positive_metrics = report_dict.get('1', {})
             if positive_metrics:
                 logger.info(f"Positive Class Precision: {positive_metrics.get('precision', 0):.4f}")
                 logger.info(f"Positive Class Recall: {positive_metrics.get('recall', 0):.4f}")
@@ -671,10 +800,12 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         
         # Save comprehensive evaluation report
         evaluation_report = {
-            'classification_report': report,
+            'classification_report': report_dict,
+            'classification_report_text': report_text,
             'confusion_matrix': conf_matrix.tolist(),
             'roc_auc_score': roc_auc,
             'pr_auc_average_precision': pr_auc,
+            'pr_curve_auc': prc_auc,
             'model_path': model_save_path,
             'feature_count': len(rule_list),
             'top_10_features': top_10_features.to_dict(orient='records'),
@@ -682,6 +813,26 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             'top_20_features': top_10_features.to_dict(orient='records'),
             'training_date': pd.Timestamp.now().isoformat()
         }
+        # Plot and save Precision-Recall curve for auditing
+        try:
+            pr_curve_path = os.path.join(model_dir, f"{base_name}_pr_curve.png")
+            plt.figure(figsize=(8, 6))
+            plt.step(recall_vals, precision_vals, where='post', color='navy', label=f'AP={pr_auc:.4f}')
+            plt.fill_between(recall_vals, precision_vals, step='post', alpha=0.2, color='navy')
+            plt.xlabel('Recall')
+            plt.ylabel('Precision')
+            plt.title('Precision-Recall Curve')
+            plt.ylim([0.0, 1.05])
+            plt.xlim([0.0, 1.0])
+            plt.grid(True, linestyle='--', alpha=0.4)
+            plt.legend(loc='lower left')
+            plt.tight_layout()
+            plt.savefig(pr_curve_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            evaluation_report['precision_recall_curve_path'] = pr_curve_path
+            logger.info(f"Precision-Recall curve saved to: {pr_curve_path}")
+        except Exception as e:
+            logger.warning(f"Failed to generate Precision-Recall curve: {e}")
         
         report_path = os.path.join(model_dir, f"{base_name}_evaluation_report.json")
         with open(report_path, 'w') as f:
@@ -714,7 +865,17 @@ def main():
     try:
         # Load configuration
         with open(args.config, 'r') as f:
-            training_config = json.load(f)
+            raw_config = json.load(f)
+
+        # Support both training-only JSON and full pipeline config containing a
+        # top-level "training" section. This keeps CLI usage in sync with the
+        # orchestrator expectations.
+        if isinstance(raw_config, dict) and 'training' in raw_config:
+            training_config = raw_config.get('training', {})
+            ancillary_config = raw_config
+        else:
+            training_config = raw_config
+            ancillary_config = None
         
         if args.verbose:
             logger.setLevel(logging.DEBUG)
@@ -731,7 +892,13 @@ def main():
         # Run evaluation if requested
         if args.evaluate:
             # Get rule list for feature importance mapping
-            rule_manager = QRadarRuleManager()
+            rm_config = {}
+            if isinstance(ancillary_config, dict):
+                rm_config = ancillary_config.get('rule_manager', {})
+            rule_manager = QRadarRuleManager(
+                mode=rm_config.get('mode', 'file'),
+                config=rm_config.get('api_config', {})
+            )
             rule_list = rule_manager.get_rule_list()
             
             evaluation_report = evaluate_and_report(
