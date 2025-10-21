@@ -68,7 +68,7 @@ class FeatureGenerator:
         self._vector_dimension = len(self._production_rule_to_index)
         self._rule_to_index = self._production_rule_to_index
         
-        expected_rules = self.config.get('feature_engineering', {}).get('expected_rules', 1128)
+        expected_rules = self.config.get('feature_engineering', {}).get('expected_rules', 287)
         if self._vector_dimension != expected_rules:
             logger.warning(f"Expected {expected_rules} rules but got {self._vector_dimension}")
         
@@ -172,7 +172,7 @@ class FeatureGenerator:
             'rule_min': min(prod_rules) if prod_rules else 0,
             'rule_max': max(prod_rules) if prod_rules else 0,
             'environment': self.environment,
-            'expected_dimension': self.config.get('feature_engineering', {}).get('expected_rules', 1128)
+            'expected_dimension': self.config.get('feature_engineering', {}).get('expected_rules', 287)
         }
 
     @classmethod
