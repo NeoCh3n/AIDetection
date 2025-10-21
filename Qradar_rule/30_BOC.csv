@@ -1,0 +1,31 @@
+﻿id,name,type,enabled,origin
+100392,BOC_303_potential Malware is included in Office Software,EVENT,TRUE,USER
+100394,BOC_302-2 potential C2 outbound detected from File Created,EVENT,TRUE,USER
+100396,BOC_366-1_Detected an lsass access to a process_part_1 (mimikatz_windows),EVENT,TRUE,USER
+100397,BOC_366-2_Detected a malicious process to access lsass_Part_2 (mimikatz_windows),EVENT,TRUE,USER
+100516,BOC_381_WIndows_Sysmon_end_point_status_Change,EVENT,TRUE,USER
+100517,BOC_382_WIndows_Sysmon_end_point_Config_Change,EVENT,TRUE,USER
+100518,BOC_331_Windows_Sysmon_Command_whoami,EVENT,TRUE,USER
+100519,BOC_332_Windows_Sysmon_Command_add_user,EVENT,TRUE,USER
+100608,BOC_301 potential C2 software from cmd.exe or explorer.exe,EVENT,TRUE,USER
+100610,BOC_302-1 potential C2 outbound detected from cmd_explorer_RAR_office_software,EVENT,TRUE,USER
+100611,BOC_321_large amount of exe files are copied to the End Point (exclude normal path),EVENT,TRUE,USER
+100613,BOC_341_Sysmon_Manually_Disabled_Services,EVENT,TRUE,USER
+100614,BOC_341-2_Sysmon_Manually_Enabled_Services.msc,EVENT,TRUE,USER
+100615,BOC_344_Sysmon_Uninstall Command Observed,EVENT,TRUE,USER
+100617,BOC_351_Sysmon_long_DNS_Query,EVENT,TRUE,USER
+100618,BOC_361-1_Windows_Sysmon_add_user_to_admin_group (Command Line),EVENT,TRUE,USER
+100619,BOC_363_Admin group membership was enumerated,EVENT,TRUE,USER
+100621,BOC_364_Use_Powershell_mimikatz_to_dump_Credential,EVENT,TRUE,USER
+100622,BOC_366-3_Detected a malicious process to access lsass_Part_3_same_hosts,EVENT,TRUE,USER
+100624,BOC_366-4_Detected a CMD to start a process to access lsass,EVENT,TRUE,USER
+100626,BOC_311_Office Software_Spwan_Enumeration Command,EVENT,TRUE,USER
+100633,BOC_312_Several_Enumeration Command Detected,EVENT,TRUE,USER
+100635,BOC_333_Powershell Detected in NB and PC,EVENT,TRUE,USER
+100636,BOC_371_Malicious Command_Detected in PC and Server,EVENT,TRUE,USER
+100638,BOC_316-1_Sysmon_CobaltStrike_possible_memory_Injection_Attack,EVENT,TRUE,USER
+100639,BOC_316-2_Sysmon_CobaltStrike_injection_on_windows_files,EVENT,TRUE,USER
+100641,BOC_364-2_Use_mimikatz_exe_to_dump_Credential,EVENT,TRUE,USER
+100642,BOC_364-X_Use_mimikatz_exe_to_dump_Credential_DLL_LSASS,EVENT,TRUE,USER
+100646,BOC_379-1_Potential KeyLogger_EXE is running or Log File Detected,EVENT,TRUE,USER
+100647,BOC_379-X_Multiple Potential KeyLogger Pattern Matched,EVENT,TRUE,USER

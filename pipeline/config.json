@@ -19,18 +19,26 @@
         "roc_auc": "roc_auc"
       },
       "refit": "f1",
-      "cv": 3,
+      "cv": 5,
       "verbose": 1,
       "use_composite": false,
       "return_train_score": true,
-      "n_iter": 80,
+      "n_iter": 100,
       "param_grid": {
-        "n_estimators": [100, 300, 500, 700, 900],
-        "max_depth": [8, 15, 20],
-        "max_features": ["sqrt", "log2"],
-        "min_samples_split": [10, 20, 30, 40, 50],
-        "min_samples_leaf": [10, 15, 20],
-        "class_weight": ["balanced"]
+        "n_estimators": [300, 500, 700, 900],
+        "max_depth": [10, 20, 30, 40, null],
+        "max_features": ["sqrt", "log2", 0.2, 0.3, 0.5],
+        "min_samples_split": [5, 10, 20, 40, 60],
+        "min_samples_leaf": [1, 5, 10, 20, 30],
+        "class_weight": ["balanced", "balanced_subsample"]
+      },
+      "param_distributions": {
+        "n_estimators": [300, 500, 700, 900],
+        "max_depth": [10, 20, 30, 40, null],
+        "max_features": ["sqrt", "log2", 0.2, 0.3, 0.5],
+        "min_samples_split": [5, 10, 20, 40, 60],
+        "min_samples_leaf": [1, 5, 10, 20, 30],
+        "class_weight": ["balanced", "balanced_subsample"]
       }
     },
     "model_params": {

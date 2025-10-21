@@ -75,6 +75,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from model.tsne_visualizer import TSNEConfig, generate_tsne_plot
 # Import pipeline modules
 from pipeline.data_loader import load_data
 from pipeline.feature_aggregator import aggregate_to_windows
@@ -196,6 +197,39 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
     try:
         logger.info("Starting model training with pipeline integration...")
         
+        tsne_options = training_config.get('tsne', {}) if isinstance(training_config, dict) else {}
+        tsne_enabled = bool(tsne_options.get('enabled', True))
+
+        tsne_max_points_raw = tsne_options.get('max_points', 2000)
+        try:
+            tsne_max_points = int(tsne_max_points_raw)
+        except (TypeError, ValueError):
+            tsne_max_points = 2000
+        if tsne_max_points <= 0:
+            tsne_max_points = 0
+
+        try:
+            tsne_perplexity = float(tsne_options.get('perplexity', 30.0))
+        except (TypeError, ValueError):
+            tsne_perplexity = 30.0
+
+        try:
+            tsne_learning_rate = float(tsne_options.get('learning_rate', 200.0))
+        except (TypeError, ValueError):
+            tsne_learning_rate = 200.0
+
+        try:
+            tsne_n_iter = int(tsne_options.get('n_iter', 1000))
+        except (TypeError, ValueError):
+            tsne_n_iter = 1000
+
+        tsne_metric = str(tsne_options.get('metric', 'euclidean'))
+
+        try:
+            tsne_random_state = int(tsne_options.get('random_state', 42))
+        except (TypeError, ValueError):
+            tsne_random_state = 42
+        
         # Create model directory if it doesn't exist
         model_dir = os.path.dirname(model_save_path)
         if model_dir and not os.path.exists(model_dir):
@@ -250,11 +284,11 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             # Reasonable defaults compatible with sklearn 0.24.2
             default_param_grid = {
                 'n_estimators': [i for i in range(300, 1000, 200)],
-                'max_depth': [i for i in range(10, 20, 5)] + [None],
-                'max_features': ['sqrt', 'log2'],
-                'min_samples_split': [i for i in range(10, 50, 10)],
-                'min_samples_leaf': [i for i in range(10, 20, 5)],
-                'class_weight': ['balanced'],
+                'max_depth': [10, 20, 30, 40, None],
+                'max_features': ['sqrt', 'log2', 0.2, 0.3, 0.5],
+                'min_samples_split': [5, 10, 20, 40, 60],
+                'min_samples_leaf': [1, 5, 10, 20, 30],
+                'class_weight': ['balanced', 'balanced_subsample'],
                 #'min_impurity_decrease': [0.0, 0.0001, 0.001, 0.01],
                 #'ccp_alpha': [0.0, 0.0001, 0.001, 0.01],
                 #'criterion': ['gini', 'entropy'],
@@ -570,10 +604,34 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             logger.info("Model training completed successfully")
         
         # Step 6: Save trained model
+        model_dir = os.path.dirname(model_save_path) or "."
+        base_name = os.path.splitext(os.path.basename(model_save_path))[0]
         logger.info(f"Saving model to: {model_save_path}")
         joblib.dump(rf_model, model_save_path)
         logger.info("Model saved successfully")
-        
+
+        if tsne_enabled:
+            try:
+                sample_X = np.asarray(X_train)
+                sample_y = np.asarray(y_train)
+                if tsne_max_points and sample_X.shape[0] > tsne_max_points:
+                    rs = np.random.RandomState(tsne_random_state)
+                    indices = rs.choice(sample_X.shape[0], tsne_max_points, replace=False)
+                    sample_X = sample_X[indices]
+                    sample_y = sample_y[indices]
+                    logger.info("t-SNE sample reduced from %s to %s points", X_train.shape[0], sample_X.shape[0])
+                tsne_cfg_obj = TSNEConfig(
+                    perplexity=tsne_perplexity,
+                    learning_rate=tsne_learning_rate,
+                    n_iter=tsne_n_iter,
+                    metric=tsne_metric,
+                    random_state=tsne_random_state,
+                )
+                tsne_path = os.path.join(model_dir, f"{base_name}_tsne.png")
+                generate_tsne_plot(sample_X, sample_y, tsne_path, tsne_cfg_obj)
+            except Exception as exc:
+                logger.warning(f"Failed to generate t-SNE plot: {exc}")
+
         # Log model characteristics
         logger.info(f"Model trained with {rf_model.n_features_in_} features and {len(rf_model.estimators_)} trees")
         
