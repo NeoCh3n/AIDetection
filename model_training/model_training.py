@@ -75,7 +75,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from model.tsne_visualizer import TSNEConfig, generate_tsne_plot
+from model_training.tsne_visualizer import TSNEConfig, generate_tsne_plot
 # Import pipeline modules
 from pipeline.data_loader import load_data
 from pipeline.feature_aggregator import aggregate_to_windows
