@@ -37,6 +37,7 @@ Usage:
 import shap
 import json
 import os
+import csv
 import logging
 import math
 import numpy as np
@@ -1047,28 +1048,54 @@ class Explainer:
         try:
             sys_dir = os.path.dirname(__file__)
             project_root = os.path.abspath(os.path.join(sys_dir, '..'))
-            qradar_dir = os.path.join(project_root, 'Qradar_rule')
-            if not os.path.isdir(qradar_dir):
-                self._rule_name_map = {}
-                return self._rule_name_map
 
-            for fname in os.listdir(qradar_dir):
-                if not fname.lower().endswith('.csv'):
-                    continue
-                fpath = os.path.join(qradar_dir, fname)
+            # Load production mapping first for canonical names
+            mapping_path = os.path.join(project_root, 'shared_utils', 'uat_to_prod_mapping.csv')
+            if os.path.isfile(mapping_path):
                 try:
-                    df_rules = pd.read_csv(fpath)
+                    with open(mapping_path, 'r', encoding='utf-8') as fh:
+                        reader = csv.DictReader(fh)
+                        for row in reader:
+                            if not row:
+                                continue
+                            prod_value = row.get('prod_rule_id')
+                            name_value = row.get('rule_name') or row.get('prod_rule_name')
+                            try:
+                                prod_rule_id = int(str(prod_value).strip()) if prod_value is not None else None
+                            except (TypeError, ValueError):
+                                continue
+
+                            if prod_rule_id is None or name_value is None:
+                                continue
+
+                            rule_name = str(name_value).strip()
+                            if not rule_name:
+                                continue
+
+                            name_map[prod_rule_id] = rule_name
                 except Exception:
-                    continue
-                if 'id' not in df_rules.columns or 'name' not in df_rules.columns:
-                    continue
-                for rid_val, nm in zip(df_rules['id'], df_rules['name']):
+                    # Ignore mapping load errors; fall back to other sources
+                    pass
+
+            qradar_dir = os.path.join(project_root, 'Qradar_rule')
+            if os.path.isdir(qradar_dir):
+                for fname in os.listdir(qradar_dir):
+                    if not fname.lower().endswith('.csv'):
+                        continue
+                    fpath = os.path.join(qradar_dir, fname)
                     try:
-                        rid_int = int(rid_val)
-                        if rid_int not in name_map:
-                            name_map[rid_int] = str(nm) if nm is not None else ''
+                        df_rules = pd.read_csv(fpath)
                     except Exception:
                         continue
+                    if 'id' not in df_rules.columns or 'name' not in df_rules.columns:
+                        continue
+                    for rid_val, nm in zip(df_rules['id'], df_rules['name']):
+                        try:
+                            rid_int = int(rid_val)
+                            if rid_int not in name_map:
+                                name_map[rid_int] = str(nm) if nm is not None else ''
+                        except Exception:
+                            continue
 
             self._rule_name_map = name_map
             return self._rule_name_map

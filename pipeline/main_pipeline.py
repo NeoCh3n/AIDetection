@@ -27,10 +27,11 @@ import sys
 import os
 import argparse
 import json
+import csv
 from datetime import datetime, timedelta
 import logging
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Dict
 import importlib
 
 """
@@ -328,6 +329,50 @@ class UnifiedPipeline:
             self.logger.error(f"Failed to cleanup old data: {str(e)}")
             return 0
     
+    def load_production_rule_name_map(self) -> Dict[int, str]:
+        """
+        Load production rule ID to rule name mapping from shared mapping file.
+        
+        Returns:
+            Dictionary mapping production rule IDs to human-readable names.
+        """
+        mapping: Dict[int, str] = {}
+        mapping_path = os.path.join(PROJECT_ROOT, 'shared_utils', 'uat_to_prod_mapping.csv')
+
+        try:
+            if not os.path.exists(mapping_path):
+                self.logger.debug(f"Production rule mapping file not found: {mapping_path}")
+                return mapping
+
+            with open(mapping_path, 'r', encoding='utf-8') as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    if not row:
+                        continue
+                    prod_value = row.get('prod_rule_id')
+                    name_value = row.get('rule_name') or row.get('prod_rule_name')
+                    try:
+                        prod_rule_id = int(str(prod_value).strip()) if prod_value is not None else None
+                    except (TypeError, ValueError):
+                        continue
+
+                    if prod_rule_id is None:
+                        continue
+
+                    if name_value is None:
+                        continue
+
+                    rule_name = str(name_value).strip()
+                    if not rule_name:
+                        continue
+
+                    mapping[prod_rule_id] = rule_name
+
+        except Exception as exc:
+            self.logger.warning(f"Failed to load production rule names: {exc}")
+
+        return mapping
+    
     def run_detection(self):
         """Detection mode: QRadar → MongoDB → Prediction"""
         self.logger.info("Starting detection pipeline...")
@@ -383,34 +428,44 @@ class UnifiedPipeline:
                     f"rule_{rid}" if rid >= 0 else f"feature_{k}"
                     for k, rid in enumerate(index_to_rule)
                 ]
-                # Optional rule name enrichment from config
+                # Optional rule name enrichment from config plus production mapping
                 fn_cfg = (self.config.get('detection', {}) or {}).get('feature_names', {}) or {}
-                include_rule_names = bool(fn_cfg.get('include_rule_names', False))
-                rule_name_map: dict = {}
-                if include_rule_names:
-                    # Start with direct name map if provided
+                rule_name_map: Dict[int, str] = {}
+                production_name_map = self.load_production_rule_name_map()
+                include_rule_names = bool(fn_cfg.get('include_rule_names', False)) or bool(production_name_map)
+
+                if production_name_map:
+                    # Use production mapping as authoritative baseline
+                    rule_name_map.update(production_name_map)
+
+                if fn_cfg:
+                    # Start with direct name map if provided (may contain overrides)
                     raw_map = fn_cfg.get('name_map') or {}
                     try:
-                        rule_name_map.update({int(k): str(v) for k, v in raw_map.items()})
+                        for key, value in raw_map.items():
+                            rid_int = int(key)
+                            rule_name_map[rid_int] = str(value)
                     except Exception:
                         pass
-                    # Add from CSV paths
-                    csv_paths = fn_cfg.get('csv_paths', []) or []
-                    for path in csv_paths:
-                        try:
-                            if path and os.path.exists(path):
-                                import pandas as _pdcsv
-                                df_rules = _pdcsv.read_csv(path)
-                                if 'id' in df_rules.columns and 'name' in df_rules.columns:
-                                    for rid, nm in zip(df_rules['id'], df_rules['name']):
-                                        try:
-                                            rid_int = int(rid)
-                                            if rid_int not in rule_name_map:
-                                                rule_name_map[rid_int] = str(nm)
-                                        except Exception:
-                                            continue
-                        except Exception:
-                            continue
+
+                    if include_rule_names:
+                        # Add from CSV paths (fills any remaining gaps)
+                        csv_paths = fn_cfg.get('csv_paths', []) or []
+                        for path in csv_paths:
+                            try:
+                                if path and os.path.exists(path):
+                                    import pandas as _pdcsv
+                                    df_rules = _pdcsv.read_csv(path)
+                                    if 'id' in df_rules.columns and 'name' in df_rules.columns:
+                                        for rid, nm in zip(df_rules['id'], df_rules['name']):
+                                            try:
+                                                rid_int = int(rid)
+                                                if rid_int not in rule_name_map:
+                                                    rule_name_map[rid_int] = str(nm)
+                                            except Exception:
+                                                continue
+                            except Exception:
+                                continue
             except Exception:
                 index_to_rule = []
                 n_features = X.shape[1] if hasattr(X, 'shape') else 0
