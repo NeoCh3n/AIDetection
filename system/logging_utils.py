@@ -95,7 +95,7 @@ def _format_detection_payload(
     top_features: Optional[Sequence[Any]] = None,
 ) -> str:
     """
-    Construct a SOC-friendly detection payload string.
+    Construct a SOC-friendly detection payload string formatted for single-line syslog.
     """
     model_display = model_name or "RandomForestClassifier"
     instance_display = instances_analyzed if instances_analyzed is not None else 1
@@ -116,55 +116,60 @@ def _format_detection_payload(
 
     confidence_str = f"{confidence_pct:.1f}%" if confidence_pct is not None else "N/A"
 
-    lines = [
-        f"ATTACK_DETECTION | hostname={hostname} | window_id={window_id}",
-        "",
-        f"Model: {model_display}",
-        f"Instances analyzed: {instance_display}",
+    header = f"ATTACK_DETECTION | hostname={hostname} | window_id={window_id}"
+
+    summary_parts = [
+        f"Model={model_display}",
+        f"Instances={instance_display}",
+        f"Timestamp={timestamp_str}",
     ]
-
     if feature_count is not None:
-        lines.append(f"Features: {feature_count}")
+        summary_parts.insert(2, f"Features={feature_count}")
+    summary = "Summary: " + " | ".join(summary_parts)
 
-    lines.append(f"Timestamp: {timestamp_str}")
-    lines.append("")
-    lines.append("Predictions:")
-    lines.append(f"  Instance 1: {prediction_label} (confidence: {confidence_str})")
+    predictions_section = f"Predictions: Instance1={prediction_label} (confidence={confidence_str})"
 
     processed_features = []
     if top_features:
         processed_features = [_format_top_feature_entry(entry) for entry in top_features]
 
+    features_section = ""
+    critical_section = ""
     if processed_features:
-        count = len(processed_features)
-        lines.append("")
-        lines.append(f"Top {count} features (BOC prioritized):")
-        lines.append("----------------------------------------------------------------------")
-        lines.append("Rank Importance   Feature (Rule Name)")
-        lines.append("----------------------------------------------------------------------")
-
+        feature_tokens = []
         for idx, feature in enumerate(processed_features, start=1):
             importance = feature.get('importance')
-            importance_str = f"{float(importance):.4f}" if importance is not None else "N/A"
-            lines.append(f"{idx:<4} {importance_str:<11} {feature['display']}")
-
-        lines.append("----------------------------------------------------------------------")
+            if importance is not None:
+                try:
+                    importance_val = float(importance)
+                    imp_label = f"{importance_val:.4f}"
+                except (TypeError, ValueError):
+                    imp_label = str(importance)
+            else:
+                imp_label = "N/A"
+            feature_tokens.append(f"{idx}) {feature['display']} (importance={imp_label})")
+        features_section = "TopFeatures: " + "; ".join(feature_tokens)
 
         primary = processed_features[0]
-        feature_id = primary.get('feature_id') or primary.get('display')
-        label = primary.get('label')
-        if feature_id and label:
-            lines.append(f"Most critical feature: {feature_id} ({label})")
-        else:
-            lines.append(f"Most critical feature: {primary.get('display')}")
+        primary_display = primary.get('display')
+        if primary_display:
+            importance_primary = primary.get('importance')
+            if importance_primary is not None:
+                try:
+                    primary_score = f"{float(importance_primary):.4f}"
+                except (TypeError, ValueError):
+                    primary_score = str(importance_primary)
+            else:
+                primary_score = "N/A"
+            critical_section = f"MostCritical: {primary_display} (importance={primary_score})"
 
-        if primary.get('importance') is not None:
-            try:
-                lines.append(f"Importance score: {float(primary['importance']):.4f}")
-            except (TypeError, ValueError):
-                lines.append(f"Importance score: {primary['importance']}")
+    sections = [header, summary, predictions_section]
+    if features_section:
+        sections.append(features_section)
+    if critical_section:
+        sections.append(critical_section)
 
-    return "\n".join(lines)
+    return " || ".join(sections)
 
 
 def run_log(level, message, payload = None):
