@@ -95,7 +95,7 @@ def _format_detection_payload(
     top_features: Optional[Sequence[Any]] = None,
 ) -> str:
     """
-    Construct a SOC-friendly detection payload string formatted for single-line syslog.
+    Construct a LEEF-formatted detection payload for QRadar.
     """
     model_display = model_name or "RandomForestClassifier"
     instance_display = instances_analyzed if instances_analyzed is not None else 1
@@ -116,27 +116,17 @@ def _format_detection_payload(
 
     confidence_str = f"{confidence_pct:.1f}%" if confidence_pct is not None else "N/A"
 
-    header = f"ATTACK_DETECTION | hostname={hostname} | window_id={window_id}"
-
-    summary_parts = [
-        f"Model={model_display}",
-        f"Instances={instance_display}",
-        f"Timestamp={timestamp_str}",
-    ]
-    if feature_count is not None:
-        summary_parts.insert(2, f"Features={feature_count}")
-    summary = "Summary: " + " | ".join(summary_parts)
-
-    predictions_section = f"Predictions: Instance1={prediction_label} (confidence={confidence_str})"
-
     processed_features = []
     if top_features:
         processed_features = [_format_top_feature_entry(entry) for entry in top_features]
 
-    features_section = ""
-    critical_section = ""
+    def _clean_value(value: Any) -> str:
+        text = str(value)
+        return text.replace("\t", " ").replace("\n", " ").replace("=", ":")
+
+    top_feature_summary = ""
     if processed_features:
-        feature_tokens = []
+        tokens = []
         for idx, feature in enumerate(processed_features, start=1):
             importance = feature.get('importance')
             if importance is not None:
@@ -147,29 +137,43 @@ def _format_detection_payload(
                     imp_label = str(importance)
             else:
                 imp_label = "N/A"
-            feature_tokens.append(f"{idx}) {feature['display']} (importance={imp_label})")
-        features_section = "TopFeatures: " + "; ".join(feature_tokens)
+            tokens.append(f"{idx}:{feature['display']}:{imp_label}")
+        top_feature_summary = ";".join(tokens)
 
+    most_critical = ""
+    if processed_features:
         primary = processed_features[0]
-        primary_display = primary.get('display')
-        if primary_display:
-            importance_primary = primary.get('importance')
-            if importance_primary is not None:
-                try:
-                    primary_score = f"{float(importance_primary):.4f}"
-                except (TypeError, ValueError):
-                    primary_score = str(importance_primary)
-            else:
-                primary_score = "N/A"
-            critical_section = f"MostCritical: {primary_display} (importance={primary_score})"
+        importance_primary = primary.get('importance')
+        if importance_primary is not None:
+            try:
+                primary_score = f"{float(importance_primary):.4f}"
+            except (TypeError, ValueError):
+                primary_score = str(importance_primary)
+        else:
+            primary_score = "N/A"
+        most_critical = f"{primary.get('display')}:{primary_score}"
 
-    sections = [header, summary, predictions_section]
-    if features_section:
-        sections.append(features_section)
-    if critical_section:
-        sections.append(critical_section)
+    feature_count_str = str(feature_count) if feature_count is not None else "unknown"
 
-    return " || ".join(sections)
+    extensions = [
+        ("name", "Malicious Threat Detection"),
+        ("hostname", hostname),
+        ("windowId", window_id),
+        ("model", model_display),
+        ("instances", instance_display),
+        ("features", feature_count_str),
+        ("timestamp", timestamp_str),
+        ("prediction", prediction_label),
+        ("confidencePct", confidence_str),
+        ("topFeatures", top_feature_summary or "n/a"),
+        ("mostCritical", most_critical or "n/a"),
+    ]
+
+    extension_str = "\t".join(f"{key}={_clean_value(value)}" for key, value in extensions)
+
+    header = "LEEF:2.0|AI4|RFDetector|1.0|ATTACK_DETECTION|High|"
+
+    return header + extension_str
 
 
 def run_log(level, message, payload = None):
