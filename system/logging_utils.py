@@ -4,8 +4,9 @@ import os
 import json
 import logging
 import logging.handlers
+import textwrap
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence, Dict, Any, Tuple
 from . import config
 
 # Use centralized configuration
@@ -24,6 +25,148 @@ SUPPRESS_STDOUT = True  # avoid duplicate console noise; rely on app logger
 _ROOT_FILE_HANDLER_PATH: Optional[str] = None
 _ROOT_FILE_HANDLER: Optional[logging.Handler] = None
 
+
+def _sanitize_message(msg: str, max_len: int = 8192, allow_multiline: bool = False) -> str:
+    """
+    Sanitize a message before transmitting to syslog.
+
+    Args:
+        msg: The message to sanitize.
+        max_len: Maximum payload size allowed.
+        allow_multiline: If True, preserve newline characters.
+    """
+    sanitized = str(msg).replace("\r", " ")
+    if not allow_multiline:
+        sanitized = sanitized.replace("\n", " ")
+    return sanitized[:max_len]
+
+
+def _format_top_feature_entry(entry: Any) -> Dict[str, Any]:
+    """
+    Normalize a feature entry into a consistent structure for rendering.
+    """
+    feature_id: Optional[str] = None
+    label: Optional[str] = None
+    importance: Optional[float] = None
+
+    if isinstance(entry, dict):
+        feature_id = entry.get('feature') or entry.get('feature_id') or entry.get('rule_id') or entry.get('name')
+        label = entry.get('label') or entry.get('rule_name') or entry.get('description')
+        importance = entry.get('importance')
+        if importance is None:
+            importance = entry.get('score') or entry.get('value')
+    elif isinstance(entry, (list, tuple)):
+        tpl: Tuple[Any, ...] = tuple(entry)
+        if tpl:
+            feature_id = tpl[0]
+        if len(tpl) > 1:
+            importance = tpl[1]
+        if len(tpl) > 2:
+            label = tpl[2]
+    else:
+        feature_id = str(entry)
+
+    display_parts = []
+    if feature_id is not None:
+        display_parts.append(str(feature_id))
+    if label:
+        display_parts.append(str(label))
+
+    display = " | ".join(display_parts) if display_parts else str(entry)
+    display = textwrap.shorten(display, width=80, placeholder="...")
+
+    return {
+        'feature_id': feature_id,
+        'label': label,
+        'display': display,
+        'importance': importance,
+    }
+
+
+def _format_detection_payload(
+    hostname: str,
+    window_id: str,
+    prediction: str,
+    confidence: Optional[float],
+    timestamp: datetime.datetime,
+    model_name: Optional[str] = None,
+    feature_count: Optional[int] = None,
+    instances_analyzed: Optional[int] = None,
+    top_features: Optional[Sequence[Any]] = None,
+) -> str:
+    """
+    Construct a SOC-friendly detection payload string.
+    """
+    model_display = model_name or "RandomForestClassifier"
+    instance_display = instances_analyzed if instances_analyzed is not None else 1
+    timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+    confidence_pct: Optional[float] = None
+    if confidence is not None:
+        try:
+            conf_val = float(confidence)
+            confidence_pct = conf_val * 100 if conf_val <= 1.5 else conf_val
+        except (TypeError, ValueError):
+            confidence_pct = None
+
+    if isinstance(prediction, str):
+        prediction_label = prediction.strip().capitalize()
+    else:
+        prediction_label = str(prediction)
+
+    confidence_str = f"{confidence_pct:.1f}%" if confidence_pct is not None else "N/A"
+
+    lines = [
+        f"ATTACK_DETECTION | hostname={hostname} | window_id={window_id}",
+        "",
+        f"Model: {model_display}",
+        f"Instances analyzed: {instance_display}",
+    ]
+
+    if feature_count is not None:
+        lines.append(f"Features: {feature_count}")
+
+    lines.append(f"Timestamp: {timestamp_str}")
+    lines.append("")
+    lines.append("Predictions:")
+    lines.append(f"  Instance 1: {prediction_label} (confidence: {confidence_str})")
+
+    processed_features = []
+    if top_features:
+        processed_features = [_format_top_feature_entry(entry) for entry in top_features]
+
+    if processed_features:
+        count = len(processed_features)
+        lines.append("")
+        lines.append(f"Top {count} features (BOC prioritized):")
+        lines.append("----------------------------------------------------------------------")
+        lines.append("Rank Importance   Feature (Rule Name)")
+        lines.append("----------------------------------------------------------------------")
+
+        for idx, feature in enumerate(processed_features, start=1):
+            importance = feature.get('importance')
+            importance_str = f"{float(importance):.4f}" if importance is not None else "N/A"
+            lines.append(f"{idx:<4} {importance_str:<11} {feature['display']}")
+
+        lines.append("----------------------------------------------------------------------")
+
+        primary = processed_features[0]
+        feature_id = primary.get('feature_id') or primary.get('display')
+        label = primary.get('label')
+        if feature_id and label:
+            lines.append(f"Most critical feature: {feature_id} ({label})")
+        else:
+            lines.append(f"Most critical feature: {primary.get('display')}")
+
+        if primary.get('importance') is not None:
+            try:
+                lines.append(f"Importance score: {float(primary['importance']):.4f}")
+            except (TypeError, ValueError):
+                lines.append(f"Importance score: {primary['importance']}")
+
+    return "\n".join(lines)
+
+
 def run_log(level, message, payload = None):
     # Ensure log directory exists
     Path(log_dir_path).mkdir(parents=True, exist_ok=True)
@@ -39,12 +182,22 @@ def run_log(level, message, payload = None):
     total_minute = int(datetime.datetime.now().hour) * 60 + int(datetime.datetime.now().minute)
     session_count = total_minute // fetch_data_frequency
     total_session = int(1440 / fetch_data_frequency)
+    session_str = f"Session: {session_count}/{total_session}"
+    level_label = level.ljust(10)
+    level_pad = " " * len(level_label)
+    time_pad = " " * len(time_now)
+    session_pad = " " * len(session_str)
+    base_prefix = f"| {level_label} | {time_now} | {session_str} | "
+    continuation_prefix = f"| {level_pad} | {time_pad} | {session_pad} | "
+
+    message_str = str(message)
+    message_lines = message_str.splitlines() if message_str else [""]
 
     with open(filepath_today, "a+") as logfile_today:
         # delete the logs of last week
         if os.path.exists(filepath_lastweek):
             os.remove(filepath_lastweek)
-            logfile_today.write("| " + level.ljust(10) + " | " + str(time_now) + " | " + "Session: " + str(session_count) + "/" + str(total_session) + " | 0. " + filepath_lastweek + " deleted\n")
+            logfile_today.write(f"{base_prefix}0. {filepath_lastweek} deleted\n")
         # delete any logs older than retention window
         cutoff = datetime.datetime.now().date() - datetime.timedelta(days=data_retention_days)
         for f in Path(log_dir_path).glob("*.log"):
@@ -53,31 +206,35 @@ def run_log(level, message, payload = None):
                 file_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
                 if file_date < cutoff and f.exists():
                     f.unlink()
-                    logfile_today.write("| " + level.ljust(10) + " | " + str(time_now) + " | " + "Session: " + str(session_count) + "/" + str(total_session) + " | old log deleted: " + str(f) + "\n")
+                    logfile_today.write(f"{base_prefix}old log deleted: {str(f)}\n")
             except Exception:
                 # ignore files not following the naming convention
                 continue
-        log_message = "| " + level.ljust(10) + " | " + str(time_now) + " | " + "Session: " + str(session_count) + "/" + str(total_session) + " | " + message + "\n"
+
+        log_lines = [base_prefix + (message_lines[0] if message_lines else "")]
+        for extra_line in message_lines[1:]:
+            log_lines.append(continuation_prefix + extra_line)
+
         if payload is not None:
-            # Keep payload on a single line to avoid breaking syslog formatting
-            payload_str = str(payload).replace("\n", " ")
-            log_message += " | Payload: " + payload_str + "\n"
+            try:
+                payload_str = json.dumps(payload, default=str)
+            except Exception:
+                payload_str = str(payload).replace("\n", " ")
+            log_lines.append(continuation_prefix + "Payload: " + payload_str)
+
+        log_message = "\n".join(log_lines) + "\n"
         logfile_today.write(log_message)
         # Optional stdout printing (disabled by default to avoid duplicates)
         if not SUPPRESS_STDOUT:
             print(log_message)
 
     # send the logs to Qradar
-    # Sanitize syslog message to a single line and cap size
-    def _sanitize(msg: str, max_len: int = 8192) -> str:
-        msg1 = msg.replace("\n", " ").replace("\r", " ")
-        return msg1[:max_len]
-
     try:
-        if level == header_ml:
-            _send_syslog(log_destination_address, log_destination_port, header_ml, _sanitize(message))
-        else:
-            _send_syslog(log_destination_address, log_destination_port, header_log, _sanitize(log_message))
+        is_ml_header = level == header_ml
+        syslog_payload = message_str if is_ml_header else log_message
+        sanitized = _sanitize_message(syslog_payload, allow_multiline=is_ml_header)
+        header_to_use = header_ml if is_ml_header else header_log
+        _send_syslog(log_destination_address, log_destination_port, header_to_use, sanitized)
     except Exception as e:
         # Fallback: write a local error note
         with open(filepath_today, "a+") as logfile_today:
@@ -147,7 +304,17 @@ def setup_global_daily_file_logging(level: int = logging.INFO, include_stdout: b
             except Exception:
                 pass
 
-def log_detection(hostname, window_id, prediction, confidence, timestamp=None):
+def log_detection(
+    hostname: str,
+    window_id: str,
+    prediction: str,
+    confidence: Optional[float] = None,
+    timestamp: Optional[datetime.datetime] = None,
+    model_name: Optional[str] = None,
+    feature_count: Optional[int] = None,
+    instances_analyzed: Optional[int] = None,
+    top_features: Optional[Sequence[Any]] = None,
+):
     """
     Log attack detection events with standardized format.
     
@@ -155,14 +322,28 @@ def log_detection(hostname, window_id, prediction, confidence, timestamp=None):
         hostname (str): Hostname where detection occurred
         window_id (str): Time window identifier
         prediction (str): Prediction result ('malicious' or 'normal')
-        confidence (float): Confidence score (0-1)
+        confidence (float, optional): Confidence score (0-1). Defaults to None.
         timestamp (datetime, optional): Timestamp of detection
+        model_name (str, optional): Name of the model producing the prediction
+        feature_count (int, optional): Number of features considered
+        instances_analyzed (int, optional): Number of instances evaluated
+        top_features (Sequence, optional): Iterable of top contributing features with metadata
     """
     if timestamp is None:
         timestamp = datetime.datetime.now()
-    
-    message = f"ATTACK_DETECTION | hostname={hostname} | window_id={window_id} | prediction={prediction} | confidence={confidence:.4f}"
-    run_log("DETECTION", message)
+
+    message = _format_detection_payload(
+        hostname=hostname,
+        window_id=window_id,
+        prediction=prediction,
+        confidence=confidence,
+        timestamp=timestamp,
+        model_name=model_name,
+        feature_count=feature_count,
+        instances_analyzed=instances_analyzed,
+        top_features=top_features,
+    )
+    run_log(header_ml, message)
 
 def log_shap_results(hostname, window_id, top_rules, shap_values, prediction, confidence):
     """
