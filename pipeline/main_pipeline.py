@@ -31,7 +31,7 @@ import csv
 from datetime import datetime, timedelta
 import logging
 import numpy as np
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import importlib
 
 """
@@ -511,6 +511,18 @@ class UnifiedPipeline:
                     return False
 
             with (ctx_manager or _NoopCtx()) as manager:
+                # Model metadata for logging
+                model_attr = getattr(predictor, "model", None)
+                if model_attr is not None:
+                    model_cls = getattr(model_attr, "__class__", None)
+                    model_name = getattr(model_cls, "__name__", str(model_cls)) if model_cls is not None else str(model_attr)
+                else:
+                    model_name = "UnknownModel"
+                try:
+                    feature_count_total = int(X.shape[1]) if hasattr(X, "shape") else None
+                except Exception:
+                    feature_count_total = None
+
                 for idx, (pred, prob) in enumerate(predictions):
                     is_alert = prob > self.config['detection']['alert_threshold']
                     result = {
@@ -523,30 +535,43 @@ class UnifiedPipeline:
                     }
                     results.append(result)
 
-                    # Unified detection logging
+                    label_str = 'malicious' if int(pred) == 1 else 'normal'
+                    instances_analyzed = 1
+
+                    # Prepare per-alert feature context
+                    payload_top_features: List[Dict[str, Any]] = []
+                    row_vec = None
                     try:
-                        label_str = 'malicious' if int(pred) == 1 else 'normal'
-                        logging_utils.log_detection(
-                            hostname=result['hostname'],
-                            window_id=result['window_id'],
-                            prediction=label_str,
-                            confidence=result['probability']
-                        )
-                    except Exception as e:
-                        pass
+                        row_candidate = X[idx]
+                        row_vec = np.array(row_candidate, dtype=float, copy=False)
+                        if row_vec.ndim > 1:
+                            row_vec = row_vec.reshape(-1)
+                    except Exception:
+                        row_vec = None
+
+                    payload_rule_limit = int((self.config.get('detection', {}) or {}).get('alert_payload_rule_count', 5))
+                    if payload_rule_limit <= 0:
+                        payload_rule_limit = 5
 
                     # On alert, add detailed top-10 rules and SHAP explanation
                     if is_alert:
                         try:
                             # Top-10 rules by feature magnitude
                             top_n = int(self.config.get('detection', {}).get('top_rules_count', 10))
-                            if hasattr(X, 'shape') and X.shape[0] > idx:
-                                row_vec = X[idx]
-                                # argsort descending
-                                top_idx = list(reversed(np.argsort(row_vec)[:top_n].tolist()))
-                            top_rules = []
+                            top_rules: List[Dict[str, Any]] = []
+                            top_idx: List[int] = []
+                            if row_vec is not None and row_vec.size > 0:
+                                try:
+                                    sorted_idx = np.argsort(row_vec)[::-1]
+                                    max_count = max(top_n, payload_rule_limit)
+                                    top_idx = [int(i) for i in sorted_idx[:max_count]]
+                                except Exception:
+                                    top_idx = []
                             for j in top_idx:
-                                val = float(row_vec[j])
+                                try:
+                                    val = float(row_vec[j]) if row_vec is not None else 0.0
+                                except Exception:
+                                    continue
                                 if val <= 0:
                                     continue
                                 resolved_rule = j
@@ -556,12 +581,21 @@ class UnifiedPipeline:
                                 rule_name = None
                                 if 'include_rule_names' in locals() and include_rule_names and isinstance(resolved_rule, int):
                                     rule_name = rule_name_map.get(int(resolved_rule))
-                                entry = {'rule_id': resolved_rule, 'value': val}
+                                entry: Dict[str, Any] = {'rule_id': resolved_rule, 'value': val}
                                 if rule_name is not None:
                                     entry['rule_name'] = rule_name
                                 top_rules.append(entry)
-                            else:
-                                top_rules = []
+
+                            if top_rules:
+                                payload_top_features = [
+                                    {
+                                        'feature': f"rule_{rule_entry['rule_id']}" if isinstance(rule_entry.get('rule_id'), int) else rule_entry.get('rule_id'),
+                                        'rule_id': rule_entry.get('rule_id'),
+                                        'rule_name': rule_entry.get('rule_name'),
+                                        'importance': rule_entry.get('value')
+                                    }
+                                    for rule_entry in top_rules[:payload_rule_limit]
+                                ]
 
                             # Log alert details with top rules
                             try:
@@ -579,7 +613,7 @@ class UnifiedPipeline:
                                 pass
 
                             # Enhanced SHAP explanation for this specific alert instance
-                            if shap_explainer is not None and hasattr(X, 'shape'):
+                            if shap_explainer is not None and row_vec is not None and row_vec.size > 0:
                                 try:
                                     self.logger.info(f"Applying SHAP explanation for alert instance {result['window_id']}")
                                     
@@ -679,6 +713,8 @@ class UnifiedPipeline:
                                                     }
                                                 }
                                             )
+                                            if enriched_shap:
+                                                payload_top_features = enriched_shap[:payload_rule_limit]
                                         except Exception as log_e:
                                             self.logger.warning(f"Failed to log SHAP results for {result['window_id']}: {log_e}")
                                         
@@ -723,6 +759,21 @@ class UnifiedPipeline:
                         except Exception as e:
                             self.logger.warning(f"Alert detail processing failed for {result['window_id']}: {e}")
                             result['shap_explanation'] = {'explanation_available': False, 'error': f'Processing failed: {str(e)}'}
+
+                    # Unified detection logging (after feature context preparation)
+                    try:
+                        logging_utils.log_detection(
+                            hostname=result['hostname'],
+                            window_id=result['window_id'],
+                            prediction=label_str,
+                            confidence=result['probability'],
+                            model_name=model_name,
+                            feature_count=feature_count_total,
+                            instances_analyzed=instances_analyzed,
+                            top_features=payload_top_features if payload_top_features else None
+                        )
+                    except Exception:
+                        pass
 
                     # Persist alerts to detection_results
                     if is_alert and manager:
