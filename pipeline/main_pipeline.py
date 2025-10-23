@@ -776,19 +776,20 @@ class UnifiedPipeline:
                         self.logger.warning(
                             f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
                         )
-                        try:
-                            logging_utils.log_detection(
-                                hostname=result['hostname'],
-                                window_id=result['window_id'],
-                                prediction=label_str,
-                                confidence=result['probability'],
-                                model_name=model_name,
-                                feature_count=feature_count_total,
-                                instances_analyzed=instances_analyzed,
-                                top_features=payload_top_features if payload_top_features else None
-                            )
-                        except Exception:
-                            pass
+                        if int(pred) == 1:
+                            try:
+                                logging_utils.log_detection(
+                                    hostname=result['hostname'],
+                                    window_id=result['window_id'],
+                                    prediction=label_str,
+                                    confidence=result['probability'],
+                                    model_name=model_name,
+                                    feature_count=feature_count_total,
+                                    instances_analyzed=instances_analyzed,
+                                    top_features=payload_top_features if payload_top_features else None
+                                )
+                            except Exception:
+                                pass
             
             self.logger.info(f"Detection completed. {len(results)} alerts generated")
             return results
