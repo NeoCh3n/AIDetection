@@ -760,21 +760,6 @@ class UnifiedPipeline:
                             self.logger.warning(f"Alert detail processing failed for {result['window_id']}: {e}")
                             result['shap_explanation'] = {'explanation_available': False, 'error': f'Processing failed: {str(e)}'}
 
-                    # Unified detection logging (after feature context preparation)
-                    try:
-                        logging_utils.log_detection(
-                            hostname=result['hostname'],
-                            window_id=result['window_id'],
-                            prediction=label_str,
-                            confidence=result['probability'],
-                            model_name=model_name,
-                            feature_count=feature_count_total,
-                            instances_analyzed=instances_analyzed,
-                            top_features=payload_top_features if payload_top_features else None
-                        )
-                    except Exception:
-                        pass
-
                     # Persist alerts to detection_results
                     if is_alert and manager:
                         try:
@@ -791,6 +776,19 @@ class UnifiedPipeline:
                         self.logger.warning(
                             f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
                         )
+                        try:
+                            logging_utils.log_detection(
+                                hostname=result['hostname'],
+                                window_id=result['window_id'],
+                                prediction=label_str,
+                                confidence=result['probability'],
+                                model_name=model_name,
+                                feature_count=feature_count_total,
+                                instances_analyzed=instances_analyzed,
+                                top_features=payload_top_features if payload_top_features else None
+                            )
+                        except Exception:
+                            pass
             
             self.logger.info(f"Detection completed. {len(results)} alerts generated")
             return results
