@@ -29,9 +29,9 @@ log_dir_path_default = os.getenv("LOG_DIR", os.path.join("running_log/"))
 log_destination_address_default = os.getenv("SYSLOG_ADDRESS", "192.168.153.123")
 log_destination_port_default = int(os.getenv("SYSLOG_PORT", "514"))
 
-SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AIR")
+SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AI4")
 SYSLOG_HEADER_ML = os.getenv("SYSLOG_HEADER_ML", f"{SYSLOG_HEADER_BASE}-RF")
-SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-RF")
+SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-LOG")
 
 
 # -------------------------
