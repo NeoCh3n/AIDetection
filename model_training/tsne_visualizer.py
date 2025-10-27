@@ -32,6 +32,7 @@ from sklearn.metrics import (
 # Ensure plots can be rendered in environments without a display server.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +47,14 @@ class TSNEConfig(object):
         n_iter=1000,
         metric="euclidean",
         random_state=42,
+        n_components=3,
     ):
         self.perplexity = perplexity
         self.learning_rate = learning_rate
         self.n_iter = n_iter
         self.metric = metric
         self.random_state = random_state
+        self.n_components = n_components
 
 
 def generate_tsne_plot(
@@ -59,9 +62,9 @@ def generate_tsne_plot(
     labels: Iterable[int],
     output_path: Optional[str] = None,
     config: Optional["TSNEConfig"] = None,
-) -> Path:
+) -> Dict[str, Path]:
     """
-    Render a t-SNE scatter plot for the provided feature matrix.
+    Render t-SNE scatter plots (2D and 3D) for the provided feature matrix.
 
     Parameters
     ----------
@@ -70,15 +73,16 @@ def generate_tsne_plot(
     labels : Iterable[int]
         Binary labels aligned with the feature rows (0 = normal, 1 = attack).
     output_path : Optional[str]
-        Where to save the resulting PNG. Defaults to ``tsne_scatter.png`` when
-        not specified.
+        Base path for the resulting PNG(s). Defaults to ``tsne_scatter.png`` when
+        not specified. The 2D image is written to ``<stem>_2d.png`` and the 3D image
+        to ``<stem>.png`` (to preserve backwards compatibility).
     config : Optional[TSNEConfig]
         Optional custom configuration for t-SNE hyperparameters.
 
     Returns
     -------
-    pathlib.Path
-        Path to the generated PNG file.
+    Dict[str, Path]
+        Mapping of dimension ("2d"/"3d") to generated PNG paths.
     """
 
     if features is None or len(features) == 0:
@@ -93,61 +97,152 @@ def generate_tsne_plot(
         )
 
     cfg = config or TSNEConfig()
-    logger.info(
-        "Running t-SNE with perplexity=%s, learning_rate=%s, n_iter=%s",
-        cfg.perplexity,
-        cfg.learning_rate,
-        cfg.n_iter,
-    )
 
-    tsne = TSNE(
-        n_components=2,
-        perplexity=cfg.perplexity,
-        learning_rate=cfg.learning_rate,
-        n_iter=cfg.n_iter,
-        metric=cfg.metric,
-        random_state=cfg.random_state,
-        init="pca",
-        verbose=0,
-    )
+    base_output = Path(output_path) if output_path else Path("tsne_scatter.png")
+    base_output.parent.mkdir(parents=True, exist_ok=True)
+    output_2d = base_output.with_name(f"{base_output.stem}_2d{base_output.suffix}")
+    output_3d = base_output
 
-    embeddings = tsne.fit_transform(features)
-    logger.debug("t-SNE embedding shape: %s", embeddings.shape)
+    artifacts: Dict[str, Path] = {}
 
-    output = Path(output_path) if output_path else Path("tsne_scatter.png")
-    output.parent.mkdir(parents=True, exist_ok=True)
+    def _fit_tsne(n_components: int) -> np.ndarray:
+        logger.info(
+            "Running t-SNE with perplexity=%s, learning_rate=%s, n_iter=%s, n_components=%s",
+            cfg.perplexity,
+            cfg.learning_rate,
+            cfg.n_iter,
+            n_components,
+        )
+        tsne = TSNE(
+            n_components=n_components,
+            perplexity=cfg.perplexity,
+            learning_rate=cfg.learning_rate,
+            n_iter=cfg.n_iter,
+            metric=cfg.metric,
+            random_state=cfg.random_state,
+            init="pca",
+            verbose=0,
+        )
+        emb = tsne.fit_transform(features)
+        logger.debug("t-SNE embedding shape (n=%s): %s", n_components, emb.shape)
+        return emb
 
-    plt.figure(figsize=(8, 6))
-    is_attack = labels_array == 1
-    plt.scatter(
-        embeddings[~is_attack, 0],
-        embeddings[~is_attack, 1],
-        c="royalblue",
-        alpha=0.6,
-        label="Normal (0)",
-        edgecolors="none",
-    )
-    plt.scatter(
-        embeddings[is_attack, 0],
-        embeddings[is_attack, 1],
-        c="crimson",
-        alpha=0.7,
-        label="Attack (1)",
-        edgecolors="none",
-    )
+    # 2D projection ---------------------------------------------------------
+    try:
+        emb_2d = _fit_tsne(2)
+        plt.figure(figsize=(8, 6))
+        is_attack = labels_array == 1
+        plt.scatter(
+            emb_2d[~is_attack, 0],
+            emb_2d[~is_attack, 1],
+            c="royalblue",
+            alpha=0.6,
+            label="Normal (0)",
+            edgecolors="none",
+        )
+        plt.scatter(
+            emb_2d[is_attack, 0],
+            emb_2d[is_attack, 1],
+            c="crimson",
+            alpha=0.7,
+            label="Attack (1)",
+            edgecolors="none",
+        )
+        plt.title("t-SNE Projection of Training Windows (2D)")
+        plt.xlabel("Component 1")
+        plt.ylabel("Component 2")
+        plt.legend(loc="best")
+        plt.grid(True, linestyle="--", alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(output_2d, dpi=300, bbox_inches="tight")
+        plt.close()
+        artifacts["2d"] = output_2d
+        logger.info("t-SNE 2D scatter plot saved to %s", output_2d)
+    except Exception as exc:
+        logger.warning("Failed to generate 2D t-SNE plot: %s", exc)
 
-    plt.title("t-SNE Projection of Training Windows")
-    plt.xlabel("Component 1")
-    plt.ylabel("Component 2")
-    plt.legend(loc="best")
-    plt.grid(True, linestyle="--", alpha=0.3)
-    plt.tight_layout()
+    # 3D projection ---------------------------------------------------------
+    try:
+        n_components_3d = max(3, int(getattr(cfg, "n_components", 3)))
+        emb_3d = _fit_tsne(n_components_3d)
+        if emb_3d.shape[1] < 3:
+            raise ValueError(
+                "t-SNE returned %s dimensions, cannot render 3D plot"
+                % emb_3d.shape[1]
+            )
+        is_attack = labels_array == 1
+        class_def: List[Tuple[np.ndarray, str, str]] = [
+            (emb_3d[~is_attack], "royalblue", "Normal (0)"),
+            (emb_3d[is_attack], "crimson", "Attack (1)"),
+        ]
 
-    plt.savefig(output, dpi=300, bbox_inches="tight")
-    plt.close()
+        fig = plt.figure(figsize=(12, 10))
+        ax3d = fig.add_subplot(2, 2, 1, projection="3d")
+        for coords, color, label in class_def:
+            if coords.size == 0:
+                continue
+            ax3d.scatter(
+                coords[:, 0],
+                coords[:, 1],
+                coords[:, 2],
+                c=color,
+                alpha=0.7,
+                label=label,
+                edgecolors="none",
+                depthshade=True,
+            )
+        ax3d.set_title("t-SNE Projection (3D View)")
+        ax3d.set_xlabel("Component 1")
+        ax3d.set_ylabel("Component 2")
+        ax3d.set_zlabel("Component 3")
+        ax3d.legend(loc="best")
+        ax3d.grid(True)
 
-    logger.info("t-SNE scatter plot saved to %s", output)
-    return output
+        def _plot_projection(ax, dims: Tuple[int, int], title: str):
+            x_idx, y_idx = dims
+            for coords, color, label in class_def:
+                if coords.size == 0:
+                    continue
+                ax.scatter(
+                    coords[:, x_idx],
+                    coords[:, y_idx],
+                    c=color,
+                    alpha=0.7,
+                    label=label,
+                    edgecolors="none",
+                )
+            ax.set_title(title)
+            ax.set_xlabel(f"Component {x_idx + 1}")
+            ax.set_ylabel(f"Component {y_idx + 1}")
+            ax.grid(True, linestyle="--", alpha=0.3)
+
+        ax_top = fig.add_subplot(2, 2, 2)
+        _plot_projection(ax_top, (0, 1), "Top View (Comp1 vs Comp2)")
+
+        ax_front = fig.add_subplot(2, 2, 3)
+        _plot_projection(ax_front, (0, 2), "Front View (Comp1 vs Comp3)")
+
+        ax_side = fig.add_subplot(2, 2, 4)
+        _plot_projection(ax_side, (1, 2), "Side View (Comp2 vs Comp3)")
+
+        # Only keep a single legend (top-right subplot) to reduce clutter
+        handles, labels = ax_top.get_legend_handles_labels()
+        if handles:
+            fig.legend(handles, labels, loc="upper center", ncol=len(handles))
+            for axis in (ax_top, ax_front, ax_side):
+                legend_obj = axis.get_legend()
+                if legend_obj is not None:
+                    legend_obj.remove()
+
+        fig.tight_layout(rect=[0, 0, 1, 0.94])
+        fig.savefig(output_3d, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        artifacts["3d"] = output_3d
+        logger.info("t-SNE 3D scatter plot saved to %s", output_3d)
+    except Exception as exc:
+        logger.warning("Failed to generate 3D t-SNE plot: %s", exc)
+
+    return artifacts
 
 
 def generate_evaluation_artifacts(

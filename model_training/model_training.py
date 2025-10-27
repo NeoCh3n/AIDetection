@@ -610,6 +610,8 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
         
         # Step 6: Save trained model
         model_dir = os.path.dirname(model_save_path) or "."
+        examination_dir = os.path.join(model_dir, "model_examination")
+        os.makedirs(examination_dir, exist_ok=True)
         base_name = os.path.splitext(os.path.basename(model_save_path))[0]
         logger.info(f"Saving model to: {model_save_path}")
         joblib.dump(rf_model, model_save_path)
@@ -632,8 +634,9 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                     metric=tsne_metric,
                     random_state=tsne_random_state,
                 )
-                tsne_path = os.path.join(model_dir, f"{base_name}_tsne.png")
-                generate_tsne_plot(sample_X, sample_y, tsne_path, tsne_cfg_obj)
+                tsne_path = os.path.join(examination_dir, f"{base_name}_tsne.png")
+                tsne_outputs = generate_tsne_plot(sample_X, sample_y, tsne_path, tsne_cfg_obj)
+                logger.info("t-SNE artifacts generated: %s", {k: str(v) for k, v in tsne_outputs.items()})
             except Exception as exc:
                 logger.warning(f"Failed to generate t-SNE plot: {exc}")
 
@@ -856,14 +859,16 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         
         # Save evaluation reports
         model_dir = os.path.dirname(model_save_path)
+        examination_dir = os.path.join(model_dir, "model_examination")
+        os.makedirs(examination_dir, exist_ok=True)
         base_name = os.path.splitext(os.path.basename(model_save_path))[0]
         
         # Save top features (Top-10). Keep legacy Top-20 filename for compatibility; also write a Top-10 file.
-        top10_path = os.path.join(model_dir, f"{base_name}_top_10_features.csv")
+        top10_path = os.path.join(examination_dir, f"{base_name}_top_10_features.csv")
         top_10_features.to_csv(top10_path, index=False)
         logger.info(f"Top 10 features saved to: {top10_path}")
         # Backward compatibility file
-        legacy_top_path = os.path.join(model_dir, f"{base_name}_top_20_features.csv")
+        legacy_top_path = os.path.join(examination_dir, f"{base_name}_top_20_features.csv")
         try:
             top_10_features.to_csv(legacy_top_path, index=False)
             logger.info(f"(Compat) Also wrote: {legacy_top_path}")
@@ -890,7 +895,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
                 y_test,
                 y_pred,
                 y_pred_proba,
-                Path(model_dir or "."),
+                Path(examination_dir),
                 classification_report_text=report_text,
                 feature_importances=feature_importances,
                 feature_names=feature_names_full,
@@ -923,7 +928,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
                     'f1_score': float(f1_scores[best_idx])
                 }
 
-        pr_curve_csv_path = os.path.join(model_dir, f"{base_name}_pr_curve_data.csv")
+        pr_curve_csv_path = os.path.join(examination_dir, f"{base_name}_pr_curve_data.csv")
         try:
             thresholds_full = np.append(pr_thresholds, 1.0) if pr_thresholds.size else np.array([1.0])
             pr_curve_df = pd.DataFrame({
@@ -939,7 +944,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
 
         # Plot and save Precision-Recall curve for auditing
         try:
-            pr_curve_path = os.path.join(model_dir, f"{base_name}_pr_curve.png")
+            pr_curve_path = os.path.join(examination_dir, f"{base_name}_pr_curve.png")
             plt.figure(figsize=(8, 6))
             plt.step(recall_vals, precision_vals, where='post', color='navy', label=f'AP={pr_auc:.4f}')
             plt.fill_between(recall_vals, precision_vals, step='post', alpha=0.2, color='navy')
