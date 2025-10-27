@@ -41,13 +41,14 @@ Notes
 - RandomForest default: n_estimators=200, class_weight='balanced_subsample', max_features='sqrt', n_jobs=-1.
 """
 
-import sys
 import os
 import json
 import logging
 import argparse
 import math
-from typing import Optional, Dict, Tuple, cast
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, cast
 import joblib
 import numpy as np
 
@@ -75,7 +76,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from model_training.tsne_visualizer import TSNEConfig, generate_tsne_plot
+from model_training.tsne_visualizer import (
+    TSNEConfig,
+    generate_evaluation_artifacts,
+    generate_tsne_plot,
+)
 # Import pipeline modules
 from pipeline.data_loader import load_data
 from pipeline.feature_aggregator import aggregate_to_windows
@@ -737,7 +742,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         conf_matrix = confusion_matrix(y_test, y_pred)
         roc_auc = roc_auc_score(y_test, y_pred_proba)
         pr_auc = average_precision_score(y_test, y_pred_proba)
-        precision_vals, recall_vals, _ = precision_recall_curve(y_test, y_pred_proba)
+        precision_vals, recall_vals, pr_thresholds = precision_recall_curve(y_test, y_pred_proba)
         prc_auc = auc(recall_vals, precision_vals)
 
         # Log key metrics
@@ -796,6 +801,15 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
                                     continue
                 except Exception:
                     continue
+
+        feature_names_full: List[str] = []
+        for rid in rule_list:
+            label = (
+                rule_name_map.get(int(rid), f"Rule {rid}")
+                if include_names
+                else f"Rule {rid}"
+            )
+            feature_names_full.append(str(label))
 
         # Create rule importance mapping and enrich with rule names
         importance_df = pd.DataFrame({
@@ -871,6 +885,58 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             'top_20_features': top_10_features.to_dict(orient='records'),
             'training_date': pd.Timestamp.now().isoformat()
         }
+        try:
+            diagnostic_artifacts = generate_evaluation_artifacts(
+                y_test,
+                y_pred,
+                y_pred_proba,
+                Path(model_dir or "."),
+                classification_report_text=report_text,
+                feature_importances=feature_importances,
+                feature_names=feature_names_full,
+                top_k_features=min(20, len(rule_list)),
+            )
+            if diagnostic_artifacts:
+                evaluation_report['diagnostic_artifacts'] = {
+                    key: str(path) for key, path in diagnostic_artifacts.items()
+                }
+                logger.info(
+                    "Generated diagnostic artifacts: %s",
+                    evaluation_report['diagnostic_artifacts'],
+                )
+        except Exception as e:
+            logger.warning(f"Failed to generate diagnostic artifacts: {e}")
+
+        # Best-threshold search (F1) and PR curve artefacts
+        best_threshold_summary = None
+        if pr_thresholds.size > 0 and precision_vals.size > 1 and recall_vals.size > 1:
+            denom = precision_vals[:-1] + recall_vals[:-1]
+            valid = denom > 0
+            f1_scores = np.zeros_like(precision_vals[:-1])
+            f1_scores[valid] = 2 * precision_vals[:-1][valid] * recall_vals[:-1][valid] / denom[valid]
+            if f1_scores.size > 0:
+                best_idx = int(np.argmax(f1_scores))
+                best_threshold_summary = {
+                    'threshold': float(pr_thresholds[best_idx]),
+                    'precision': float(precision_vals[best_idx]),
+                    'recall': float(recall_vals[best_idx]),
+                    'f1_score': float(f1_scores[best_idx])
+                }
+
+        pr_curve_csv_path = os.path.join(model_dir, f"{base_name}_pr_curve_data.csv")
+        try:
+            thresholds_full = np.append(pr_thresholds, 1.0) if pr_thresholds.size else np.array([1.0])
+            pr_curve_df = pd.DataFrame({
+                'threshold': thresholds_full,
+                'precision': precision_vals,
+                'recall': recall_vals
+            })
+            pr_curve_df.to_csv(pr_curve_csv_path, index=False)
+            logger.info(f"Precision-Recall data saved to: {pr_curve_csv_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save Precision-Recall data: {e}")
+            pr_curve_csv_path = None
+
         # Plot and save Precision-Recall curve for auditing
         try:
             pr_curve_path = os.path.join(model_dir, f"{base_name}_pr_curve.png")
@@ -891,9 +957,16 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             logger.info(f"Precision-Recall curve saved to: {pr_curve_path}")
         except Exception as e:
             logger.warning(f"Failed to generate Precision-Recall curve: {e}")
+            pr_curve_path = None
         
         report_path = os.path.join(model_dir, f"{base_name}_evaluation_report.json")
         with open(report_path, 'w') as f:
+            if pr_curve_path:
+                evaluation_report['precision_recall_curve_path'] = pr_curve_path
+            if pr_curve_csv_path:
+                evaluation_report['precision_recall_curve_data_path'] = pr_curve_csv_path
+            if best_threshold_summary:
+                evaluation_report['recommended_threshold_f1'] = best_threshold_summary
             json.dump(evaluation_report, f, indent=2)
         logger.info(f"Evaluation report saved to: {report_path}")
         

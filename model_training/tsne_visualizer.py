@@ -1,20 +1,33 @@
 """
-t-SNE Visualization Utilities
-=============================
+t-SNE & Model Diagnostic Visualization Utilities
+================================================
 
-Generates scatter plots that project high-dimensional feature vectors onto a
-2D plane using t-Distributed Stochastic Neighbour Embedding (t-SNE). Designed
-to run in headless environments and integrate with the supervised training
-pipeline.
+Provides helper routines to visualise model behaviour and evaluation metrics:
+
+* t-SNE projection of high-dimensional feature vectors.
+* ROC, cumulative gains, lift, and calibration curves.
+* Confusion matrix heatmap, classification report (text file), and
+  feature-importance bar chart.
+
+All plots are rendered with matplotlib's Agg backend so they work in headless
+environments (e.g., CI, remote servers). Outputs are saved as PNG files to the
+specified directory (typically the ``model`` folder used by the training
+pipeline).
 """
 
 import logging
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import matplotlib
 import numpy as np
+from sklearn.calibration import calibration_curve
 from sklearn.manifold import TSNE
+from sklearn.metrics import (
+    auc,
+    confusion_matrix,
+    roc_curve,
+)
 
 # Ensure plots can be rendered in environments without a display server.
 matplotlib.use("Agg")
@@ -135,3 +148,350 @@ def generate_tsne_plot(
 
     logger.info("t-SNE scatter plot saved to %s", output)
     return output
+
+
+def generate_evaluation_artifacts(
+    y_true: Sequence[int],
+    y_pred: Sequence[int],
+    y_proba: Optional[Sequence[float]],
+    output_dir: Path,
+    classification_report_text: Optional[str] = None,
+    feature_importances: Optional[Sequence[float]] = None,
+    feature_names: Optional[Sequence[str]] = None,
+    top_k_features: int = 20,
+) -> Dict[str, Path]:
+    """
+    Generate a suite of diagnostic plots and reports after model training.
+
+    Parameters
+    ----------
+    y_true : Sequence[int]
+        Ground-truth binary labels.
+    y_pred : Sequence[int]
+        Model-predicted binary labels.
+    y_proba : Optional[Sequence[float]]
+        Positive-class probabilities. Required for ROC, gains, lift, and
+        calibration curves. Plots depending on probabilities are skipped when
+        this is ``None``.
+    output_dir : Path
+        Directory where PNG/text artifacts are written.
+    classification_report_text : Optional[str]
+        Full classification report (precision/recall/F1) for persistence.
+    feature_importances : Optional[Sequence[float]]
+        Feature importance values (e.g., from RandomForest.feature_importances_).
+    feature_names : Optional[Sequence[str]]
+        Names matching ``feature_importances`` indices. Falls back to generic
+        names if not provided.
+    top_k_features : int
+        Maximum number of features to show in the importance bar chart.
+
+    Returns
+    -------
+    Dict[str, Path]
+        Mapping of artifact names to generated file paths.
+    """
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    y_true_arr = np.asarray(list(y_true))
+    y_pred_arr = np.asarray(list(y_pred))
+    y_proba_arr = np.asarray(list(y_proba)) if y_proba is not None else None
+
+    artifacts: Dict[str, Path] = {}
+
+    # ROC Curve -------------------------------------------------------------
+    if y_proba_arr is not None and y_proba_arr.size == y_true_arr.size:
+        try:
+            roc_path = output_dir / "roc_curve.png"
+            _plot_roc_curve(y_true_arr, y_proba_arr, roc_path)
+            artifacts["roc_curve"] = roc_path
+        except Exception as exc:
+            logger.warning("Failed to generate ROC curve: %s", exc)
+
+        # Cumulative Gains & Lift Charts share the same computed arrays
+        try:
+            gains_path = output_dir / "cumulative_gains_curve.png"
+            lift_path = output_dir / "lift_chart.png"
+            perc_samples, perc_positives, lift_values = _compute_cumulative_gains(
+                y_true_arr, y_proba_arr
+            )
+            _plot_cumulative_gains(perc_samples, perc_positives, gains_path)
+            _plot_lift_chart(perc_samples, lift_values, lift_path)
+            artifacts["cumulative_gains"] = gains_path
+            artifacts["lift_chart"] = lift_path
+        except Exception as exc:
+            logger.warning("Failed to generate gains/lift charts: %s", exc)
+
+        try:
+            calibration_path = output_dir / "calibration_curve.png"
+            _plot_calibration_curve(y_true_arr, y_proba_arr, calibration_path)
+            artifacts["calibration_curve"] = calibration_path
+        except Exception as exc:
+            logger.warning("Failed to generate calibration curve: %s", exc)
+
+    else:
+        logger.warning(
+            "Probability scores unavailable; skipping ROC, gains, lift, and calibration plots"
+        )
+
+    # Confusion Matrix ------------------------------------------------------
+    try:
+        cm_path = output_dir / "confusion_matrix.png"
+        cm = confusion_matrix(y_true_arr, y_pred_arr)
+        _plot_confusion_matrix(cm, cm_path)
+        artifacts["confusion_matrix"] = cm_path
+    except Exception as exc:
+        logger.warning("Failed to generate confusion matrix: %s", exc)
+
+    # Classification Report -------------------------------------------------
+    if classification_report_text:
+        try:
+            report_path = output_dir / "classification_report.txt"
+            report_path.write_text(classification_report_text, encoding="utf-8")
+            artifacts["classification_report"] = report_path
+        except Exception as exc:
+            logger.warning("Failed to persist classification report: %s", exc)
+
+    # Feature Importance ----------------------------------------------------
+    if feature_importances is not None:
+        try:
+            importance_path = output_dir / "feature_importance.png"
+            _plot_feature_importance(
+                np.asarray(list(feature_importances)),
+                feature_names,
+                importance_path,
+                top_k_features,
+            )
+            artifacts["feature_importance"] = importance_path
+        except Exception as exc:
+            logger.warning("Failed to generate feature-importance chart: %s", exc)
+
+    return artifacts
+
+
+def _plot_roc_curve(y_true: np.ndarray, y_proba: np.ndarray, output_path: Path) -> None:
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure(figsize=(6, 5))
+    plt.plot(fpr, tpr, color="darkorange", lw=2, label="ROC curve (AUC = %.3f)" % roc_auc)
+    plt.plot([0, 1], [0, 1], color="navy", lw=1, linestyle="--", label="Random")
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("Receiver Operating Characteristic")
+    plt.legend(loc="lower right")
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _compute_cumulative_gains(
+    y_true: np.ndarray, y_proba: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    order = np.argsort(-y_proba)
+    y_true_sorted = y_true[order]
+
+    total_samples = y_true_sorted.size
+    if total_samples == 0:
+        raise ValueError("No samples available for cumulative gains computation")
+
+    positives_total = np.sum(y_true_sorted)
+    if positives_total <= 0:
+        positives_total = 1  # avoid division by zero, curve will stay near zero
+
+    cum_positives = np.cumsum(y_true_sorted)
+    perc_samples = np.arange(1, total_samples + 1, dtype=float) / float(total_samples)
+    perc_positives = cum_positives / float(positives_total)
+
+    expected_positive_rate = np.arange(1, total_samples + 1, dtype=float) / float(
+        total_samples
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lift = np.where(
+            expected_positive_rate > 0,
+            perc_positives / expected_positive_rate,
+            0.0,
+        )
+
+    return perc_samples, perc_positives, lift
+
+
+def _plot_cumulative_gains(
+    perc_samples: np.ndarray, perc_positives: np.ndarray, output_path: Path
+) -> None:
+    plt.figure(figsize=(6, 5))
+    plt.plot(
+        perc_samples * 100,
+        perc_positives * 100,
+        color="green",
+        lw=2,
+        label="Model",
+    )
+    plt.plot(
+        [0, 100],
+        [0, 100],
+        color="gray",
+        lw=1,
+        linestyle="--",
+        label="Baseline",
+    )
+    plt.xlim([0, 100])
+    plt.ylim([0, 105])
+    plt.xlabel("Cumulative Percentage of Samples")
+    plt.ylabel("Cumulative Percentage of Positives")
+    plt.title("Cumulative Gains Curve")
+    plt.legend(loc="lower right")
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_lift_chart(
+    perc_samples: np.ndarray, lift_values: np.ndarray, output_path: Path
+) -> None:
+    plt.figure(figsize=(6, 5))
+    plt.plot(
+        perc_samples * 100,
+        lift_values,
+        color="purple",
+        lw=2,
+        label="Model Lift",
+    )
+    plt.axhline(1.0, color="gray", linestyle="--", label="Baseline Lift = 1")
+    plt.xlim([0, 100])
+    plt.ylim(bottom=0)
+    plt.xlabel("Cumulative Percentage of Samples")
+    plt.ylabel("Lift")
+    plt.title("Lift Chart")
+    plt.legend(loc="upper right")
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_calibration_curve(
+    y_true: np.ndarray, y_proba: np.ndarray, output_path: Path
+) -> None:
+    prob_true, prob_pred = calibration_curve(y_true, y_proba, n_bins=10)
+
+    plt.figure(figsize=(6, 5))
+    plt.plot(prob_pred, prob_true, marker="o", linewidth=2, label="Model")
+    plt.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Perfectly Calibrated")
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel("Mean Predicted Probability")
+    plt.ylabel("Fraction of Positives")
+    plt.title("Calibration Curve")
+    plt.legend(loc="upper left")
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_confusion_matrix(cm: np.ndarray, output_path: Path) -> None:
+    plt.figure(figsize=(5, 4))
+    im = plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+    plt.title("Confusion Matrix")
+    plt.colorbar(im, fraction=0.046, pad=0.04)
+    tick_marks = np.arange(cm.shape[0])
+    plt.xticks(tick_marks, ["Normal", "Attack"])
+    plt.yticks(tick_marks, ["Normal", "Attack"])
+
+    thresh = cm.max() / 2.0 if cm.size else 0.0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            plt.text(
+                j,
+                i,
+                format(cm[i, j], "d"),
+                ha="center",
+                va="center",
+                color="white" if cm[i, j] > thresh else "black",
+            )
+
+    plt.ylabel("True Label")
+    plt.xlabel("Predicted Label")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_feature_importance(
+    feature_importances: np.ndarray,
+    feature_names: Optional[Sequence[str]],
+    output_path: Path,
+    top_k: int,
+) -> None:
+    feature_importances = np.asarray(feature_importances, dtype=float).ravel()
+    if feature_importances.ndim != 1:
+        raise ValueError("feature_importances must be a 1-D sequence")
+
+    if feature_importances.size == 0:
+        raise ValueError("feature_importances is empty")
+
+    top_k = max(1, int(top_k))
+
+    # Sort by importance descending
+    order = np.argsort(feature_importances)[::-1]
+    ordered_pairs = [(idx, feature_importances[idx]) for idx in order]
+
+    # Prefer strictly positive importances for visibility
+    positive_pairs = [(idx, val) for idx, val in ordered_pairs if np.isfinite(val) and val > 0]
+    selected = positive_pairs[:top_k] if positive_pairs else ordered_pairs[:top_k]
+
+    if not selected:
+        raise ValueError("Unable to select feature importances for plotting")
+
+    sel_indices, sel_values = zip(*selected)
+    sel_indices_arr = np.array(sel_indices, dtype=int)
+    sel_values_arr = np.array(sel_values, dtype=float)
+
+    if feature_names is not None and len(feature_names) >= feature_importances.size:
+        names = [str(feature_names[i]) for i in sel_indices_arr]
+    else:
+        names = ["Feature %d" % i for i in sel_indices_arr]
+
+    # Preserve descending order top -> bottom in bar chart
+    raw_values = sel_values_arr[::-1]
+    plot_names = names[::-1]
+    y_pos = np.arange(len(raw_values))
+
+    # Normalise purely for visual clarity when magnitudes are tiny
+    max_abs = np.max(np.abs(raw_values))
+    if max_abs > 0:
+        plot_values = raw_values
+        display_values = raw_values
+    else:
+        # All importances zero (or effectively zero). Use equal bars for visibility
+        plot_values = np.ones_like(raw_values)
+        display_values = raw_values
+
+    plt.figure(figsize=(8, max(4, len(plot_values) * 0.4)))
+    bars = plt.barh(y_pos, plot_values, align="center", color="steelblue")
+    plt.yticks(y_pos, plot_names)
+    plt.xlabel("Importance")
+    plt.title("Top %d Feature Importances" % len(plot_values))
+    plt.grid(axis="x", linestyle="--", alpha=0.3)
+
+    # Annotate each bar with the raw (un-normalised) importance
+    for bar, raw in zip(bars, display_values):
+        width = bar.get_width()
+        text_x = width if width > 0 else bar.get_x() + 0.02
+        plt.text(
+            text_x,
+            bar.get_y() + bar.get_height() / 2.0,
+            f"{raw:.4e}",
+            va="center",
+            ha="left",
+            fontsize=8,
+        )
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
