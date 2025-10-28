@@ -30,6 +30,7 @@ import json
 import csv
 from datetime import datetime, timedelta
 import logging
+import random
 import numpy as np
 from typing import List, Optional, Dict, Any
 import importlib
@@ -201,7 +202,16 @@ class UnifiedPipeline:
             }
             http_timeout = int(qcfg.get('timeout', 300))
             poll_interval = max(3, int(qcfg.get('poll_interval', 5)))
+            base_poll_interval = poll_interval
             max_wait = int(qcfg.get('max_wait_seconds', http_timeout))
+            backoff_factor = float(qcfg.get('status_backoff_factor', 1.5))
+            max_poll_interval = max(poll_interval, int(qcfg.get('max_poll_interval', 60)))
+            jitter_seconds = max(0.0, float(qcfg.get('status_poll_jitter', 1.0)))
+            backoff_step_limit = max(1, int(qcfg.get('status_backoff_steps', 6)))
+            max_status_checks = int(qcfg.get('max_status_checks', 0))
+            if max_status_checks <= 0:
+                approx_checks = int(max_wait / max(poll_interval, 1)) + 1
+                max_status_checks = max(approx_checks, 5)
             
             # Create search
             search_response = create_searches_Qradar(
@@ -227,6 +237,9 @@ class UnifiedPipeline:
             start_wait = time.monotonic()
             last_status = None
             last_progress = None
+            attempt_count = 0
+            consecutive_errors = 0
+            consecutive_pending = 0
             while True:
                 # Check timeout
                 elapsed = time.monotonic() - start_wait
@@ -246,6 +259,24 @@ class UnifiedPipeline:
                     except Exception:
                         pass
                     return None
+                if attempt_count >= max_status_checks:
+                    msg = (
+                        f"QRadar search exceeded maximum status checks ({max_status_checks}); "
+                        f"search_id={search_id}, last_status={last_status}, last_progress={last_progress}, "
+                        f"elapsed={int(elapsed)}s"
+                    )
+                    self.logger.error(msg)
+                    try:
+                        logging_utils.run_log("ERROR", msg)
+                    except Exception:
+                        pass
+                    try:
+                        delete_searches_Qradar(Qradar_address=qcfg['host'], search_id=search_id, request_header=request_header, timeout=10)
+                    except Exception:
+                        pass
+                    return None
+
+                attempt_count += 1
 
                 # Query status
                 status_resp = status_searches_Qradar(
@@ -255,16 +286,116 @@ class UnifiedPipeline:
                     timeout=min(30, http_timeout)
                 )
                 if not status_resp or not isinstance(status_resp, dict):
-                    time.sleep(poll_interval)
+                    consecutive_errors += 1
+                    exponent = min(consecutive_errors, backoff_step_limit)
+                    sleep_seconds = min(
+                        max_poll_interval,
+                        base_poll_interval * (backoff_factor ** exponent)
+                    )
+                    if jitter_seconds:
+                        sleep_seconds += random.uniform(0, jitter_seconds)
+                    self.logger.warning(
+                        f"QRadar status check yielded no data (attempt {attempt_count}/{max_status_checks}); "
+                        f"backing off for {sleep_seconds:.1f}s"
+                    )
+                    time.sleep(sleep_seconds)
                     continue
 
-                last_status = str(status_resp.get('status', '')).upper()
-                last_progress = status_resp.get('progress')
+                http_status = status_resp.get('__http_status')
+                try:
+                    http_status = int(http_status) if http_status is not None else None
+                except (TypeError, ValueError):
+                    http_status = None
+
+                retry_after_header = status_resp.get('__retry_after')
+                retry_after_seconds = None
+                if retry_after_header:
+                    try:
+                        retry_after_seconds = float(retry_after_header)
+                    except (TypeError, ValueError):
+                        retry_after_seconds = None
+
+                if http_status is not None and http_status >= 400:
+                    consecutive_errors += 1
+                    exponent = min(consecutive_errors, backoff_step_limit)
+                    if http_status == 429 and retry_after_seconds is not None:
+                        sleep_seconds = min(max_poll_interval, max(retry_after_seconds, base_poll_interval))
+                    else:
+                        sleep_seconds = min(
+                            max_poll_interval,
+                            base_poll_interval * (backoff_factor ** exponent)
+                        )
+                    if jitter_seconds:
+                        sleep_seconds += random.uniform(0, jitter_seconds)
+                    self.logger.warning(
+                        f"QRadar status check HTTP {http_status} (attempt {attempt_count}/{max_status_checks}); "
+                        f"backing off for {sleep_seconds:.1f}s"
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+
+                if 'status' not in status_resp:
+                    consecutive_errors += 1
+                    exponent = min(consecutive_errors, backoff_step_limit)
+                    sleep_seconds = min(
+                        max_poll_interval,
+                        base_poll_interval * (backoff_factor ** exponent)
+                    )
+                    if jitter_seconds:
+                        sleep_seconds += random.uniform(0, jitter_seconds)
+                    self.logger.warning(
+                        f"QRadar status payload missing 'status' field (attempt {attempt_count}/{max_status_checks}); "
+                        f"sleeping {sleep_seconds:.1f}s before retry"
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+
+                # Valid response resets error streak
+                consecutive_errors = 0
+
+                prev_status = last_status
+                prev_progress = last_progress
+
+                status_value = str(status_resp.get('status', '')).upper()
+                progress_value = status_resp.get('progress')
+
                 # Log periodic progress
-                self.logger.info(f"QRadar search status: {last_status} ({last_progress}%) for search_id={search_id}")
-                if last_status in ("COMPLETED", "COMPLETE", "SORTED", "DONE", "FINISHED"):
+                self.logger.info(f"QRadar search status: {status_value} ({progress_value}%) for search_id={search_id}")
+                if status_value in ("COMPLETED", "COMPLETE", "SORTED", "DONE", "FINISHED"):
+                    last_status = status_value
+                    last_progress = progress_value
                     break
-                time.sleep(poll_interval)
+
+                status_changed = prev_status is None or status_value != prev_status
+                progress_improved = False
+                if progress_value is not None and prev_progress is not None:
+                    try:
+                        progress_improved = float(progress_value) > float(prev_progress)
+                    except (TypeError, ValueError):
+                        progress_improved = False
+
+                last_status = status_value
+                last_progress = progress_value
+
+                if status_changed or progress_improved:
+                    consecutive_pending = 0
+                else:
+                    consecutive_pending += 1
+
+                exponent = min(max(consecutive_pending - 1, 0), backoff_step_limit)
+                sleep_seconds = min(
+                    max_poll_interval,
+                    base_poll_interval * (backoff_factor ** exponent)
+                )
+                if jitter_seconds:
+                    sleep_seconds += random.uniform(0, jitter_seconds)
+
+                self.logger.debug(
+                    f"QRadar search pending (status={status_value}, progress={progress_value}); "
+                    f"sleeping {sleep_seconds:.1f}s before next status check "
+                    f"(attempt {attempt_count}/{max_status_checks})"
+                )
+                time.sleep(sleep_seconds)
             
             result_data = result_searches_Qradar(
                 Qradar_address=qcfg['host'],

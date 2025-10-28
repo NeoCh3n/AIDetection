@@ -33,6 +33,17 @@ def status_searches_Qradar(Qradar_address=Qradar_address_default, search_id=sear
         )
         # Parse the JSON response
         get_response_ariel_searches = get_request_ariel_searches.json()
+        if isinstance(get_response_ariel_searches, dict):
+            try:
+                get_response_ariel_searches['__http_status'] = getattr(get_request_ariel_searches, "status_code", None)
+            except Exception:
+                pass
+            try:
+                retry_after_header = get_request_ariel_searches.headers.get('Retry-After')
+                if retry_after_header:
+                    get_response_ariel_searches['__retry_after'] = retry_after_header
+            except Exception:
+                pass
         logging_utils.run_log("INFO", "5. GET Request sent to Qradar: getting ariel searches status information -- Response Code: " + str(get_request_ariel_searches))
     except requests.Timeout as e:
         logging_utils.run_log("ERROR", f"QRadar status check timeout after {timeout}s: {e}")
