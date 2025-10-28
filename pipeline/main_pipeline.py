@@ -31,8 +31,11 @@ import csv
 from datetime import datetime, timedelta
 import logging
 import random
-import numpy as np
+import time
+from contextlib import contextmanager
 from typing import List, Optional, Dict, Any
+
+import numpy as np
 import importlib
 
 """
@@ -136,14 +139,16 @@ class UnifiedPipeline:
                         "connection_string": "mongodb://localhost:27017/",
                         "database": "qradar_ml",
                         "collection": "detection_data"
-                    },
-                    "retention_days": 7,
-                    "alert_threshold": 0.8
                 },
-                "rule_manager": {
-                    "mode": "file",
-                    "api_config": {}
-                }
+                "retention_days": 7,
+                "alert_threshold": 0.8,
+                "min_fetch_interval_seconds": 300,
+                "lock_max_age_seconds": 1800
+            },
+            "rule_manager": {
+                "mode": "file",
+                "api_config": {}
+            }
             }
     
     def run_training(self):
@@ -459,6 +464,174 @@ class UnifiedPipeline:
         except Exception as e:
             self.logger.error(f"Failed to cleanup old data: {str(e)}")
             return 0
+
+    def _get_detection_runtime_dir(self) -> str:
+        """Directory used to persist detection runtime state (locks, metadata)."""
+        paths_cfg = self.config.get('paths', {})
+        base_dir = paths_cfg.get('logs')
+        if base_dir:
+            base_dir = os.path.abspath(base_dir)
+        else:
+            base_dir = os.path.join(PROJECT_ROOT, 'running_log')
+
+        runtime_dir = os.path.join(base_dir, 'detection_runtime')
+        try:
+            os.makedirs(runtime_dir, exist_ok=True)
+        except Exception as exc:
+            self.logger.warning(f"Failed to ensure detection runtime directory: {exc}")
+        return runtime_dir
+
+    def _get_detection_lock_path(self) -> str:
+        """Path to the detection lock file."""
+        return os.path.join(self._get_detection_runtime_dir(), 'detection.lock')
+
+    def _get_detection_state_path(self) -> str:
+        """Path to the detection state file."""
+        return os.path.join(self._get_detection_runtime_dir(), 'detection_state.json')
+
+    def _load_detection_state(self) -> Dict[str, Any]:
+        """Load persisted detection state metadata."""
+        state_path = self._get_detection_state_path()
+        try:
+            with open(state_path, 'r', encoding='utf-8') as fh:
+                data = json.load(fh)
+                if isinstance(data, dict):
+                    return data
+        except FileNotFoundError:
+            return {}
+        except json.JSONDecodeError as exc:
+            self.logger.warning(f"Detection state file malformed ({exc}); resetting state")
+        except Exception as exc:
+            self.logger.warning(f"Failed to read detection state file: {exc}")
+        return {}
+
+    def _persist_detection_state(self, state: Dict[str, Any]) -> None:
+        """Persist detection state metadata atomically."""
+        state_path = self._get_detection_state_path()
+        tmp_path = f"{state_path}.tmp"
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as fh:
+                json.dump(state, fh)
+            os.replace(tmp_path, state_path)
+        except Exception as exc:
+            self.logger.warning(f"Unable to write detection state file: {exc}")
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _get_min_fetch_interval_seconds(self) -> float:
+        """Minimum seconds to wait between QRadar queries."""
+        detection_cfg = self.config.get('detection', {})
+        interval = detection_cfg.get('min_fetch_interval_seconds')
+        if interval is None:
+            # Default throttle prevents aggressive re-queries; override via config if needed.
+            interval = 300
+        try:
+            interval_val = float(interval)
+        except (TypeError, ValueError):
+            interval_val = 300.0
+        return max(0.0, interval_val)
+
+    def _seconds_until_next_fetch(self, state: Dict[str, Any]) -> float:
+        """Return remaining seconds until the next QRadar fetch is allowed."""
+        min_interval = self._get_min_fetch_interval_seconds()
+        if min_interval <= 0:
+            return 0.0
+
+        last_fetch_epoch = state.get('last_fetch_epoch')
+        if last_fetch_epoch is None:
+            return 0.0
+
+        try:
+            elapsed = time.time() - float(last_fetch_epoch)
+        except (TypeError, ValueError):
+            return 0.0
+        return max(0.0, min_interval - elapsed)
+
+    def _acquire_detection_lock(self):
+        """Attempt to create the detection lock file. Returns lock file handle or None."""
+        lock_path = self._get_detection_lock_path()
+        detection_cfg = self.config.get('detection', {})
+        stale_seconds = detection_cfg.get('lock_max_age_seconds', 1800)
+
+        try:
+            lock_file = open(lock_path, 'x')
+        except FileExistsError:
+            if stale_seconds:
+                try:
+                    mtime = os.path.getmtime(lock_path)
+                except OSError:
+                    mtime = None
+                if mtime is not None and (time.time() - mtime) > stale_seconds:
+                    self.logger.warning(
+                        f"Found stale detection lock (> {stale_seconds}s); attempting cleanup"
+                    )
+                    try:
+                        os.remove(lock_path)
+                    except Exception as exc:
+                        self.logger.error(f"Failed to remove stale detection lock: {exc}")
+                        return None
+                    try:
+                        lock_file = open(lock_path, 'x')
+                    except FileExistsError:
+                        return None
+                else:
+                    self.logger.info("Detection lock already held by another runner; skipping")
+                    return None
+            else:
+                self.logger.info("Detection lock already held by another runner; skipping")
+                return None
+        except Exception as exc:
+            self.logger.error(f"Unexpected error acquiring detection lock: {exc}")
+            return None
+
+        try:
+            lock_file.write(json.dumps({
+                "pid": os.getpid(),
+                "acquired_at": time.time()
+            }))
+            lock_file.flush()
+        except Exception as exc:
+            try:
+                lock_file.close()
+            finally:
+                try:
+                    os.remove(lock_path)
+                except Exception:
+                    pass
+            self.logger.error(f"Failed to initialize detection lock: {exc}")
+            return None
+
+        return lock_file
+
+    @contextmanager
+    def _detection_run_guard(self):
+        """
+        Context manager managing inter-process locking for detection runs.
+
+        Yields:
+            bool: True if the lock was acquired and the caller may proceed.
+        """
+        lock_file = self._acquire_detection_lock()
+        if lock_file is None:
+            yield False
+            return
+
+        try:
+            yield True
+        finally:
+            try:
+                lock_file.close()
+            except Exception:
+                pass
+            try:
+                os.remove(self._get_detection_lock_path())
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                self.logger.warning(f"Failed to remove detection lock: {exc}")
     
     def load_production_rule_name_map(self) -> Dict[int, str]:
         """
@@ -507,427 +680,459 @@ class UnifiedPipeline:
     def run_detection(self):
         """Detection mode: QRadar → MongoDB → Prediction"""
         self.logger.info("Starting detection pipeline...")
-        
-        try:
+        with self._detection_run_guard() as lock_acquired:
+            if not lock_acquired:
+                self.logger.info("Detection run skipped: another execution is in progress")
+                return None
+
+            state = self._load_detection_state()
+            wait_seconds = self._seconds_until_next_fetch(state)
+            if wait_seconds > 0:
+                self.logger.info(
+                    "Detection run skipped: next QRadar fetch allowed in %.1fs",
+                    wait_seconds
+                )
+                return None
+
             # Calculate time window
             end_time = datetime.now()
             start_time = end_time - timedelta(minutes=30)
-            
-            # Cleanup old data
-            self.cleanup_old_data()
-            
-            # Fetch QRadar data
-            qradar_data = self.fetch_qradar_data(start_time, end_time)
-            if not qradar_data:
-                self.logger.warning("No QRadar data retrieved")
-                return None
-            
-            # Store in MongoDB
-            documents = self.store_detection_data(qradar_data, start_time, end_time)
-            if not documents:
-                self.logger.warning("No documents to process")
-                return None
-            
-            # Load data for prediction
-            df = load_data('detect', self.config['detection'])
-            if df.empty:
-                self.logger.warning("No data loaded for prediction")
-                return None
-            
-            # Aggregate features (ensure detection-mode to avoid training labels)
-            df_agg = aggregate_to_windows(df, mode='detect')
-            if df_agg.empty:
-                self.logger.warning("No aggregated windows")
-                return None
-            
-            # Generate features
-            feature_gen = FeatureGenerator()
-            feature_gen.initialize_rules()
-            X, _ = feature_gen.generate_feature_vectors(df_agg, mode='detect')
 
-            # Build feature name mapping for explainability/top-k logging
+            state['last_attempt_epoch'] = time.time()
+            self._persist_detection_state(state)
+
+            fetch_attempted = False
+            fetch_status = 'not_started'
+            qradar_data = None
+
             try:
-                prod_rule_to_index = feature_gen.rule_manager.get_production_rule_to_index_map()
-                dim = feature_gen.get_feature_vector_dimension()
-                # Use -1 sentinel to avoid Optional typing complexities
-                index_to_rule: List[int] = [-1] * dim
-                for rid, idx in prod_rule_to_index.items():
-                    j = int(idx)
-                    if 0 <= j < dim:
-                        index_to_rule[j] = int(rid)
-                feature_names = [
-                    f"rule_{rid}" if rid >= 0 else f"feature_{k}"
-                    for k, rid in enumerate(index_to_rule)
-                ]
-                # Optional rule name enrichment from config plus production mapping
-                fn_cfg = (self.config.get('detection', {}) or {}).get('feature_names', {}) or {}
-                rule_name_map: Dict[int, str] = {}
-                production_name_map = self.load_production_rule_name_map()
-                include_rule_names = bool(fn_cfg.get('include_rule_names', False)) or bool(production_name_map)
+                # Cleanup old data before fetching new batch
+                self.cleanup_old_data()
 
-                if production_name_map:
-                    # Use production mapping as authoritative baseline
-                    rule_name_map.update(production_name_map)
-
-                if fn_cfg:
-                    # Start with direct name map if provided (may contain overrides)
-                    raw_map = fn_cfg.get('name_map') or {}
-                    try:
-                        for key, value in raw_map.items():
-                            rid_int = int(key)
-                            rule_name_map[rid_int] = str(value)
-                    except Exception:
-                        pass
-
-                    if include_rule_names:
-                        # Add from CSV paths (fills any remaining gaps)
-                        csv_paths = fn_cfg.get('csv_paths', []) or []
-                        for path in csv_paths:
-                            try:
-                                if path and os.path.exists(path):
-                                    import pandas as _pdcsv
-                                    df_rules = _pdcsv.read_csv(path)
-                                    if 'id' in df_rules.columns and 'name' in df_rules.columns:
-                                        for rid, nm in zip(df_rules['id'], df_rules['name']):
-                                            try:
-                                                rid_int = int(rid)
-                                                if rid_int not in rule_name_map:
-                                                    rule_name_map[rid_int] = str(nm)
-                                            except Exception:
-                                                continue
-                            except Exception:
-                                continue
-            except Exception:
-                index_to_rule = []
-                n_features = X.shape[1] if hasattr(X, 'shape') else 0
-                feature_names = [f"feature_{k}" for k in range(int(n_features))]
-                include_rule_names = False
-                rule_name_map = {}
-            
-            # Make predictions
-            try:
-                from model_predictor import Predictor as ModelPredictor
-            except Exception as e:
-                self.logger.error(f"Predictor not available: {e}. Ensure model_predictor.py exists and the model path is correct.")
-                return None
-
-            predictor = ModelPredictor(self.config['training']['model_path'])
-            predictions = predictor.predict(X)
-
-            # Initialize SHAP explainer once if available
-            shap_explainer = None
-            try:
-                from system.shap_explainer import Explainer as ShapExplainer
-                shap_explainer = ShapExplainer()
-                
-                self.logger.info("SHAP explainer initialized and ready for alert explanations")
-            except Exception as e:
-                self.logger.warning(f"SHAP explainer unavailable: {e}")
-            
-            # Process results; persist alerts to MongoDB
-            results = []
-            try:
-                from mongodb.mongodb_connection import get_mongodb_manager
-            except Exception:
-                get_mongodb_manager = None  # type: ignore
-
-            mongo_ctx = get_mongodb_manager() if get_mongodb_manager else None
-            ctx_manager = mongo_ctx if mongo_ctx else None
-
-            # Use context if available; else no-op context
-            class _NoopCtx:
-                def __enter__(self):
+                fetch_attempted = True
+                fetch_status = 'error'
+                qradar_data = self.fetch_qradar_data(start_time, end_time)
+                if not qradar_data:
+                    fetch_status = 'empty'
+                    self.logger.warning("No QRadar data retrieved")
                     return None
-                def __exit__(self, exc_type, exc, tb):
-                    return False
+                fetch_status = 'success'
 
-            with (ctx_manager or _NoopCtx()) as manager:
-                # Model metadata for logging
-                model_attr = getattr(predictor, "model", None)
-                if model_attr is not None:
-                    model_cls = getattr(model_attr, "__class__", None)
-                    model_name = getattr(model_cls, "__name__", str(model_cls)) if model_cls is not None else str(model_attr)
-                else:
-                    model_name = "UnknownModel"
+                # Store in MongoDB
+                documents = self.store_detection_data(qradar_data, start_time, end_time)
+                if not documents:
+                    self.logger.warning("No documents to process")
+                    return None
+
+                # Load data for prediction
+                df = load_data('detect', self.config['detection'])
+                if df.empty:
+                    self.logger.warning("No data loaded for prediction")
+                    return None
+
+                # Aggregate features (ensure detection-mode to avoid training labels)
+                df_agg = aggregate_to_windows(df, mode='detect')
+                if df_agg.empty:
+                    self.logger.warning("No aggregated windows")
+                    return None
+
+                # Generate features
+                feature_gen = FeatureGenerator()
+                feature_gen.initialize_rules()
+                X, _ = feature_gen.generate_feature_vectors(df_agg, mode='detect')
+
+                # Build feature name mapping for explainability/top-k logging
                 try:
-                    feature_count_total = int(X.shape[1]) if hasattr(X, "shape") else None
-                except Exception:
-                    feature_count_total = None
+                    prod_rule_to_index = feature_gen.rule_manager.get_production_rule_to_index_map()
+                    dim = feature_gen.get_feature_vector_dimension()
+                    # Use -1 sentinel to avoid Optional typing complexities
+                    index_to_rule: List[int] = [-1] * dim
+                    for rid, idx in prod_rule_to_index.items():
+                        j = int(idx)
+                        if 0 <= j < dim:
+                            index_to_rule[j] = int(rid)
+                    feature_names = [
+                        f"rule_{rid}" if rid >= 0 else f"feature_{k}"
+                        for k, rid in enumerate(index_to_rule)
+                    ]
+                    # Optional rule name enrichment from config plus production mapping
+                    fn_cfg = (self.config.get('detection', {}) or {}).get('feature_names', {}) or {}
+                    rule_name_map: Dict[int, str] = {}
+                    production_name_map = self.load_production_rule_name_map()
+                    include_rule_names = bool(fn_cfg.get('include_rule_names', False)) or bool(production_name_map)
 
-                for idx, (pred, prob) in enumerate(predictions):
-                    is_alert = prob > self.config['detection']['alert_threshold']
-                    result = {
-                        'timestamp': datetime.now().isoformat(),
-                        'hostname': df_agg.iloc[idx]['hostname'],
-                        'window_id': df_agg.iloc[idx]['window_id'],
-                        'prediction': int(pred),
-                        'probability': float(prob),
-                        'alert': bool(is_alert)
-                    }
-                    results.append(result)
+                    if production_name_map:
+                        # Use production mapping as authoritative baseline
+                        rule_name_map.update(production_name_map)
 
-                    label_str = 'malicious' if int(pred) == 1 else 'normal'
-                    instances_analyzed = 1
-
-                    # Prepare per-alert feature context
-                    payload_top_features: List[Dict[str, Any]] = []
-                    row_vec = None
-                    try:
-                        row_candidate = X[idx]
-                        row_vec = np.array(row_candidate, dtype=float, copy=False)
-                        if row_vec.ndim > 1:
-                            row_vec = row_vec.reshape(-1)
-                    except Exception:
-                        row_vec = None
-
-                    payload_rule_limit = int((self.config.get('detection', {}) or {}).get('alert_payload_rule_count', 5))
-                    if payload_rule_limit <= 0:
-                        payload_rule_limit = 5
-
-                    # On alert, add detailed top-10 rules and SHAP explanation
-                    if is_alert:
+                    if fn_cfg:
+                        # Start with direct name map if provided (may contain overrides)
+                        raw_map = fn_cfg.get('name_map') or {}
                         try:
-                            # Top-10 rules by feature magnitude
-                            top_n = int(self.config.get('detection', {}).get('top_rules_count', 10))
-                            top_rules: List[Dict[str, Any]] = []
-                            top_idx: List[int] = []
-                            if row_vec is not None and row_vec.size > 0:
-                                try:
-                                    sorted_idx = np.argsort(row_vec)[::-1]
-                                    max_count = max(top_n, payload_rule_limit)
-                                    top_idx = [int(i) for i in sorted_idx[:max_count]]
-                                except Exception:
-                                    top_idx = []
-                            for j in top_idx:
-                                try:
-                                    val = float(row_vec[j]) if row_vec is not None else 0.0
-                                except Exception:
-                                    continue
-                                if val <= 0:
-                                    continue
-                                resolved_rule = j
-                                if index_to_rule and j < len(index_to_rule):
-                                    rid_val = index_to_rule[j]
-                                    resolved_rule = int(rid_val) if isinstance(rid_val, int) and rid_val >= 0 else j
-                                rule_name = None
-                                if 'include_rule_names' in locals() and include_rule_names and isinstance(resolved_rule, int):
-                                    rule_name = rule_name_map.get(int(resolved_rule))
-                                entry: Dict[str, Any] = {'rule_id': resolved_rule, 'value': val}
-                                if rule_name is not None:
-                                    entry['rule_name'] = rule_name
-                                top_rules.append(entry)
-
-                            if top_rules:
-                                payload_top_features = [
-                                    {
-                                        'feature': f"rule_{rule_entry['rule_id']}" if isinstance(rule_entry.get('rule_id'), int) else rule_entry.get('rule_id'),
-                                        'rule_id': rule_entry.get('rule_id'),
-                                        'rule_name': rule_entry.get('rule_name'),
-                                        'importance': rule_entry.get('value')
-                                    }
-                                    for rule_entry in top_rules[:payload_rule_limit]
-                                ]
-
-                            # Log alert details with top rules
-                            try:
-                                logging_utils.run_log(
-                                    "ALERT_DETAIL",
-                                    f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
-                                    payload={
-                                        'hostname': result['hostname'],
-                                        'window_id': result['window_id'],
-                                        'confidence': result['probability'],
-                                        'top_rules_by_count': top_rules,
-                                    }
-                                )
-                            except Exception:
-                                pass
-
-                            # Enhanced SHAP explanation for this specific alert instance
-                            if shap_explainer is not None and row_vec is not None and row_vec.size > 0:
-                                try:
-                                    self.logger.info(f"Applying SHAP explanation for alert instance {result['window_id']}")
-                                    
-                                    # Create single instance data for explanation
-                                    instance_data = row_vec.reshape(1, -1)
-                                    
-                                    # Apply SHAP explainer to this specific alert instance
-                                    # Use a subset of X as background data for efficiency
-                                    background_sample_size = min(100, X.shape[0])
-                                    background_indices = np.random.choice(X.shape[0], size=background_sample_size, replace=False)
-                                    background_data = X[background_indices]
-                                    
-                                    # SHAP frequent path mining options from config (optional)
-                                    shap_cfg = (self.config.get('detection', {}) or {}).get('shap', {}) or {}
-                                    fpm_opts = shap_cfg.get('frequent_path_mining', None)
-
-                                    shap_results = shap_explainer.explain(
-                                        model=predictor.model,
-                                        background_data=background_data,  # Background data for SHAP baseline
-                                        instance_data=instance_data,  # Single alert instance to explain
-                                        feature_name_list=feature_names,
-                                        persist_outputs=False,
-                                        plot=False,
-                                        plot_in_terminal=True,
-                                        summary_report=False,
-                                        frequent_path_mining=fpm_opts
-                                    )
-                                    
-                                    if shap_results and 'feature_importance' in shap_results:
-                                        # Extract top contributing features for this alert
-                                        alert_top_features = shap_results['feature_importance'][:top_n]
-                                        # Enrich with rule_id and rule_name when available
-                                        enriched_shap = []
-                                        for fi in alert_top_features:
-                                            fname = fi.get('feature', '')
-                                            rid_val = None
-                                            if isinstance(fname, str) and fname.startswith('rule_'):
-                                                try:
-                                                    rid_val = int(fname.replace('rule_', ''))
-                                                except Exception:
-                                                    rid_val = None
-                                            fi_en = dict(fi)
-                                            if rid_val is not None:
-                                                fi_en['rule_id'] = rid_val
-                                                if 'include_rule_names' in locals() and include_rule_names:
-                                                    name = rule_name_map.get(int(rid_val))
-                                                    if name is not None:
-                                                        fi_en['rule_name'] = name
-                                            enriched_shap.append(fi_en)
-                                        
-                                        # Log SHAP-based feature importance
-                                        shap_top_rules = []
-                                        shap_top_values = []
-                                        
-                                        for feature_info in alert_top_features:
-                                            feature_name = feature_info.get('feature', '')
-                                            importance = feature_info.get('importance', 0.0)
-                                            
-                                            # Extract rule ID from feature name
-                                            if feature_name.startswith('rule_'):
-                                                try:
-                                                    rule_id = int(feature_name.replace('rule_', ''))
-                                                except ValueError:
-                                                    rule_id = feature_name
-                                            else:
-                                                rule_id = feature_name
-                                            
-                                            shap_top_rules.append(rule_id)
-                                            shap_top_values.append(float(importance))
-                                        
-                                        # Enhanced logging with SHAP results
-                                        try:
-                                            logging_utils.log_shap_results(
-                                                hostname=result['hostname'],
-                                                window_id=result['window_id'],
-                                                top_rules=shap_top_rules,
-                                                shap_values=shap_top_values,
-                                                prediction='malicious',
-                                                confidence=result['probability']
-                                            )
-                                            
-                                            # Additional detailed SHAP logging
-                                            logging_utils.run_log(
-                                                "SHAP_EXPLANATION",
-                                                f"SHAP explanation for alert | hostname={result['hostname']} | window_id={result['window_id']}",
-                                                payload={
-                                                    'hostname': result['hostname'],
-                                                    'window_id': result['window_id'],
-                                                    'confidence': result['probability'],
-                                                    'shap_top_features': enriched_shap,
-                                                    'shap_output_files': shap_results.get('output_files', {}),
-                                                    'shap_summary': {
-                                                        'most_important_feature': enriched_shap[0].get('rule_name', enriched_shap[0].get('feature')) if enriched_shap else None,
-                                                        'max_importance_score': alert_top_features[0]['importance'] if alert_top_features else 0,
-                                                        'features_analyzed': len(shap_results.get('feature_importance', [])),
-                                                        'explanation_timestamp': shap_results.get('timestamp')
-                                                    }
-                                                }
-                                            )
-                                            if enriched_shap:
-                                                payload_top_features = enriched_shap[:payload_rule_limit]
-                                        except Exception as log_e:
-                                            self.logger.warning(f"Failed to log SHAP results for {result['window_id']}: {log_e}")
-                                        
-                                        # Store SHAP results in the result for potential further use
-                                        result['shap_explanation'] = {
-                                            'top_features': enriched_shap,
-                                            'output_files': shap_results.get('output_files', {}),
-                                            'explanation_available': True
-                                        }
-                                        
-                                        self.logger.info(f"SHAP explanation completed for alert {result['window_id']} - "
-                                                       f"Top feature: {alert_top_features[0]['feature'] if alert_top_features else 'N/A'}")
-                                    
-                                    else:
-                                        self.logger.warning(f"SHAP explanation returned no results for {result['window_id']}")
-                                        result['shap_explanation'] = {'explanation_available': False, 'error': 'No SHAP results'}
-                                
-                                except Exception as shap_e:
-                                    self.logger.error(f"SHAP explanation failed for alert {result['window_id']}: {shap_e}")
-                                    result['shap_explanation'] = {'explanation_available': False, 'error': str(shap_e)}
-                                    
-                                    # Fallback to basic feature importance logging
-                                    try:
-                                        if top_rules:
-                                            basic_rules = [rule['rule_id'] for rule in top_rules[:top_n]]
-                                            basic_values = [rule['value'] for rule in top_rules[:top_n]]
-                                            logging_utils.log_shap_results(
-                                                hostname=result['hostname'],
-                                                window_id=result['window_id'],
-                                                top_rules=basic_rules,
-                                                shap_values=basic_values,
-                                                prediction='malicious',
-                                                confidence=result['probability']
-                                            )
-                                    except Exception:
-                                        pass
-                            
-                            else:
-                                self.logger.info(f"SHAP explainer not available for alert {result['window_id']}")
-                                result['shap_explanation'] = {'explanation_available': False, 'error': 'SHAP explainer not initialized'}
-
-                        except Exception as e:
-                            self.logger.warning(f"Alert detail processing failed for {result['window_id']}: {e}")
-                            result['shap_explanation'] = {'explanation_available': False, 'error': f'Processing failed: {str(e)}'}
-
-                    # Persist alerts to detection_results
-                    if is_alert and manager:
-                        try:
-                            manager.insert_prediction({
-                                'window_id': result['window_id'],
-                                'hostname': result['hostname'],
-                                'predicted_label': int(pred),
-                                'confidence': float(prob)
-                            })
+                            for key, value in raw_map.items():
+                                rid_int = int(key)
+                                rule_name_map[rid_int] = str(value)
                         except Exception:
                             pass
 
-                    if is_alert:
-                        self.logger.warning(
-                            f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
-                        )
-                        if int(pred) == 1:
+                        if include_rule_names:
+                            # Add from CSV paths (fills any remaining gaps)
+                            csv_paths = fn_cfg.get('csv_paths', []) or []
+                            for path in csv_paths:
+                                try:
+                                    if path and os.path.exists(path):
+                                        import pandas as _pdcsv
+                                        df_rules = _pdcsv.read_csv(path)
+                                        if 'id' in df_rules.columns and 'name' in df_rules.columns:
+                                            for rid, nm in zip(df_rules['id'], df_rules['name']):
+                                                try:
+                                                    rid_int = int(rid)
+                                                    if rid_int not in rule_name_map:
+                                                        rule_name_map[rid_int] = str(nm)
+                                                except Exception:
+                                                    continue
+                                except Exception:
+                                    continue
+                except Exception:
+                    index_to_rule = []
+                    n_features = X.shape[1] if hasattr(X, 'shape') else 0
+                    feature_names = [f"feature_{k}" for k in range(int(n_features))]
+                    include_rule_names = False
+                    rule_name_map = {}
+        
+                # Make predictions
+                try:
+                    from model_predictor import Predictor as ModelPredictor
+                except Exception as e:
+                    self.logger.error(f"Predictor not available: {e}. Ensure model_predictor.py exists and the model path is correct.")
+                    return None
+
+                predictor = ModelPredictor(self.config['training']['model_path'])
+                predictions = predictor.predict(X)
+
+                # Initialize SHAP explainer once if available
+                shap_explainer = None
+                try:
+                    from system.shap_explainer import Explainer as ShapExplainer
+                    shap_explainer = ShapExplainer()
+                
+                    self.logger.info("SHAP explainer initialized and ready for alert explanations")
+                except Exception as e:
+                    self.logger.warning(f"SHAP explainer unavailable: {e}")
+            
+                # Process results; persist alerts to MongoDB
+                results = []
+                try:
+                    from mongodb.mongodb_connection import get_mongodb_manager
+                except Exception:
+                    get_mongodb_manager = None  # type: ignore
+
+                mongo_ctx = get_mongodb_manager() if get_mongodb_manager else None
+                ctx_manager = mongo_ctx if mongo_ctx else None
+
+                # Use context if available; else no-op context
+                class _NoopCtx:
+                    def __enter__(self):
+                        return None
+                    def __exit__(self, exc_type, exc, tb):
+                        return False
+
+                with (ctx_manager or _NoopCtx()) as manager:
+                    # Model metadata for logging
+                    model_attr = getattr(predictor, "model", None)
+                    if model_attr is not None:
+                        model_cls = getattr(model_attr, "__class__", None)
+                        model_name = getattr(model_cls, "__name__", str(model_cls)) if model_cls is not None else str(model_attr)
+                    else:
+                        model_name = "UnknownModel"
+                    try:
+                        feature_count_total = int(X.shape[1]) if hasattr(X, "shape") else None
+                    except Exception:
+                        feature_count_total = None
+
+                    for idx, (pred, prob) in enumerate(predictions):
+                        is_alert = prob > self.config['detection']['alert_threshold']
+                        result = {
+                            'timestamp': datetime.now().isoformat(),
+                            'hostname': df_agg.iloc[idx]['hostname'],
+                            'window_id': df_agg.iloc[idx]['window_id'],
+                            'prediction': int(pred),
+                            'probability': float(prob),
+                            'alert': bool(is_alert)
+                        }
+                        results.append(result)
+
+                        label_str = 'malicious' if int(pred) == 1 else 'normal'
+                        instances_analyzed = 1
+
+                        # Prepare per-alert feature context
+                        payload_top_features: List[Dict[str, Any]] = []
+                        row_vec = None
+                        try:
+                            row_candidate = X[idx]
+                            row_vec = np.array(row_candidate, dtype=float, copy=False)
+                            if row_vec.ndim > 1:
+                                row_vec = row_vec.reshape(-1)
+                        except Exception:
+                            row_vec = None
+
+                        payload_rule_limit = int((self.config.get('detection', {}) or {}).get('alert_payload_rule_count', 5))
+                        if payload_rule_limit <= 0:
+                            payload_rule_limit = 5
+
+                        # On alert, add detailed top-10 rules and SHAP explanation
+                        if is_alert:
                             try:
-                                logging_utils.log_detection(
-                                    hostname=result['hostname'],
-                                    window_id=result['window_id'],
-                                    prediction=label_str,
-                                    confidence=result['probability'],
-                                    model_name=model_name,
-                                    feature_count=feature_count_total,
-                                    instances_analyzed=instances_analyzed,
-                                    top_features=payload_top_features if payload_top_features else None
-                                )
+                                # Top-10 rules by feature magnitude
+                                top_n = int(self.config.get('detection', {}).get('top_rules_count', 10))
+                                top_rules: List[Dict[str, Any]] = []
+                                top_idx: List[int] = []
+                                if row_vec is not None and row_vec.size > 0:
+                                    try:
+                                        sorted_idx = np.argsort(row_vec)[::-1]
+                                        max_count = max(top_n, payload_rule_limit)
+                                        top_idx = [int(i) for i in sorted_idx[:max_count]]
+                                    except Exception:
+                                        top_idx = []
+                                for j in top_idx:
+                                    try:
+                                        val = float(row_vec[j]) if row_vec is not None else 0.0
+                                    except Exception:
+                                        continue
+                                    if val <= 0:
+                                        continue
+                                    resolved_rule = j
+                                    if index_to_rule and j < len(index_to_rule):
+                                        rid_val = index_to_rule[j]
+                                        resolved_rule = int(rid_val) if isinstance(rid_val, int) and rid_val >= 0 else j
+                                    rule_name = None
+                                    if 'include_rule_names' in locals() and include_rule_names and isinstance(resolved_rule, int):
+                                        rule_name = rule_name_map.get(int(resolved_rule))
+                                    entry: Dict[str, Any] = {'rule_id': resolved_rule, 'value': val}
+                                    if rule_name is not None:
+                                        entry['rule_name'] = rule_name
+                                    top_rules.append(entry)
+
+                                if top_rules:
+                                    payload_top_features = [
+                                        {
+                                            'feature': f"rule_{rule_entry['rule_id']}" if isinstance(rule_entry.get('rule_id'), int) else rule_entry.get('rule_id'),
+                                            'rule_id': rule_entry.get('rule_id'),
+                                            'rule_name': rule_entry.get('rule_name'),
+                                            'importance': rule_entry.get('value')
+                                        }
+                                        for rule_entry in top_rules[:payload_rule_limit]
+                                    ]
+
+                                # Log alert details with top rules
+                                try:
+                                    logging_utils.run_log(
+                                        "ALERT_DETAIL",
+                                        f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
+                                        payload={
+                                            'hostname': result['hostname'],
+                                            'window_id': result['window_id'],
+                                            'confidence': result['probability'],
+                                            'top_rules_by_count': top_rules,
+                                        }
+                                    )
+                                except Exception:
+                                    pass
+
+                                # Enhanced SHAP explanation for this specific alert instance
+                                if shap_explainer is not None and row_vec is not None and row_vec.size > 0:
+                                    try:
+                                        self.logger.info(f"Applying SHAP explanation for alert instance {result['window_id']}")
+                                    
+                                        # Create single instance data for explanation
+                                        instance_data = row_vec.reshape(1, -1)
+                                    
+                                        # Apply SHAP explainer to this specific alert instance
+                                        # Use a subset of X as background data for efficiency
+                                        background_sample_size = min(100, X.shape[0])
+                                        background_indices = np.random.choice(X.shape[0], size=background_sample_size, replace=False)
+                                        background_data = X[background_indices]
+                                    
+                                        # SHAP frequent path mining options from config (optional)
+                                        shap_cfg = (self.config.get('detection', {}) or {}).get('shap', {}) or {}
+                                        fpm_opts = shap_cfg.get('frequent_path_mining', None)
+
+                                        shap_results = shap_explainer.explain(
+                                            model=predictor.model,
+                                            background_data=background_data,  # Background data for SHAP baseline
+                                            instance_data=instance_data,  # Single alert instance to explain
+                                            feature_name_list=feature_names,
+                                            persist_outputs=False,
+                                            plot=False,
+                                            plot_in_terminal=True,
+                                            summary_report=False,
+                                            frequent_path_mining=fpm_opts
+                                        )
+                                    
+                                        if shap_results and 'feature_importance' in shap_results:
+                                            # Extract top contributing features for this alert
+                                            alert_top_features = shap_results['feature_importance'][:top_n]
+                                            # Enrich with rule_id and rule_name when available
+                                            enriched_shap = []
+                                            for fi in alert_top_features:
+                                                fname = fi.get('feature', '')
+                                                rid_val = None
+                                                if isinstance(fname, str) and fname.startswith('rule_'):
+                                                    try:
+                                                        rid_val = int(fname.replace('rule_', ''))
+                                                    except Exception:
+                                                        rid_val = None
+                                                fi_en = dict(fi)
+                                                if rid_val is not None:
+                                                    fi_en['rule_id'] = rid_val
+                                                    if 'include_rule_names' in locals() and include_rule_names:
+                                                        name = rule_name_map.get(int(rid_val))
+                                                        if name is not None:
+                                                            fi_en['rule_name'] = name
+                                                enriched_shap.append(fi_en)
+                                        
+                                            # Log SHAP-based feature importance
+                                            shap_top_rules = []
+                                            shap_top_values = []
+                                        
+                                            for feature_info in alert_top_features:
+                                                feature_name = feature_info.get('feature', '')
+                                                importance = feature_info.get('importance', 0.0)
+                                            
+                                                # Extract rule ID from feature name
+                                                if feature_name.startswith('rule_'):
+                                                    try:
+                                                        rule_id = int(feature_name.replace('rule_', ''))
+                                                    except ValueError:
+                                                        rule_id = feature_name
+                                                else:
+                                                    rule_id = feature_name
+                                            
+                                                shap_top_rules.append(rule_id)
+                                                shap_top_values.append(float(importance))
+                                        
+                                            # Enhanced logging with SHAP results
+                                            try:
+                                                logging_utils.log_shap_results(
+                                                    hostname=result['hostname'],
+                                                    window_id=result['window_id'],
+                                                    top_rules=shap_top_rules,
+                                                    shap_values=shap_top_values,
+                                                    prediction='malicious',
+                                                    confidence=result['probability']
+                                                )
+                                            
+                                                # Additional detailed SHAP logging
+                                                logging_utils.run_log(
+                                                    "SHAP_EXPLANATION",
+                                                    f"SHAP explanation for alert | hostname={result['hostname']} | window_id={result['window_id']}",
+                                                    payload={
+                                                        'hostname': result['hostname'],
+                                                        'window_id': result['window_id'],
+                                                        'confidence': result['probability'],
+                                                        'shap_top_features': enriched_shap,
+                                                        'shap_output_files': shap_results.get('output_files', {}),
+                                                        'shap_summary': {
+                                                            'most_important_feature': enriched_shap[0].get('rule_name', enriched_shap[0].get('feature')) if enriched_shap else None,
+                                                            'max_importance_score': alert_top_features[0]['importance'] if alert_top_features else 0,
+                                                            'features_analyzed': len(shap_results.get('feature_importance', [])),
+                                                            'explanation_timestamp': shap_results.get('timestamp')
+                                                        }
+                                                    }
+                                                )
+                                                if enriched_shap:
+                                                    payload_top_features = enriched_shap[:payload_rule_limit]
+                                            except Exception as log_e:
+                                                self.logger.warning(f"Failed to log SHAP results for {result['window_id']}: {log_e}")
+                                        
+                                            # Store SHAP results in the result for potential further use
+                                            result['shap_explanation'] = {
+                                                'top_features': enriched_shap,
+                                                'output_files': shap_results.get('output_files', {}),
+                                                'explanation_available': True
+                                            }
+                                        
+                                            self.logger.info(f"SHAP explanation completed for alert {result['window_id']} - "
+                                                           f"Top feature: {alert_top_features[0]['feature'] if alert_top_features else 'N/A'}")
+                                    
+                                        else:
+                                            self.logger.warning(f"SHAP explanation returned no results for {result['window_id']}")
+                                            result['shap_explanation'] = {'explanation_available': False, 'error': 'No SHAP results'}
+                                
+                                    except Exception as shap_e:
+                                        self.logger.error(f"SHAP explanation failed for alert {result['window_id']}: {shap_e}")
+                                        result['shap_explanation'] = {'explanation_available': False, 'error': str(shap_e)}
+                                    
+                                        # Fallback to basic feature importance logging
+                                        try:
+                                            if top_rules:
+                                                basic_rules = [rule['rule_id'] for rule in top_rules[:top_n]]
+                                                basic_values = [rule['value'] for rule in top_rules[:top_n]]
+                                                logging_utils.log_shap_results(
+                                                    hostname=result['hostname'],
+                                                    window_id=result['window_id'],
+                                                    top_rules=basic_rules,
+                                                    shap_values=basic_values,
+                                                    prediction='malicious',
+                                                    confidence=result['probability']
+                                                )
+                                        except Exception:
+                                            pass
+                            
+                                else:
+                                    self.logger.info(f"SHAP explainer not available for alert {result['window_id']}")
+                                    result['shap_explanation'] = {'explanation_available': False, 'error': 'SHAP explainer not initialized'}
+
+                            except Exception as e:
+                                self.logger.warning(f"Alert detail processing failed for {result['window_id']}: {e}")
+                                result['shap_explanation'] = {'explanation_available': False, 'error': f'Processing failed: {str(e)}'}
+
+                        # Persist alerts to detection_results
+                        if is_alert and manager:
+                            try:
+                                manager.insert_prediction({
+                                    'window_id': result['window_id'],
+                                    'hostname': result['hostname'],
+                                    'predicted_label': int(pred),
+                                    'confidence': float(prob)
+                                })
                             except Exception:
                                 pass
+
+                        if is_alert:
+                            self.logger.warning(
+                                f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
+                            )
+                            if int(pred) == 1:
+                                try:
+                                    logging_utils.log_detection(
+                                        hostname=result['hostname'],
+                                        window_id=result['window_id'],
+                                        prediction=label_str,
+                                        confidence=result['probability'],
+                                        model_name=model_name,
+                                        feature_count=feature_count_total,
+                                        instances_analyzed=instances_analyzed,
+                                        top_features=payload_top_features if payload_top_features else None
+                                    )
+                                except Exception:
+                                    pass
             
-            self.logger.info(f"Detection completed. {len(results)} alerts generated")
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"Detection pipeline failed: {str(e)}")
-            return None
+                    self.logger.info(f"Detection completed. {len(results)} alerts generated")
+                    return results
+
+            except Exception as e:
+                self.logger.error(f"Detection pipeline failed: {str(e)}")
+                fetch_status = 'error'
+                return None
+
+            finally:
+                if fetch_attempted:
+                    state['last_fetch_epoch'] = time.time()
+                    state['last_window_start_epoch'] = start_time.timestamp()
+                    state['last_window_end_epoch'] = end_time.timestamp()
+                    state['last_fetch_status'] = fetch_status
+                    self._persist_detection_state(state)
     
     def execute(self):
         """Main execution based on mode"""
