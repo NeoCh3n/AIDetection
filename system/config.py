@@ -97,8 +97,8 @@ def get_config() -> Dict[str, Any]:
         },
         'mongodb': {
             'connection_string': 'mongodb://localhost:27017/',
-            'database_name': 'qradar_ml',
-            'collection_name': 'detection_data',
+            'database_name': 'qradar_detection',
+            'collection_name': 'qradar_sliding_windows',
         },
         'paths': {
             'model_dir': 'model',

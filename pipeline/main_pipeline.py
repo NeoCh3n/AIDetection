@@ -7,7 +7,6 @@ How To Use
 - Activate venv: `source venv/bin/activate` (required).
 - Install deps: `make install` (uses local venv) or `pip install -r requirements.txt`.
 - Run training (from repo root):
-  - `python -m pipeline.main_pipeline train`
   - or `python ./pipeline/main_pipeline.py train`
 - Run detection:
   - `python -m pipeline.main_pipeline detect`
@@ -924,10 +923,15 @@ class UnifiedPipeline:
                                         for rule_entry in top_rules[:payload_rule_limit]
                                     ]
 
+                                alert_description = (
+                                    f"Alert description | {label_str} activity detected " 
+                                    f"on {result['hostname']} (confidence={result['probability']:.4f})"
+                                )
                                 # Log alert details with top rules
                                 try:
                                     logging_utils.run_log(
                                         "ALERT_DETAIL",
+                                        f"{alert_description} | " 
                                         f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
                                         payload={
                                             'hostname': result['hostname'],
