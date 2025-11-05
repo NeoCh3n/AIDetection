@@ -4,6 +4,7 @@
     "model_path": "./model/threat_detector.joblib",
     "test_size": 0.2,
     "random_state": 42,
+    "rule_environment": "uat",
     "feature_names": {
       "include_rule_names": true,
       "csv_paths": [
