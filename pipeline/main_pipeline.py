@@ -1123,7 +1123,7 @@ class UnifiedPipeline:
                                     pass
                     #summerize alerts count
                     alert_count = sum(1 for r in results if r.get('alert', False))
-                    self.logger.info(f"Detection completed. {alert_count} alerts generated")
+                    self.logger.info(f"Detection completed. {alert_count} alerts generated in len{results} windows.")
                     return results
 
             except Exception as e:
