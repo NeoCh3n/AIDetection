@@ -1117,8 +1117,9 @@ class UnifiedPipeline:
                                     )
                                 except Exception:
                                     pass
-            
-                    self.logger.info(f"Detection completed. {len(results)} alerts generated")
+                    #summerize alerts count
+                    alert_count = sum(1 for r in results if r.get('alert', False))
+                    self.logger.info(f"Detection completed. {alert_count} alerts generated")
                     return results
 
             except Exception as e:
