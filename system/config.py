@@ -20,7 +20,7 @@ such as config.get('key', default).
 DATA_RETENTION_DAYS = int(os.getenv("DATA_RETENTION_DAYS", "7"))
 
 # Frequency for periodic scheduling (minutes). Used by some logs/tests.
-fetch_data_frequency_default = int(os.getenv("FETCH_FREQUENCY_MIN", "30"))
+fetch_data_frequency_default = int(os.getenv("FETCH_FREQUENCY_MIN", "15"))
 
 # Where local logs are written
 log_dir_path_default = os.getenv("LOG_DIR", os.path.join("running_log/"))
@@ -81,7 +81,7 @@ def get_config() -> Dict[str, Any]:
             'environment': os.getenv('ENVIRONMENT', 'prod')
         },
         'feature_engineering': {
-            'expected_rules': 287,
+            'expected_rules': 402,
             'window_size_minutes': 30,
             'log_transform': True,
             'normalize_counts': False,
