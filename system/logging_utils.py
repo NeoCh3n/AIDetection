@@ -354,12 +354,13 @@ def log_detection(
     )
     run_log(header_ml, message)
 
-def log_shap_results(hostname, window_id, top_rules, shap_values, prediction, confidence):
+def log_shap_results(hostname, source_ip, window_id, top_rules, shap_values, prediction, confidence):
     """
     Log SHAP explanation results for attack detections.
     
     Args:
         hostname (str): Hostname where detection occurred
+        source_ip (str): Source IP address
         window_id (str): Time window identifier
         top_rules (list): List of top contributing rule IDs
         shap_values (list): Corresponding SHAP values
@@ -368,6 +369,7 @@ def log_shap_results(hostname, window_id, top_rules, shap_values, prediction, co
     """
     shap_data = {
         "hostname": hostname,
+        "source_ip": source_ip,
         "window_id": window_id,
         "prediction": prediction,
         "confidence": confidence,
@@ -375,8 +377,8 @@ def log_shap_results(hostname, window_id, top_rules, shap_values, prediction, co
         "shap_values": shap_values,
         "timestamp": datetime.datetime.now().isoformat()
     }
-    
-    message = f"SHAP_EXPLANATION | hostname={hostname} | window_id={window_id}"
+
+    message = f"SHAP_EXPLANATION | hostname={hostname} source_ip={source_ip} | window_id={window_id}"
     run_log("EXPLAIN", message, payload=shap_data)
 
 def log_pipeline_event(event_type, message, metadata=None):
@@ -471,7 +473,7 @@ if __name__ == "__main__":
     log_detection("test-host", "2024-01-01-1200", "malicious", 0.95)
     
     # Test SHAP explanation logging
-    log_shap_results("test-host", "2024-01-01-1200", [1001, 1002, 1003], [0.45, 0.32, 0.23], "malicious", 0.95)
+    log_shap_results("test-host", "0.0.0.0", "2024-01-01-1200", [1001, 1002, 1003], [0.45, 0.32, 0.23], "malicious", 0.95)
     
     # Test pipeline logging
     log_pipeline_event("TRAINING_START", "Started training pipeline", {"mode": "train"})
