@@ -56,7 +56,7 @@
       "token": "677f60e2-3d58-4275-a1f0-c13d1975fdbe",
       "version": "20.0",
       "verify_ssl": false,
-      "query_30min": "SELECT \"sysmon_hostname\" AS 'sysmon_hostname (custom)', \"creEventList\" AS 'Custom Rule', DATEFORMAT(MIN(\"deviceTime\"), 'MMM dd, yyyy, h:mm:ss a') AS 'Log Source Time (Minimum)', COUNT(*) AS 'Count' FROM events WHERE (\"Sysmon_hostname\" != NULL)GROUP BY \"sysmon_hostname\", \"creEventList\" ORDER BY \"Count\" DESC START '{start_time}' STOP '{end_time}'",
+      "query_30min": "SELECT \"sourceIP\" AS 'Source IP', \"sysmon_hostname\" AS 'sysmon_hostname (custom)', \"creEventList\" AS 'Custom Rule', DATEFORMAT(MIN(\"deviceTime\"), 'MMM dd, yyyy, h:mm:ss a') AS 'Log Source Time (Minimum)', COUNT(*) AS 'Count' FROM events WHERE (\"Sysmon_hostname\" != NULL)GROUP BY \"sysmon_hostname\", \"sourceIP\", \"creEventList\" ORDER BY \"Count\" DESC START '{start_time}' STOP '{end_time}'",
       "timeout": 300
     },
     "mongodb_config": {
