@@ -273,33 +273,43 @@ class AQLDataInserter:
             except Exception as e:
                 logging_utils.run_log("WARNING", f"Failed to parse AQL event: {e}")
                 continue
-        
-        # Finalize host_triggers: reduce multiple Source IPs to the majority Source IP per hostname
+          # Finalize host_triggers: select majority Source IP per hostname while preserving host totals
         for window in window_groups.values():
             host_triggers = window.get('host_triggers', {}) or {}
             for hostname, payload in list(host_triggers.items()):
                 source_ips = payload.get('source_ips') or {}
-                if source_ips:
-                    # Determine majority Source IP by largest total_triggers
+                
+                # If no valid source IPs were collected for this host, drop the host entry
+                if not source_ips:
                     try:
-                        majority_ip, majority_data = max(
-                            source_ips.items(), key=lambda kv: int(kv[1].get('total_triggers', 0))
-                        )
+                        del host_triggers[hostname]
                     except Exception:
-                        majority_ip, majority_data = None, None
+                        pass
+                    continue
 
-                    if majority_ip and majority_data:
-                        # Replace rules/total_triggers with majority IP's data
-                        payload['source_ip'] = majority_ip
-                        payload['rules'] = majority_data.get('rules', {})
-                        payload['total_triggers'] = int(majority_data.get('total_triggers', 0))
-                    else:
-                        # No valid source IPs -> keep existing aggregated rules
-                        payload['source_ip'] = '0.0.0.0'
-                else:
-                    # No source_ips collected (older AQL shape) -> set sentinel
-                    payload['source_ip'] = '0.0.0.0'
+                # Determine majority Source IP by largest total_triggers
+                try:
+                    majority_ip, majority_data = max(
+                        source_ips.items(), key=lambda kv: int(kv[1].get('total_triggers', 0))
+                    )
+                except Exception:
+                    majority_ip, majority_data = None, None
 
+                if not majority_ip or not majority_data:
+                    # No valid majority -> drop this host entry
+                    try:
+                        del host_triggers[hostname]
+                    except Exception:
+                        pass
+                    continue
+
+                # Set the majority Source IP (canonical field for this host)
+                payload['source_ip'] = majority_ip
+                payload['Source IP'] = majority_ip  # Compatibility key
+                
+                # Keep host-level combined totals (payload['rules'] and payload['total_triggers'] already aggregated)
+                # These represent ALL source IPs for this hostname (already computed during event loop)
+                
                 # Remove temporary aggregation structure
                 if 'source_ips' in payload:
                     del payload['source_ips']
