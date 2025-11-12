@@ -191,7 +191,16 @@ class AQLDataInserter:
                 rule_id = str(event.get('Custom Rule', '0'))
                 count = int(event.get('Count', 0))
                 hostname = str(event.get('sysmon_hostname (custom)', 'global'))
-                
+
+                # New: extract Source IP if present in AQL result (support different key casings)
+                source_ip = event.get('Source IP') or event.get('source_ip') or event.get('src_ip') or ''
+                source_ip = str(source_ip).strip() if source_ip is not None else ''
+                if not source_ip:
+                    #skip this event if no source ip found
+                    continue
+                elif source_ip == 'N/A' or source_ip.lower() == 'null':
+                    #skip this event if no source ip found
+                    continue
                 # Parse timestamp
                 event_time_str = event.get('Log Source Time (Minimum)', '')
                 if not event_time_str:
@@ -228,17 +237,34 @@ class AQLDataInserter:
                 
                 # Update host-level breakdown
                 if hostname not in window_groups[window_id]['host_triggers']:
+                    # Keep a temporary per-host per-source-ip aggregation in 'source_ips'
                     window_groups[window_id]['host_triggers'][hostname] = {
+                        'total_triggers': 0,
+                        'rules': {},
+                        'source_ips': {}
+                    }
+                
+                host_entry = window_groups[window_id]['host_triggers'][hostname]
+
+                # Aggregate counts per Source IP -> rules
+                if source_ip not in host_entry['source_ips']:
+                    host_entry['source_ips'][source_ip] = {
                         'total_triggers': 0,
                         'rules': {}
                     }
-                
-                window_groups[window_id]['host_triggers'][hostname]['total_triggers'] += count
-                window_groups[window_id]['host_triggers'][hostname]['rules'][rule_id] = (
-                    window_groups[window_id]['host_triggers'][hostname]['rules'].get(rule_id, 0) + count
+
+                host_entry['source_ips'][source_ip]['total_triggers'] += count
+                host_entry['source_ips'][source_ip]['rules'][rule_id] = (
+                    host_entry['source_ips'][source_ip]['rules'].get(rule_id, 0) + count
+                )
+
+                # Also update an overall per-host rules aggregation (kept for backward compatibility until finalization)
+                host_entry['total_triggers'] += count
+                host_entry['rules'][rule_id] = (
+                    host_entry['rules'].get(rule_id, 0) + count
                 )
                 
-                # Update totals
+                # Update totals for the window
                 window_groups[window_id]['total_triggers'] += count
                 window_groups[window_id]['total_rules_triggered'] = len(
                     window_groups[window_id]['feature_vector']
@@ -247,6 +273,36 @@ class AQLDataInserter:
             except Exception as e:
                 logging_utils.run_log("WARNING", f"Failed to parse AQL event: {e}")
                 continue
+        
+        # Finalize host_triggers: reduce multiple Source IPs to the majority Source IP per hostname
+        for window in window_groups.values():
+            host_triggers = window.get('host_triggers', {}) or {}
+            for hostname, payload in list(host_triggers.items()):
+                source_ips = payload.get('source_ips') or {}
+                if source_ips:
+                    # Determine majority Source IP by largest total_triggers
+                    try:
+                        majority_ip, majority_data = max(
+                            source_ips.items(), key=lambda kv: int(kv[1].get('total_triggers', 0))
+                        )
+                    except Exception:
+                        majority_ip, majority_data = None, None
+
+                    if majority_ip and majority_data:
+                        # Replace rules/total_triggers with majority IP's data
+                        payload['source_ip'] = majority_ip
+                        payload['rules'] = majority_data.get('rules', {})
+                        payload['total_triggers'] = int(majority_data.get('total_triggers', 0))
+                    else:
+                        # No valid source IPs -> keep existing aggregated rules
+                        payload['source_ip'] = '0.0.0.0'
+                else:
+                    # No source_ips collected (older AQL shape) -> set sentinel
+                    payload['source_ip'] = '0.0.0.0'
+
+                # Remove temporary aggregation structure
+                if 'source_ips' in payload:
+                    del payload['source_ips']
         
         documents = list(window_groups.values())
         logging_utils.run_log("INFO", f"Created {len(documents)} detection windows from AQL data")
@@ -409,7 +465,7 @@ def main():
     
     args = parser.parse_args()
     
-    print("📊 Starting AQL JSON data processing...")
+    print("  Starting AQL JSON data processing...")
     print(f"   Mode: Detection-only")
     print(f"   Data source: AQL JSON")
     print(f"   Files to process: {len(args.json_files)}")

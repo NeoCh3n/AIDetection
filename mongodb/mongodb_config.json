@@ -25,7 +25,7 @@
       "query_time": "datetime",
       "feature_vector": "object (rule_id -> count)",
       "rule_counts": "object (rule_id -> count)",
-      "host_triggers": "object (hostname -> {total_triggers, rules})",
+      "host_triggers": "object (hostname -> {total_triggers, rules, Source IP (majority if multiple)})",
       "total_triggers": "integer",
       "total_rules_triggered": "integer",
       "metadata": {
