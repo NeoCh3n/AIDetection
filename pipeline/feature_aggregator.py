@@ -65,6 +65,14 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
     
     logger.info(f"Aggregating {len(df)} events into {window_size_minutes}-minute windows...")
     
+    # Normalize Source IP column if present (support both 'Source IP' and 'source_ip')
+    if 'Source IP' in df.columns:
+        df['source_ip'] = df['Source IP'].astype(str)
+    elif 'source_ip' in df.columns:
+        df['source_ip'] = df['source_ip'].astype(str)
+    else:
+        df['source_ip'] = '0.0.0.0'
+    
     # Ensure timestamp column is datetime type
     if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
         df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -85,15 +93,15 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
         lambda ts: get_window_id(ts, window_size_minutes)
     )
     
-    # Group by window_id, hostname, and source_label for aggregation
-    grouped = df.groupby(['window_id', 'hostname', 'source_label'])
+    # Group by window_id, hostname, source_label and source_ip for aggregation
+    grouped = df.groupby(['window_id', 'hostname', 'source_label', 'source_ip'])
     
     # Aggregate rule counts into dictionaries
     aggregated_data = []
     
     for group_key, group_df in grouped:
         # Use typing.cast to explicitly type the tuple unpacking
-        window_id, hostname, source_label = cast(Tuple[str, str, str], group_key)
+        window_id, hostname, source_label, source_ip = cast(Tuple[str, str, str, str], group_key)
         group = group_df
         # Build rule count dictionary (RAW integer sums for interpretability/tests)
         rule_counts_raw = group.groupby('rule_id')['count'].sum().astype(int).to_dict()
@@ -125,7 +133,8 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
             'unique_rules': int(unique_rules),
             'window_start': window_start,
             'window_end': window_end,
-            'source_label': source_label
+            'source_label': source_label,
+            'source_ip': source_ip
         }
         # Attach optional log1p-sum metrics for downstream use (not used by tests)
         result_row['aggregated_rules_log1p_sum'] = rule_counts_log_str

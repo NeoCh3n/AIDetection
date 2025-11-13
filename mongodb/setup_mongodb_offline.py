@@ -550,11 +550,15 @@ class MongoDBOfflineSetup:
             host_triggers = {
                 "192.168.153.166": {
                     "total_triggers": int(total_triggers * 0.3),
-                    "rules": {str(rule_id): int(count * 0.3) for rule_id, count in zip(real_rule_ids[:5], real_counts[:5])}
+                    "rules": {str(rule_id): int(count * 0.3) for rule_id, count in zip(real_rule_ids[:5], real_counts[:5])},
+                    # This host is an IP so use it as the Source IP (synthetic majority)
+                    "source_ip": "192.168.153.166"
                 },
                 "DESKTOP-64-EDR": {
                     "total_triggers": int(total_triggers * 0.7),
-                    "rules": {str(rule_id): int(count * 0.7) for rule_id, count in zip(real_rule_ids, real_counts)}
+                    "rules": {str(rule_id): int(count * 0.7) for rule_id, count in zip(real_rule_ids, real_counts)},
+                    # Non-IP hostname -> no distinct source IP observed in this synthetic dataset
+                    "source_ip": "0.0.0.0"
                 }
             }
             

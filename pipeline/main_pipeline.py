@@ -854,6 +854,7 @@ class UnifiedPipeline:
                         result = {
                             'timestamp': datetime.now().isoformat(),
                             'hostname': df_agg.iloc[idx]['hostname'],
+                            'source_ip': df_agg.iloc[idx]['source_ip'],
                             'window_id': df_agg.iloc[idx]['window_id'],
                             'prediction': int(pred),
                             'probability': float(prob),
@@ -935,6 +936,7 @@ class UnifiedPipeline:
                                         f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
                                         payload={
                                             'hostname': result['hostname'],
+                                            'source_ip': result['source_ip'],
                                             'window_id': result['window_id'],
                                             'confidence': result['probability'],
                                             'top_rules_by_count': top_rules,
@@ -1019,6 +1021,7 @@ class UnifiedPipeline:
                                             try:
                                                 logging_utils.log_shap_results(
                                                     hostname=result['hostname'],
+                                                    source_ip=result['source_ip'],
                                                     window_id=result['window_id'],
                                                     top_rules=shap_top_rules,
                                                     shap_values=shap_top_values,
@@ -1032,6 +1035,7 @@ class UnifiedPipeline:
                                                     f"SHAP explanation for alert | hostname={result['hostname']} | window_id={result['window_id']}",
                                                     payload={
                                                         'hostname': result['hostname'],
+                                                        'source_ip': result['source_ip'],
                                                         'window_id': result['window_id'],
                                                         'confidence': result['probability'],
                                                         'shap_top_features': enriched_shap,
@@ -1074,6 +1078,7 @@ class UnifiedPipeline:
                                                 basic_values = [rule['value'] for rule in top_rules[:top_n]]
                                                 logging_utils.log_shap_results(
                                                     hostname=result['hostname'],
+                                                    source_ip=result['source_ip'],
                                                     window_id=result['window_id'],
                                                     top_rules=basic_rules,
                                                     shap_values=basic_values,
@@ -1105,7 +1110,7 @@ class UnifiedPipeline:
 
                         if is_alert:
                             self.logger.warning(
-                                f"ALERT: Threat detected on {result['hostname']} (p={prob:.2f})"
+                                f"ALERT: Threat detected on {result['hostname']}(IP: {result['source_ip']})(p={prob:.2f})"
                             )
                             if int(pred) == 1:
                                 try:
@@ -1123,7 +1128,7 @@ class UnifiedPipeline:
                                     pass
                     #summerize alerts count
                     alert_count = sum(1 for r in results if r.get('alert', False))
-                    self.logger.info(f"Detection completed. {alert_count} alerts generated in len{results} windows.")
+                    self.logger.info(f"Detection completed. {alert_count} alerts generated in {len(results)} windows.")
                     return results
 
             except Exception as e:

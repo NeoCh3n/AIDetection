@@ -238,8 +238,8 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
             
             if not windows:
                 logger.warning(f"No detection data found for window: {start_time} to {end_time}")
-                return pd.DataFrame(columns=['hostname', 'rule_id', 'timestamp', 'count', 'source_label'])
-            
+                return pd.DataFrame(columns=['hostname', 'source_ip', 'rule_id', 'timestamp', 'count', 'source_label'])
+
             # Transform windows to unified format
             rows = []
             for window in windows:
@@ -250,11 +250,14 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
                 if isinstance(host_triggers, dict) and host_triggers:
                     for host, payload in host_triggers.items():
                         rules = (payload or {}).get('rules') or {}
+                        # Normalize possible source_ip keys from inserter
+                        source_ip_val = (payload or {}).get('source_ip')
                         for rule_id, count in (rules.items() if isinstance(rules, dict) else []):
                             try:
                                 if count is not None and int(count) > 0:
                                     rows.append({
                                         'hostname': str(host),
+                                        'source_ip': str(source_ip_val),
                                         'rule_id': int(rule_id),
                                         'timestamp': window_start,
                                         'count': int(count),
@@ -277,6 +280,7 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
                         if count is not None and int(count) > 0:  # Only include positive counts
                             rows.append({
                                 'hostname': str(hostname),
+                                'source_ip': '0.0.0.0',
                                 'rule_id': int(rule_id),
                                 'timestamp': window_start,
                                 'count': int(count),
@@ -288,8 +292,8 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
             # Create DataFrame
             if not rows:
                 logger.warning("No rule triggers found in detection windows")
-                return pd.DataFrame(columns=['hostname', 'rule_id', 'timestamp', 'count', 'source_label'])
-            
+                return pd.DataFrame(columns=['hostname', 'source_ip', 'rule_id', 'timestamp', 'count', 'source_label'])
+
             df = pd.DataFrame(rows)
 
             # Ensure timestamp is proper datetime dtype
@@ -303,7 +307,10 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
             df['rule_id'] = pd.to_numeric(df['rule_id'], errors='coerce')
             df['count'] = pd.to_numeric(df['count'], errors='coerce')
             df['hostname'] = df['hostname'].astype(str)
-            
+            # Ensure source_ip column exists and is string
+            if 'source_ip' in df.columns:
+                df['source_ip'] = df['source_ip'].astype(str)
+
             # Convert to nullable integer types
             df['rule_id'] = df['rule_id'].astype('Int64')
             df['count'] = df['count'].astype('Int64')
