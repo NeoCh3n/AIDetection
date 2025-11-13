@@ -251,7 +251,7 @@ def _load_detection_data(config: Dict[str, Any]) -> pd.DataFrame:
                     for host, payload in host_triggers.items():
                         rules = (payload or {}).get('rules') or {}
                         # Normalize possible source_ip keys from inserter
-                        source_ip_val = (payload or {}).get('source_ip') or (payload or {}).get('source_ip') or (payload or {}).get('Source_IP') or '0.0.0.0'
+                        source_ip_val = (payload or {}).get('source_ip')
                         for rule_id, count in (rules.items() if isinstance(rules, dict) else []):
                             try:
                                 if count is not None and int(count) > 0:
