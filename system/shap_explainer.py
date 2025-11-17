@@ -521,7 +521,7 @@ class Explainer:
             # Try TreeExplainer first (fastest for tree models)
             if (hasattr(model, 'estimators_') or hasattr(model, 'tree_') or 
                 hasattr(model, 'booster')):
-                explainer = shap.TreeExplainer(model, data=background_data)
+                explainer = shap.TreeExplainer(model, data=background_data, class_additivity=False)
                 self.logger.info("Using SHAP TreeExplainer")
                 return explainer
         except Exception as e:
