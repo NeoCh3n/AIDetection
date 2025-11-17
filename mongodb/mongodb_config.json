@@ -8,7 +8,7 @@
   "pipeline": {
     "mode": "detection_only",
     "query_frequency_minutes": 15,
-    "window_size": "30min",
+    "window_size": "15min",
     "timezone": "HKT",
     "retention_days": 7
   },
@@ -56,10 +56,10 @@
     }
   },
   "rule_mapping": {
-    "total_rules": 287,
+    "total_rules": 402,
     "rule_ids": [],
     "source": "Production_baseline",
-    "description": "Fixed 287 production rules as baseline for consistent feature vectors across environments",
+    "description": "Fixed 402 production rules as baseline for consistent feature vectors across environments",
     "fixed_count": true,
     "uat_mapping": {
       "enabled": true,

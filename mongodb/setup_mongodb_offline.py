@@ -10,20 +10,20 @@ ARCHITECTURE ALIGNMENT: Unified Processing Pipeline
 --------------------------------------------------
 This setup follows the unified data processing pipeline:
 - Detection-only mode with 30-minute sliding windows
-- 287 production rules as fixed baseline
+- 402 production rules as fixed baseline
 - Shared utilities: mongodb_connection.py, time_utils.py, rule_manager.py
 - 15-minute query frequency with 30-minute aggregation windows
 
 PHASE 1: RULE MANAGEMENT & VALIDATION
 ------------------------------------
 1. Rule Discovery via rule_manager.py:
-   - Fixed 287 production rules (confirmed baseline)
+   - Fixed 402 production rules (confirmed baseline)
    - Uses rule_manager.py for centralized rule ID management
    - Maps to Qradar_rule/ directory structure
    - Validates rule count consistency across environments
 
 2. Configuration Validation:
-   - mongodb_config.json contains 287 total_rules
+   - mongodb_config.json contains 402 total_rules
    - rule_mapping.json aligns with production baseline
    - UAT-to-Production mapping enabled via shared_utils/
 
@@ -53,14 +53,14 @@ EXECUTION ORDER (Unified Pipeline):
 ----------------------------------
 cd /Users/chaoyanchen/Desktop/AIDetection4Ransomware
 
-# Step 1: Validate rule setup (287 rules)
+# Step 1: Validate rule setup (402 rules)
 python shared_utils/rule_manager.py validate --count
 
 # Step 2: Run complete MongoDB setup
 python mongodb/setup_mongodb_offline.py
 
 # Step 3: Test unified connection
-python -c "from mongodb_connection import MongoDBConnection; print('✓ Connection OK')"
+python -c "from mongodb_connection import MongoDBConnection; print('Connection OK')"
 
 # Step 4: Validate pipeline integration
 python shared_utils/time_utils.py test-window-calculation
@@ -170,7 +170,7 @@ class MongoDBOfflineSetup:
                 }
             },
             "rule_mapping": {
-                "total_rules": 287,
+                "total_rules": 402,
                 "comment": "Fixed production rule count - using production rule coordinates as baseline",
                 "source": "Production_baseline",
                 "description": "Using 287 production rules as baseline for consistent feature vector dimensions across environments",
