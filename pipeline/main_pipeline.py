@@ -913,6 +913,7 @@ class UnifiedPipeline:
                                         entry['rule_name'] = rule_name
                                     top_rules.append(entry)
 
+                                top_rules_for_payload: List[Dict[str, Any]] = []
                                 if top_rules:
                                     payload_top_features = [
                                         {
@@ -923,6 +924,7 @@ class UnifiedPipeline:
                                         }
                                         for rule_entry in top_rules[:payload_rule_limit]
                                     ]
+                                    top_rules_for_payload = top_rules[:payload_rule_limit]
 
                                 alert_description = (
                                     f"Alert description | {label_str} activity detected " 
@@ -939,7 +941,7 @@ class UnifiedPipeline:
                                             'source_ip': result['source_ip'],
                                             'window_id': result['window_id'],
                                             'confidence': result['probability'],
-                                            'top_rules_by_count': top_rules,
+                                            'top_rules_by_count': top_rules_for_payload,
                                         }
                                     )
                                 except Exception:

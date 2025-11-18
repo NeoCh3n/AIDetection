@@ -176,6 +176,37 @@ def _format_detection_payload(
     return header + extension_str
 
 
+def _normalize_top_rules_payload(payload: Any) -> Any:
+    """
+    Ensure the top_rules_by_count payload entries include indexed keys
+    (e.g., rule_id-1, value-1) to satisfy QRadar formatting expectations.
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    top_rules_raw = payload.get('top_rules_by_count')
+    if not isinstance(top_rules_raw, (list, tuple)) or not top_rules_raw:
+        return payload
+
+    transformed_rules = []
+    for idx, entry in enumerate(top_rules_raw, start=1):
+        if isinstance(entry, dict):
+            normalized_entry = {
+                f'rule_id-{idx}': entry.get('rule_id'),
+                f'value-{idx}': entry.get('value'),
+            }
+            rule_name_val = entry.get('rule_name')
+            if rule_name_val is not None:
+                normalized_entry[f'rule_name-{idx}'] = rule_name_val
+        else:
+            normalized_entry = {f'value-{idx}': entry}
+        transformed_rules.append(normalized_entry)
+
+    payload_copy = dict(payload)
+    payload_copy['top_rules_by_count'] = transformed_rules
+    return payload_copy
+
+
 def run_log(level, message, payload = None):
     # Ensure log directory exists
     Path(log_dir_path).mkdir(parents=True, exist_ok=True)
@@ -224,11 +255,16 @@ def run_log(level, message, payload = None):
         for extra_line in message_lines[1:]:
             log_lines.append(continuation_prefix + extra_line)
 
+        payload_to_log = payload
         if payload is not None:
             try:
-                payload_str = json.dumps(payload, default=str)
+                payload_to_log = _normalize_top_rules_payload(payload)
             except Exception:
-                payload_str = str(payload).replace("\n", " ")
+                payload_to_log = payload
+            try:
+                payload_str = json.dumps(payload_to_log, default=str)
+            except Exception:
+                payload_str = str(payload_to_log).replace("\n", " ")
             log_lines.append(continuation_prefix + "Payload: " + payload_str)
 
         log_message = "\n".join(log_lines) + "\n"
