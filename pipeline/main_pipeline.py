@@ -192,7 +192,7 @@ class UnifiedPipeline:
         try:
             qcfg = self.config['detection']['qradar_config']
             # Construct AQL query
-            aql = qcfg['query_30min'].format(
+            aql = qcfg['query_15min'].format(
                 start_time=start_time.strftime("%Y-%m-%d %H:%M:%S"),
                 end_time=end_time.strftime("%Y-%m-%d %H:%M:%S")
             )
