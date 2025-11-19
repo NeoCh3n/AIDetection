@@ -132,7 +132,7 @@ class UnifiedPipeline:
                     "qradar_config": {
                         "host": os.getenv("QRADAR_ADDRESS", "192.168.153.123"),
                         "token": os.getenv("QRADAR_API_TOKEN", "REPLACE_WITH_TOKEN"),
-                        "query_30min": "SELECT \"sysmon_hostname\" AS 'sysmon_hostname (custom)', \"creEventList\" AS 'Custom Rule', DATEFORMAT(MIN(\"deviceTime\"), 'MMM dd, yyyy, h:mm:ss a') AS 'Log Source Time (Minimum)', COUNT(*) AS 'Count' FROM events GROUP BY \"sysmon_hostname\", \"creEventList\" ORDER BY \"Count\" DESC START '{start_time}' STOP '{end_time}'"
+                        "query_15min": "SELECT \"sourceIP\" AS 'Source IP', \"sysmon_hostname\" AS 'sysmon_hostname (custom)', \"creEventList\" AS 'Custom Rule', DATEFORMAT(MIN(\"deviceTime\"), 'MMM dd, yyyy, h:mm:ss a') AS 'Log Source Time (Minimum)', COUNT(*) AS 'Count' FROM events WHERE (\"Sysmon_hostname\" != NULL) GROUP BY \"sysmon_hostname\", \"sourceIP\", \"creEventList\" ORDER BY \"Count\" DESC START '{start_time}' STOP '{end_time}'"
                     },
                     "mongodb_config": {
                         "connection_string": "mongodb://localhost:27017/",
