@@ -695,7 +695,7 @@ class UnifiedPipeline:
 
             # Calculate time window
             end_time = datetime.now()
-            start_time = end_time - timedelta(minutes=15)
+            start_time = end_time - timedelta(minutes=30)
 
             state['last_attempt_epoch'] = time.time()
             self._persist_detection_state(state)

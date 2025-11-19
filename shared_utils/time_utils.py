@@ -50,13 +50,13 @@ def parse_qradar_timestamp(timestamp_str: str) -> datetime.datetime:
         raise ValueError(f"Unrecognized timestamp format: {timestamp_str}")
 
 
-def get_window_id(timestamp: datetime.datetime, window_size_minutes: int = 30) -> str:
+def get_window_id(timestamp: datetime.datetime, window_size_minutes: int = 15) -> str:
     """
-    Generate a unique window ID for 30-minute time windows
-    
+    Generate a unique window ID for 15-minute time windows
+
     Args:
         timestamp: The datetime to generate window ID for
-        window_size_minutes: Size of time window in minutes (default: 30)
+        window_size_minutes: Size of time window in minutes (default: 15)
         
     Returns:
         String window ID in format "YYYY-MM-DD_HH-MM-SS_WID"
@@ -86,7 +86,7 @@ def get_window_id(timestamp: datetime.datetime, window_size_minutes: int = 30) -
     return f"{window_id}_W{window_number}"
 
 
-def adjust_csv_timestamp_to_window_start(timestamp: datetime.datetime, window_size_minutes: int = 30) -> datetime.datetime:
+def adjust_csv_timestamp_to_window_start(timestamp: datetime.datetime, window_size_minutes: int = 15) -> datetime.datetime:
     """
     Adjust CSV timestamp to the start of its 30-minute window.
     
@@ -127,10 +127,10 @@ def adjust_csv_timestamp_to_window_start(timestamp: datetime.datetime, window_si
     return categorize_query_timestamp(timestamp, window_size_minutes)
 
 
-def categorize_query_timestamp(timestamp: datetime.datetime, window_size_minutes: int = 30, tolerance_seconds: int = 5) -> datetime.datetime:
+def categorize_query_timestamp(timestamp: datetime.datetime, window_size_minutes: int = 15, tolerance_seconds: int = 5) -> datetime.datetime:
     """
-    Categorize manual query timestamp to nearest 30-minute window with 5-second tolerance.
-    
+    Categorize manual query timestamp to nearest 15-minute window with 5-second tolerance.
+
     For manual queries like "Jul 31, 2025, 10:15 AM - 10:45 AM", handles timestamps
     that are within 5 seconds of window boundaries.
     
@@ -202,14 +202,14 @@ def categorize_query_timestamp(timestamp: datetime.datetime, window_size_minutes
             return next_window_start
 
 
-def get_window_start_end(timestamp: datetime.datetime, window_size_minutes: int = 30) -> tuple:
+def get_window_start_end(timestamp: datetime.datetime, window_size_minutes: int = 15) -> tuple:
     """
-    Get the start and end times for a 30-minute window containing the given timestamp.
-    
+    Get the start and end times for a 15-minute window containing the given timestamp.
+
     Args:
         timestamp: The datetime to get window boundaries for
-        window_size_minutes: Size of time window in minutes (default: 30)
-        
+        window_size_minutes: Size of time window in minutes (default: 15)
+
     Returns:
         Tuple of (start_time, end_time) as datetime objects
     """
@@ -311,7 +311,7 @@ def get_current_window_id() -> str:
 # Cache for frequently used windows
 _window_cache = {}
 
-def get_window_id_cached(timestamp: datetime.datetime, window_size_minutes: int = 30) -> str:
+def get_window_id_cached(timestamp: datetime.datetime, window_size_minutes: int = 15) -> str:
     """
     Cached version of get_window_id for performance optimization.
     

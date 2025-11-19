@@ -156,7 +156,7 @@ class AQLDataInserter:
         """Calculate 30-minute window boundaries for AQL data."""
         minutes = timestamp.minute
         window_start = timestamp.replace(
-            minute=(minutes // 30) * 30, 
+            minute=(minutes // 15 * 15), 
             second=0, 
             microsecond=0
         )
