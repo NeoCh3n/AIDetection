@@ -142,12 +142,13 @@ class AQLDataInserter:
     
     def parse_aql_timestamp(self, timestamp_str: str) -> Optional[datetime]:
         """Parse QRadar AQL timestamp string to datetime."""
+        timebuffer = timedelta(seconds=10)
         try:
             # Handle QRadar AQL timestamp format: "Jul 29, 2025, 9:50:55 AM"
-            return datetime.strptime(timestamp_str, "%b %d, %Y, %I:%M:%S %p")
+            return datetime.strptime(timestamp_str, "%b %d, %Y, %I:%M:%S %p") + timebuffer
         except ValueError:
             try:
-                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S") + timebuffer
             except ValueError:
                 logging_utils.run_log("WARNING", f"Failed to parse timestamp: {timestamp_str}")
                 return None
