@@ -531,13 +531,21 @@ class MongoDBConnectionManager:
             start_norm = _normalize(start_time)
             end_norm = _normalize(end_time)
 
-            # Return windows that overlap the requested interval
+            # Ensure start <= end (swap if caller accidentally passed reversed times)
+            if start_norm and end_norm and start_norm > end_norm:
+                start_norm, end_norm = end_norm, start_norm
+
+            # Strict containment: only return windows where both window_start and window_end
+            # are strictly inside the requested interval (start < window_start < end AND start < window_end < end)
             query = {
-                'window_end': {'$gt': start_norm},
-                'window_start': {'$lt': end_norm},
-                'label': {'$exists': False}
+                '$and': [
+                    {'window_start': {'$gt': start_norm, '$lt': end_norm}},
+                    {'window_end': {'$gt': start_norm, '$lt': end_norm}},
+                    {'label': {'$exists': False}}
+                ]
             }
-            
+
+            logging_utils.run_log("DEBUG", f"get_unlabeled_windows strict query: {query} | start={start_norm} end={end_norm}")
             windows = list(self.windows_collection.find(query).sort('window_start', 1))
             return windows
             
