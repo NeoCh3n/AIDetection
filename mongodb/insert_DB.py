@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """
 MongoDB Data Insertion Script for Detection-Only Mode
 
 This script processes QRadar AQL search results (JSON format) and inserts them
 into MongoDB collections in detection-only mode.
-Handles 30-minute sliding window aggregation of AQL rule trigger data.
+Handles 15-minute sliding window aggregation of AQL rule trigger data.
 
 Python 3.6.8 Compatible
 """
@@ -33,7 +32,7 @@ class AQLDataInserter:
     """
     Specialized inserter for QRadar AQL JSON data in detection-only mode.
     
-    Processes QRadar search results formatted as JSON and creates 30-minute
+    Processes QRadar search results formatted as JSON and creates 15-minute
     sliding windows for threat detection without training labels.
     """
     
@@ -67,7 +66,7 @@ class AQLDataInserter:
             },
             "pipeline": {
                 "mode": "detection_only",
-                "window_size_minutes": 30,
+                "window_size_minutes": 15,
                 "retention_days": 7
             },
             "collections": {
@@ -154,14 +153,15 @@ class AQLDataInserter:
                 return None
     
     def get_window_boundaries(self, timestamp: datetime) -> tuple:
-        """Calculate 30-minute window boundaries for AQL data."""
+        """Calculate window boundaries for AQL data."""
+        window_size = self.config.get('pipeline', {}).get('window_size_minutes', 15)
         minutes = timestamp.minute
         window_start = timestamp.replace(
-            minute=(minutes // 15 * 15), 
+            minute=(minutes // window_size * window_size), 
             second=0, 
             microsecond=0
         )
-        window_end = window_start + timedelta(minutes=30)
+        window_end = window_start + timedelta(minutes=window_size)
         window_id = window_start.strftime("%Y-%m-%d_%H-%M-%S")
         
         return window_id, window_start, window_end
