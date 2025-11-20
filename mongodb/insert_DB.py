@@ -227,7 +227,7 @@ class AQLDataInserter:
                         'metadata': {
                             'source': 'qradar_aql',
                             'data_type': 'detection',
-                            'window_size_minutes': 30
+                            'window_size_minutes': 15
                         }
                     }
                 
