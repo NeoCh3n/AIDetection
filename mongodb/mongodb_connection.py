@@ -537,6 +537,7 @@ class MongoDBConnectionManager:
 
             # Strict containment: only return windows where both window_start and window_end
             # are strictly inside the requested interval (start < window_start < end AND start < window_end < end)
+            """
             query = {
                 '$and': [
                     {'window_start': {'$gt': start_norm, '$lt': end_norm}},
@@ -544,9 +545,16 @@ class MongoDBConnectionManager:
                     {'label': {'$exists': False}}
                 ]
             }
+            """
 
-            logging_utils.run_log("DEBUG", f"get_unlabeled_windows strict query: {query} | start={start_norm} end={end_norm}")
-            windows = list(self.windows_collection.find(query).sort('window_start', 1))
+            #logging_utils.run_log("DEBUG", f"get_unlabeled_windows strict query: {query} | start={start_norm} end={end_norm}")
+            #windows = list(self.windows_collection.find(query).sort('window_start', 1))
+            logging_utils.run_log("DEBUG", f"get_unlabeled_windows query: | start={start_norm} end={end_norm}")
+            windows = list(self.windows_collection.find().sort('_id', -1 ).limit(2))
+            w_start = windows[0].get('window_end') if windows else None
+            w_end = windows[-1].get('window_start') if windows else None
+
+            logging_utils.run_log("INFO", f"Retrieved {len(windows)} unlabeled windows between {w_start} and {w_end}")
             return windows
             
         except Exception as e:
