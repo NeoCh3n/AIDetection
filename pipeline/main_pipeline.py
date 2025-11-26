@@ -927,40 +927,27 @@ class UnifiedPipeline:
                                     top_rules_for_payload = top_rules[:payload_rule_limit]
 
                                 alert_description = (
-                                    f"Alert description | {label_str} activity detected " 
+                                    f"Alert description | {label_str} activity detected "
                                     f"on {result['hostname']} (confidence={result['probability']:.4f})"
                                 )
-                                # Log alert details with top rules
-                                try:
-                                    logging_utils.run_log(
-                                        "ALERT_DETAIL",
-                                        f"{alert_description} | " 
-                                        f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
-                                        payload={
-                                            'hostname': result['hostname'],
-                                            'source_ip': result['source_ip'],
-                                            'window_id': result['window_id'],
-                                            'confidence': result['probability'],
-                                            'top_rules_by_count': top_rules_for_payload,
-                                        }
-                                    )
-                                except Exception:
-                                    pass
 
                                 # Enhanced SHAP explanation for this specific alert instance
+                                shap_success = False
+                                enriched_shap = []
+
                                 if shap_explainer is not None and row_vec is not None and row_vec.size > 0:
                                     try:
                                         self.logger.info(f"Applying SHAP explanation for alert instance {result['window_id']}")
-                                    
+
                                         # Create single instance data for explanation
                                         instance_data = row_vec.reshape(1, -1)
-                                    
+
                                         # Apply SHAP explainer to this specific alert instance
                                         # Use a subset of X as background data for efficiency
                                         background_sample_size = min(100, X.shape[0])
                                         background_indices = np.random.choice(X.shape[0], size=background_sample_size, replace=False)
                                         background_data = X[background_indices]
-                                    
+
                                         # SHAP frequent path mining options from config (optional)
                                         shap_cfg = (self.config.get('detection', {}) or {}).get('shap', {}) or {}
                                         fpm_opts = shap_cfg.get('frequent_path_mining', None)
@@ -976,12 +963,11 @@ class UnifiedPipeline:
                                             summary_report=False,
                                             frequent_path_mining=fpm_opts
                                         )
-                                    
+
                                         if shap_results and 'feature_importance' in shap_results:
                                             # Extract top contributing features for this alert
                                             alert_top_features = shap_results['feature_importance'][:top_n]
                                             # Enrich with rule_id and rule_name when available
-                                            enriched_shap = []
                                             for fi in alert_top_features:
                                                 fname = fi.get('feature', '')
                                                 rid_val = None
@@ -997,16 +983,21 @@ class UnifiedPipeline:
                                                         name = rule_name_map.get(int(rid_val))
                                                         if name is not None:
                                                             fi_en['rule_name'] = name
+
+                                                # Ensure 'value' key exists for compatibility with ALERT_DETAIL format
+                                                if 'importance' in fi_en:
+                                                    fi_en['value'] = fi_en['importance']
+
                                                 enriched_shap.append(fi_en)
-                                        
+
                                             # Log SHAP-based feature importance
                                             shap_top_rules = []
                                             shap_top_values = []
-                                        
+
                                             for feature_info in alert_top_features:
                                                 feature_name = feature_info.get('feature', '')
                                                 importance = feature_info.get('importance', 0.0)
-                                            
+
                                                 # Extract rule ID from feature name
                                                 if feature_name.startswith('rule_'):
                                                     try:
@@ -1015,10 +1006,10 @@ class UnifiedPipeline:
                                                         rule_id = feature_name
                                                 else:
                                                     rule_id = feature_name
-                                            
+
                                                 shap_top_rules.append(rule_id)
                                                 shap_top_values.append(float(importance))
-                                        
+
                                             # Enhanced logging with SHAP results
                                             try:
                                                 logging_utils.log_shap_results(
@@ -1030,8 +1021,8 @@ class UnifiedPipeline:
                                                     prediction='malicious',
                                                     confidence=result['probability']
                                                 )
-                                            
-                                                # Additional detailed SHAP logging
+
+                                                # Additional detailed SHAP logging - SWAPPED CONTENT: Now logs count-based rules
                                                 logging_utils.run_log(
                                                     "SHAP_EXPLANATION",
                                                     f"SHAP explanation for alert | hostname={result['hostname']} | window_id={result['window_id']}",
@@ -1040,7 +1031,7 @@ class UnifiedPipeline:
                                                         'source_ip': result['source_ip'],
                                                         'window_id': result['window_id'],
                                                         'confidence': result['probability'],
-                                                        'shap_top_features': enriched_shap,
+                                                        'shap_top_features': top_rules_for_payload, # Swapped: using count-based rules
                                                         'shap_output_files': shap_results.get('output_files', {}),
                                                         'shap_summary': {
                                                             'most_important_feature': enriched_shap[0].get('rule_name', enriched_shap[0].get('feature')) if enriched_shap else None,
@@ -1050,29 +1041,28 @@ class UnifiedPipeline:
                                                         }
                                                     }
                                                 )
-                                                if enriched_shap:
-                                                    payload_top_features = enriched_shap[:payload_rule_limit]
+                                                shap_success = True
                                             except Exception as log_e:
                                                 self.logger.warning(f"Failed to log SHAP results for {result['window_id']}: {log_e}")
-                                        
+
                                             # Store SHAP results in the result for potential further use
                                             result['shap_explanation'] = {
                                                 'top_features': enriched_shap,
                                                 'output_files': shap_results.get('output_files', {}),
                                                 'explanation_available': True
                                             }
-                                        
+
                                             self.logger.info(f"SHAP explanation completed for alert {result['window_id']} - "
                                                            f"Top feature: {alert_top_features[0]['feature'] if alert_top_features else 'N/A'}")
-                                    
+
                                         else:
                                             self.logger.warning(f"SHAP explanation returned no results for {result['window_id']}")
                                             result['shap_explanation'] = {'explanation_available': False, 'error': 'No SHAP results'}
-                                
+
                                     except Exception as shap_e:
                                         self.logger.error(f"SHAP explanation failed for alert {result['window_id']}: {shap_e}")
                                         result['shap_explanation'] = {'explanation_available': False, 'error': str(shap_e)}
-                                    
+
                                         # Fallback to basic feature importance logging
                                         try:
                                             if top_rules:
@@ -1089,10 +1079,31 @@ class UnifiedPipeline:
                                                 )
                                         except Exception:
                                             pass
-                            
+
                                 else:
                                     self.logger.info(f"SHAP explainer not available for alert {result['window_id']}")
                                     result['shap_explanation'] = {'explanation_available': False, 'error': 'SHAP explainer not initialized'}
+
+                                # Log alert details - SWAPPED CONTENT: Now logs SHAP results (if available), otherwise fallback to counts
+                                # Must be logged AFTER SHAP calculation to include SHAP results
+                                try:
+                                    payload_data = {
+                                        'hostname': result['hostname'],
+                                        'source_ip': result['source_ip'],
+                                        'window_id': result['window_id'],
+                                        'confidence': result['probability'],
+                                        # Use SHAP results if successful, otherwise fallback to count-based rules
+                                        'top_rules_by_count': enriched_shap[:payload_rule_limit] if shap_success and enriched_shap else top_rules_for_payload,
+                                    }
+
+                                    logging_utils.run_log(
+                                        "ALERT_DETAIL",
+                                        f"{alert_description} | "
+                                        f"Alert details | hostname={result['hostname']} | window_id={result['window_id']} | confidence={result['probability']:.4f}",
+                                        payload=payload_data
+                                    )
+                                except Exception as e:
+                                    self.logger.warning(f"Failed to log ALERT_DETAIL: {e}")
 
                             except Exception as e:
                                 self.logger.warning(f"Alert detail processing failed for {result['window_id']}: {e}")
