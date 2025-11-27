@@ -1094,7 +1094,7 @@ class Explainer:
             return self._boc_rule_ids
         try:
             name_map = self._get_rule_name_map()
-            boc_ids = {rid for rid, nm in name_map.items() if 'boc' in str(nm).lower()}
+            boc_ids = {rid for rid, nm in name_map.items() if 'boc_' in str(nm).lower()}
             self._boc_rule_ids = boc_ids
             return self._boc_rule_ids
         except Exception:
