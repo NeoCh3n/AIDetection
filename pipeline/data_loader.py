@@ -145,16 +145,28 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
         'Count': 'count'
     }
     
-    # Find all CSV files in directory
-    csv_files = [f for f in os.listdir(data_path) if f.endswith('.csv')]
+    # Find all CSV files in directory (recursively)
+    search_pattern = os.path.join(data_path, '**', '*.csv')
+    csv_files = glob.glob(search_pattern, recursive=True)
+    
     if not csv_files:
         logger.warning(f"No CSV files found in {data_path}")
         return pd.DataFrame(columns=['hostname', 'rule_id', 'timestamp', 'count', 'source_label'])
     
-    for file in csv_files:
-        file_path = os.path.join(data_path, file)
+    # Initialize Rule Manager for UAT mapping
+    try:
+        from shared_utils.qradar_rule_manager import QRadarRuleManager
+        rule_manager = QRadarRuleManager(mode='file')
+        uat_to_prod_map = rule_manager.get_uat_to_prod_map()
+        # Convert keys/values to Int64 for pandas compatibility
+        uat_to_prod_map = {int(k): int(v) for k, v in uat_to_prod_map.items()}
+    except Exception as e:
+        logger.warning(f"Failed to load UAT mapping: {e}")
+        uat_to_prod_map = {}
+
+    for file_path in csv_files:
         try:
-            logger.info(f"Processing {file}...")
+            logger.info(f"Processing {os.path.basename(file_path)}...")
             df = pd.read_csv(file_path)
             
             # Map actual columns to standardized names
@@ -164,7 +176,7 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
             required_cols = ['hostname', 'rule_id', 'timestamp_str', 'count']
             missing_cols = [col for col in required_cols if col not in df.columns]
             if missing_cols:
-                logger.warning(f"Skipping {file}: missing columns {missing_cols}")
+                logger.warning(f"Skipping {file_path}: missing columns {missing_cols}")
                 continue
             
             # Process timestamps
@@ -187,13 +199,24 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
             # Drop rows with invalid data
             df = df.dropna(subset=['hostname', 'rule_id', 'timestamp', 'count'])
             
+            # CHECK FOR UAT DATA AND APPLY MAPPING
+            # Check if 'UAT' is a parent directory of the file
+            # We look for '/UAT/' or '\UAT\' in the path
+            path_parts = file_path.split(os.sep)
+            if 'UAT' in path_parts:
+                logger.info(f"Detected UAT data in {file_path}. Applying UAT-to-PROD mapping...")
+                # Apply mapping
+                # We use map() but need to handle missing keys (keep original ID if no mapping found)
+                # Using apply with a lookup is safer for preserving unmapped IDs
+                df['rule_id'] = df['rule_id'].apply(lambda x: uat_to_prod_map.get(int(x), x) if pd.notnull(x) else x)
+            
             # Ensure consistent column order
             df = df[['hostname', 'rule_id', 'timestamp', 'count', 'source_label']]
             
             all_files.append(df)
             
         except Exception as e:
-            logger.error(f"Error processing {file}: {e}")
+            logger.error(f"Error processing {file_path}: {e}")
             continue
     
     if not all_files:
