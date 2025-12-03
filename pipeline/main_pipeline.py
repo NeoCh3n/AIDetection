@@ -1074,6 +1074,12 @@ class UnifiedPipeline:
                                                         'rule_id': None
                                                     })
 
+                                            # Filter out specific unwanted rules from the output
+                                            expanded_features = [
+                                                item for item in expanded_features 
+                                                if "BOC_OfficeHour" not in item['display_name']
+                                            ]
+
                                             # Sort expanded features by importance (descending) to ensure top rules are first
                                             # Note: If a family had multiple rules, they will all have the same importance
                                             # and appear together.
