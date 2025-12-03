@@ -4,6 +4,9 @@
         "100392": "BOC_3xx",
         "500999": "BOC_3xx",
         "30001": "BOC_300xx",
-        "99999": "Custom_Family_Example"
+        "99999": "Custom_Family_Example",
+        "12345": "BOC_3xx",
+        "67890": "BOC_300xx",
+        "11111": "My_Special_Family"
     }
 }
