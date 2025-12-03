@@ -1,0 +1,9 @@
+{
+    "family_mapping": {
+        "comment": "Map specific Rule IDs to Families here to override pattern matching. Format: 'RuleID': 'FamilyName'",
+        "100392": "BOC_3xx",
+        "500999": "BOC_3xx",
+        "30001": "BOC_300xx",
+        "99999": "Custom_Family_Example"
+    }
+}

@@ -993,22 +993,96 @@ class UnifiedPipeline:
                                             # Log SHAP-based feature importance
                                             shap_top_rules = []
                                             shap_top_values = []
+                                            
+                                            # Get raw rule counts for this window to map families back to specific rules
+                                            current_window_rules = df_agg.iloc[idx].get('aggregated_rules_dict', {})
+                                            if isinstance(current_window_rules, str):
+                                                import ast
+                                                try:
+                                                    current_window_rules = ast.literal_eval(current_window_rules)
+                                                except:
+                                                    current_window_rules = {}
 
+                                            # Expand Family features into specific rules
+                                            expanded_features = []
+                                            
                                             for feature_info in alert_top_features:
                                                 feature_name = feature_info.get('feature', '')
                                                 importance = feature_info.get('importance', 0.0)
+                                                
+                                                # Handle Family Features: Map back to specific rules
+                                                if feature_name.startswith('family_'):
+                                                    family_name = feature_name.replace('family_', '')
+                                                    found_constituent = False
+                                                    
+                                                    # Find rules in this window that belong to this family
+                                                    for r_id, r_count in current_window_rules.items():
+                                                        try:
+                                                            r_id_int = int(r_id)
+                                                            # Check if this rule belongs to the current family
+                                                            if feature_gen.rule_manager.get_rule_family(r_id_int) == family_name:
+                                                                found_constituent = True
+                                                                # Get Rule Name
+                                                                r_name = rule_name_map.get(r_id_int, str(r_id_int))
+                                                                
+                                                                # Create a feature entry for this specific rule
+                                                                # We assign the Family's importance to the specific rule
+                                                                # This ensures it appears in the top list
+                                                                expanded_features.append({
+                                                                    'display_name': f"{r_name} (ID:{r_id_int})",
+                                                                    'importance': importance,
+                                                                    'rule_id': r_id_int
+                                                                })
+                                                        except:
+                                                            continue
+                                                    
+                                                    # If no specific rules found for this family in this window (rare/edge case),
+                                                    # keep the family name so we don't lose the signal
+                                                    if not found_constituent:
+                                                        expanded_features.append({
+                                                            'display_name': family_name,
+                                                            'importance': importance,
+                                                            'rule_id': None
+                                                        })
 
-                                                # Extract rule ID from feature name
-                                                if feature_name.startswith('rule_'):
+                                                # Handle legacy "rule_" features (if any)
+                                                elif feature_name.startswith('rule_'):
                                                     try:
                                                         rule_id = int(feature_name.replace('rule_', ''))
+                                                        r_name = rule_name_map.get(rule_id)
+                                                        if r_name:
+                                                            display_name = f"{r_name} (ID:{rule_id})"
+                                                        else:
+                                                            display_name = str(rule_id)
+                                                        
+                                                        expanded_features.append({
+                                                            'display_name': display_name,
+                                                            'importance': importance,
+                                                            'rule_id': rule_id
+                                                        })
                                                     except ValueError:
-                                                        rule_id = feature_name
+                                                        expanded_features.append({
+                                                            'display_name': feature_name,
+                                                            'importance': importance,
+                                                            'rule_id': None
+                                                        })
                                                 else:
-                                                    rule_id = feature_name
+                                                    # Other features
+                                                    expanded_features.append({
+                                                        'display_name': feature_name,
+                                                        'importance': importance,
+                                                        'rule_id': None
+                                                    })
 
-                                                shap_top_rules.append(rule_id)
-                                                shap_top_values.append(float(importance))
+                                            # Sort expanded features by importance (descending) to ensure top rules are first
+                                            # Note: If a family had multiple rules, they will all have the same importance
+                                            # and appear together.
+                                            expanded_features.sort(key=lambda x: x['importance'], reverse=True)
+                                            
+                                            # Populate the lists for logging
+                                            for item in expanded_features:
+                                                shap_top_rules.append(item['display_name'])
+                                                shap_top_values.append(float(item['importance']))
 
                                             # Enhanced logging with SHAP results
                                             try:

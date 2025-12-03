@@ -45,7 +45,7 @@ class FeatureGenerator:
         )
         self._rule_to_index = None
         self._vector_dimension = None
-        self._production_rule_to_index = None
+        self._family_to_index = None
         
         # Validate configuration on initialization
         self._validate_config()
@@ -62,17 +62,15 @@ class FeatureGenerator:
         logger.info(f"Feature generator initialized with {self.environment} environment")
 
     def initialize_rules(self) -> None:
-        """Initialize rule mappings from discovered rules using production baseline."""
-        # Always use production rule coordinates as baseline
-        self._production_rule_to_index = self.rule_manager.get_production_rule_to_index_map()
-        self._vector_dimension = len(self._production_rule_to_index)
-        self._rule_to_index = self._production_rule_to_index
+        """Initialize rule mappings from discovered rules using family aggregation."""
+        # Use family mapping instead of raw rule IDs
+        self._family_to_index = self.rule_manager.get_family_to_index_map()
+        self._vector_dimension = len(self._family_to_index)
+        self._rule_to_index = self._family_to_index
         
-        expected_rules = self.config.get('feature_engineering', {}).get('expected_rules', 287)
-        if self._vector_dimension != expected_rules:
-            logger.warning(f"Expected {expected_rules} rules but got {self._vector_dimension}")
-        
-        logger.info(f"Initialized feature generator with {self._vector_dimension} production rules")
+        # Note: expected_rules config might need update if it refers to raw rules
+        # For now, we log the dimension
+        logger.info(f"Initialized feature generator with {self._vector_dimension} rule families")
     
     def generate_feature_vectors(self, 
                                df_agg: pd.DataFrame, 
@@ -120,27 +118,29 @@ class FeatureGenerator:
             if isinstance(rule_counts, dict):
                 for rule_id, count in rule_counts.items():
                     rule_id_int = int(str(rule_id))
-                    # Map UAT rule to production rule if necessary
-                    prod_rule_id = uat_to_prod_map.get(rule_id_int, rule_id_int)
                     
-                    if self._rule_to_index and prod_rule_id in self._rule_to_index:
-                        col_idx = self._rule_to_index[prod_rule_id]
-                        X[idx, col_idx] = float(count)
+                    # Get family for the rule
+                    family = self.rule_manager.get_rule_family(rule_id_int)
+                    
+                    if self._rule_to_index and family in self._rule_to_index:
+                        col_idx = self._rule_to_index[family]
+                        # Accumulate counts for the family
+                        X[idx, col_idx] += float(count)
                     else:
-                        logger.warning(f"Rule ID {prod_rule_id} not found in production baseline")
+                        # Optional: log unmapped families if needed, but "Uncategorized" should catch most
+                        pass
+                        
             elif 'rule_id' in df_agg.columns and 'count' in df_agg.columns:
                 # Handle direct rule_id/count format
                 rule_id = int(str(row['rule_id']))
                 count = float(str(row['count']))
                 
-                # Map UAT rule to production rule if necessary
-                prod_rule_id = uat_to_prod_map.get(rule_id, rule_id)
+                # Get family for the rule
+                family = self.rule_manager.get_rule_family(rule_id)
                 
-                if self._rule_to_index and prod_rule_id in self._rule_to_index:
-                    col_idx = self._rule_to_index[prod_rule_id]
-                    X[idx, col_idx] = count
-                else:
-                    logger.warning(f"Rule ID {prod_rule_id} not found in production baseline")
+                if self._rule_to_index and family in self._rule_to_index:
+                    col_idx = self._rule_to_index[family]
+                    X[idx, col_idx] += count
         
         # Handle labels for training mode
         y = None
@@ -160,19 +160,23 @@ class FeatureGenerator:
         return X, y
     
     def get_feature_names(self) -> List[str]:
-        """Get feature names corresponding to production rule IDs."""
-        rule_list = self.rule_manager.get_production_rule_list()
-        return [f"rule_{rule_id}" for rule_id in rule_list]
+        """Get feature names corresponding to rule families."""
+        if self._family_to_index is None:
+            self.initialize_rules()
+        # Sort by index to ensure correct order
+        sorted_families = sorted(self._family_to_index.items(), key=lambda x: x[1])
+        return [f"family_{name}" for name, _ in sorted_families]
     
     def get_rule_statistics(self) -> Dict[str, Any]:
-        """Get statistics about discovered rules using production baseline."""
-        prod_rules = self.rule_manager.get_production_rule_list()
+        """Get statistics about discovered rules and families."""
+        if self._family_to_index is None:
+            self.initialize_rules()
+            
         return {
-            'total_rules': len(prod_rules),
-            'rule_min': min(prod_rules) if prod_rules else 0,
-            'rule_max': max(prod_rules) if prod_rules else 0,
+            'total_families': len(self._family_to_index),
+            'families': list(self._family_to_index.keys()),
             'environment': self.environment,
-            'expected_dimension': self.config.get('feature_engineering', {}).get('expected_rules', 287)
+            'vector_dimension': self._vector_dimension
         }
 
     @classmethod

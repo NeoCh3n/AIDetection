@@ -12,6 +12,7 @@ import requests
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+import re
 from datetime import datetime
 
 class QRadarRuleManager:
@@ -46,12 +47,16 @@ class QRadarRuleManager:
         self._uat_to_prod_map = None
         self._prod_rule_list = None
         self._prod_rule_to_index = None
+        self._family_mapping = None
+        self._family_to_index = None
+        self._rule_id_to_family = None
         
         # Default paths
         self.project_root = Path(__file__).parent.parent.absolute()
         self.rule_dir = self.project_root / "Qradar_rule"
         self.mapping_file = self.project_root / "rule_mapping.json"
         self.uat_mapping_file = self.project_root / "shared_utils" / "uat_to_prod_mapping.csv"
+        self.family_mapping_file = self.project_root / "rule_family_mapping.json"
     
     def discover_rules(self) -> List[int]:
         """
@@ -534,53 +539,156 @@ class QRadarRuleManager:
         uat_to_prod = self.get_uat_to_prod_map()
         return uat_to_prod.get(uat_rule_id, uat_rule_id)
     
-    def validate_mapping_consistency(self) -> Dict[str, Any]:
+        return results
+
+    def _load_family_mapping_config(self) -> Dict[str, str]:
         """
-        Validate UAT-to-Production mapping consistency
+        Load explicit rule ID to family mapping from configuration file
         
         Returns:
-            Dictionary with validation results
+            Dictionary mapping rule ID (str) to Family Name
         """
-        results = {
-            'valid': True,
-            'warnings': [],
-            'errors': [],
-            'stats': {}
+        try:
+            if self.family_mapping_file.exists():
+                with open(self.family_mapping_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    return config.get('family_mapping', {})
+            return {}
+        except Exception as e:
+            self.logger.error(f"Failed to load family mapping config: {e}")
+            return {}
+
+    def _get_rule_family(self, rule_id: int, rule_name: str, explicit_mapping: Dict[str, str]) -> str:
+        """
+        Determine the family for a given rule based on ID or Name pattern
+        
+        Args:
+            rule_id: Rule ID
+            rule_name: Rule Name
+            explicit_mapping: Dictionary of explicit ID->Family mappings
+            
+        Returns:
+            Family name (e.g., "BOC_3xx", "BOC_300xx", "Uncategorized")
+        """
+        # 1. Explicit Mapping
+        if str(rule_id) in explicit_mapping:
+            return explicit_mapping[str(rule_id)]
+            
+        # 2. Pattern Matching (Name-based)
+        # BOC_300xx pattern: BOC_300 followed by 2 digits (e.g., BOC_30001...)
+        if re.match(r'^BOC_300\d{2}.*', rule_name):
+            return "BOC_300xx"
+
+        # BOC_3xx pattern: BOC_3 followed by 2 digits (e.g., BOC_303...)
+        if re.match(r'^BOC_3\d{2}.*', rule_name):
+            return "BOC_3xx"
+            
+        # 3. Fallback
+        return "Uncategorized"
+
+    def create_family_mapping(self, force_refresh: bool = False) -> Dict:
+        """
+        Create rule family mapping
+        
+        Args:
+            force_refresh: Force recreation of mapping
+            
+        Returns:
+            Dictionary containing family_to_index and rule_id_to_family
+        """
+        if not force_refresh and self._family_mapping:
+            return self._family_mapping
+            
+        # Get all rules with metadata (need names)
+        # We need to re-discover to get names, as simple ID list isn't enough
+        # For efficiency, we'll assume discover_rules or _discover_from_csv 
+        # can be adapted or we just re-read the CSVs/API here if needed.
+        # But wait, discover_rules only returns IDs.
+        # We need a method that returns full rule objects or at least ID+Name.
+        
+        # Let's fetch full rule details
+        rules_data = []
+        if self.mode == 'api':
+            # In API mode, we might need to fetch again or cache. 
+            # For now, let's rely on CSVs which are saved during API fetch.
+            # If API fetch hasn't run, we might miss data. 
+            # But typically discover_rules is called first.
+            pass
+        
+        # Always read from CSVs as they are the local cache/source
+        rule_files = self._find_rule_files()
+        explicit_mapping = self._load_family_mapping_config()
+        
+        family_set = set()
+        rule_id_to_family = {}
+        
+        for file_path in rule_files:
+            try:
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        try:
+                            rule_id = int(float(row['id']))
+                            rule_name = row.get('name', '')
+                            
+                            family = self._get_rule_family(rule_id, rule_name, explicit_mapping)
+                            
+                            rule_id_to_family[rule_id] = family
+                            family_set.add(family)
+                            
+                        except (ValueError, KeyError):
+                            continue
+            except Exception as e:
+                self.logger.error(f"Error reading {file_path} for family mapping: {e}")
+        
+        # Sort families to ensure consistent indexing
+        # Ensure Uncategorized is last or has specific place if desired, but sorted is fine
+        sorted_families = sorted(list(family_set))
+        
+        family_to_index = {family: idx for idx, family in enumerate(sorted_families)}
+        
+        mapping = {
+            'family_to_index': family_to_index,
+            'rule_id_to_family': rule_id_to_family,
+            'families': sorted_families,
+            'total_families': len(sorted_families),
+            'generated_at': str(datetime.now())
         }
         
-        try:
-            # Load mappings
-            uat_to_prod = self.get_uat_to_prod_map()
-            prod_rules = set(self.get_production_rule_list())
-            
-            if not uat_to_prod:
-                results['warnings'].append("No UAT-to-Production mappings found")
-                results['stats']['total_mappings'] = 0
-                return results
-            
-            # Validate mappings
-            missing_production_rules = []
-            for uat_rule, prod_rule in uat_to_prod.items():
-                if prod_rule not in prod_rules:
-                    missing_production_rules.append(prod_rule)
-            
-            if missing_production_rules:
-                results['errors'].append(f"Production rules missing: {missing_production_rules}")
-                results['valid'] = False
-            
-            results['stats'] = {
-                'total_mappings': len(uat_to_prod),
-                'production_rules': len(prod_rules),
-                'coverage_percentage': (len(set(uat_to_prod.values()).intersection(prod_rules)) / len(prod_rules)) * 100 if prod_rules else 0
-            }
-            
-            self.logger.info(f"Mapping validation: {results['stats']}")
-            
-        except Exception as e:
-            results['errors'].append(str(e))
-            results['valid'] = False
+        self._family_mapping = mapping
+        self._family_to_index = family_to_index
+        self._rule_id_to_family = rule_id_to_family
         
-        return results
+        return mapping
+
+    def get_family_to_index_map(self, refresh: bool = False) -> Dict[str, int]:
+        """
+        Get family name to index mapping
+        
+        Args:
+            refresh: Force refresh
+            
+        Returns:
+            Dictionary mapping Family Name to Index
+        """
+        if refresh or not self._family_to_index:
+            mapping = self.create_family_mapping(force_refresh=True)
+            return mapping['family_to_index']
+        return self._family_to_index
+
+    def get_rule_family(self, rule_id: int) -> str:
+        """
+        Get family for a specific rule ID
+        
+        Args:
+            rule_id: Rule ID
+            
+        Returns:
+            Family name
+        """
+        if not self._rule_id_to_family:
+            self.create_family_mapping()
+        return self._rule_id_to_family.get(rule_id, "Uncategorized")
 
 
 # Convenience functions for backward compatibility
@@ -676,6 +784,22 @@ def get_uat_to_prod_map(config: Optional[Dict[str, Any]] = None) -> Dict[int, in
     """
     manager = QRadarRuleManager(config=config)
     return manager.get_uat_to_prod_map()
+
+
+def get_family_to_index_map(
+    config: Optional[Dict[str, Any]] = None
+) -> Dict[str, int]:
+    """
+    Get family to index mapping
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Dictionary mapping Family Name to Index
+    """
+    manager = QRadarRuleManager(config=config)
+    return manager.get_family_to_index_map()
 
 
 if __name__ == "__main__":
