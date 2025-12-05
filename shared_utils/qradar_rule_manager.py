@@ -642,8 +642,17 @@ class QRadarRuleManager:
                 self.logger.error(f"Error reading {file_path} for family mapping: {e}")
         
         # Sort families to ensure consistent indexing
-        # Ensure Uncategorized is last or has specific place if desired, but sorted is fine
+        # Remove Uncategorized from families list as they will be handled individually
+        if "Uncategorized" in family_set:
+            family_set.remove("Uncategorized")
+            
         sorted_families = sorted(list(family_set))
+        
+        # Get list of uncategorized rule IDs
+        uncategorized_rules = sorted([
+            rid for rid, fam in rule_id_to_family.items() 
+            if fam == "Uncategorized"
+        ])
         
         family_to_index = {family: idx for idx, family in enumerate(sorted_families)}
         
@@ -651,7 +660,9 @@ class QRadarRuleManager:
             'family_to_index': family_to_index,
             'rule_id_to_family': rule_id_to_family,
             'families': sorted_families,
+            'uncategorized_rules': uncategorized_rules,
             'total_families': len(sorted_families),
+            'total_uncategorized': len(uncategorized_rules),
             'generated_at': str(datetime.now())
         }
         
@@ -660,6 +671,20 @@ class QRadarRuleManager:
         self._rule_id_to_family = rule_id_to_family
         
         return mapping
+
+    def get_uncategorized_rules(self, refresh: bool = False) -> List[int]:
+        """
+        Get list of rule IDs that are not in any specific family
+        
+        Args:
+            refresh: Force refresh
+            
+        Returns:
+            List of rule IDs
+        """
+        if refresh or not self._family_mapping:
+            self.create_family_mapping(force_refresh=True)
+        return self._family_mapping.get('uncategorized_rules', [])
 
     def get_family_to_index_map(self, refresh: bool = False) -> Dict[str, int]:
         """

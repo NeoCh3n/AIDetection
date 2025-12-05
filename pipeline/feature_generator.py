@@ -64,13 +64,30 @@ class FeatureGenerator:
     def initialize_rules(self) -> None:
         """Initialize rule mappings from discovered rules using family aggregation."""
         # Use family mapping instead of raw rule IDs
+        # Use family mapping instead of raw rule IDs
         self._family_to_index = self.rule_manager.get_family_to_index_map()
-        self._vector_dimension = len(self._family_to_index)
-        self._rule_to_index = self._family_to_index
+        
+        # Get uncategorized rules for standalone features
+        self._uncategorized_rules = self.rule_manager.get_uncategorized_rules()
+        
+        # Create standalone rule index map
+        # Start indices after the last family index
+        start_idx = len(self._family_to_index)
+        self._standalone_rule_to_index = {
+            int(rule_id): start_idx + i 
+            for i, rule_id in enumerate(self._uncategorized_rules)
+        }
+        
+        self._vector_dimension = len(self._family_to_index) + len(self._standalone_rule_to_index)
+        
+        # _rule_to_index is now a misnomer, it's really a feature map, but we keep the name for compatibility
+        # We won't use it directly for lookup in the new logic, but we can populate it for reference
+        self._rule_to_index = self._family_to_index.copy()
         
         # Note: expected_rules config might need update if it refers to raw rules
         # For now, we log the dimension
-        logger.info(f"Initialized feature generator with {self._vector_dimension} rule families")
+        logger.info(f"Initialized feature generator with {len(self._family_to_index)} families and {len(self._standalone_rule_to_index)} standalone rules")
+        logger.info(f"Total feature vector dimension: {self._vector_dimension}")
     
     def generate_feature_vectors(self, 
                                df_agg: pd.DataFrame, 
@@ -119,16 +136,18 @@ class FeatureGenerator:
                 for rule_id, count in rule_counts.items():
                     rule_id_int = int(str(rule_id))
                     
-                    # Get family for the rule
-                    family = self.rule_manager.get_rule_family(rule_id_int)
-                    
-                    if self._rule_to_index and family in self._rule_to_index:
-                        col_idx = self._rule_to_index[family]
-                        # Accumulate counts for the family
-                        X[idx, col_idx] += float(count)
-                    else:
-                        # Optional: log unmapped families if needed, but "Uncategorized" should catch most
-                        pass
+                # Get family for the rule
+                family = self.rule_manager.get_rule_family(rule_id_int)
+                
+                # Logic: If family exists and is not Uncategorized, use family feature.
+                # Otherwise, check if it's a standalone rule feature.
+                
+                if family != "Uncategorized" and self._family_to_index and family in self._family_to_index:
+                    col_idx = self._family_to_index[family]
+                    X[idx, col_idx] += float(count)
+                elif self._standalone_rule_to_index and rule_id_int in self._standalone_rule_to_index:
+                    col_idx = self._standalone_rule_to_index[rule_id_int]
+                    X[idx, col_idx] += float(count)
                         
             elif 'rule_id' in df_agg.columns and 'count' in df_agg.columns:
                 # Handle direct rule_id/count format
@@ -138,8 +157,11 @@ class FeatureGenerator:
                 # Get family for the rule
                 family = self.rule_manager.get_rule_family(rule_id)
                 
-                if self._rule_to_index and family in self._rule_to_index:
-                    col_idx = self._rule_to_index[family]
+                if family != "Uncategorized" and self._family_to_index and family in self._family_to_index:
+                    col_idx = self._family_to_index[family]
+                    X[idx, col_idx] += count
+                elif self._standalone_rule_to_index and rule_id in self._standalone_rule_to_index:
+                    col_idx = self._standalone_rule_to_index[rule_id]
                     X[idx, col_idx] += count
         
         # Handle labels for training mode
@@ -164,8 +186,16 @@ class FeatureGenerator:
         if self._family_to_index is None:
             self.initialize_rules()
         # Sort by index to ensure correct order
+        # Sort by index to ensure correct order
         sorted_families = sorted(self._family_to_index.items(), key=lambda x: x[1])
-        return [f"family_{name}" for name, _ in sorted_families]
+        names = [f"family_{name}" for name, _ in sorted_families]
+        
+        # Add standalone rules
+        if hasattr(self, '_standalone_rule_to_index') and self._standalone_rule_to_index:
+            sorted_rules = sorted(self._standalone_rule_to_index.items(), key=lambda x: x[1])
+            names.extend([f"rule_{rid}" for rid, _ in sorted_rules])
+            
+        return names
     
     def get_rule_statistics(self) -> Dict[str, Any]:
         """Get statistics about discovered rules and families."""
@@ -174,6 +204,7 @@ class FeatureGenerator:
             
         return {
             'total_families': len(self._family_to_index),
+            'total_standalone_rules': len(getattr(self, '_standalone_rule_to_index', [])),
             'families': list(self._family_to_index.keys()),
             'environment': self.environment,
             'vector_dimension': self._vector_dimension
