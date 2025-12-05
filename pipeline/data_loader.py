@@ -213,6 +213,11 @@ def _load_csv_files(data_path: str, source_label: str) -> pd.DataFrame:
             # Ensure consistent column order
             df = df[['hostname', 'rule_id', 'timestamp', 'count', 'source_label']]
             
+            # Generate unique window_id from filename for training mode
+            # We use the filename (without extension) as the base window ID
+            window_id_base = os.path.splitext(os.path.basename(file_path))[0]
+            df['window_id'] = window_id_base
+            
             all_files.append(df)
             
         except Exception as e:

@@ -88,10 +88,16 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
     # Use math.log1p via Series.apply to satisfy static type checkers
     df['count_log1p'] = df['count'].astype(float).apply(math.log1p)
     
-    # Generate window IDs for each event
-    df['window_id'] = df['timestamp'].apply(
-        lambda ts: get_window_id(ts, window_size_minutes)
-    )
+    # Generate window IDs
+    if mode == 'train' and 'window_id' in df.columns:
+        # Use existing window_id from file-based loading
+        # Ensure window_id is string
+        df['window_id'] = df['window_id'].astype(str)
+    else:
+        # Generate time-based window IDs for detection mode
+        df['window_id'] = df['timestamp'].apply(
+            lambda ts: get_window_id(ts, window_size_minutes)
+        )
     
     # Group by window_id, hostname, source_label and source_ip for aggregation
     grouped = df.groupby(['window_id', 'hostname', 'source_label', 'source_ip'])
@@ -121,8 +127,14 @@ def aggregate_to_windows(df: pd.DataFrame, window_size_minutes: int = 30, mode: 
         is_attack = 1 if source_label == 'attack' else 0
         
         # Get window boundaries
-        first_timestamp = group['timestamp'].min()
-        window_start, window_end = get_window_start_end(first_timestamp, window_size_minutes)
+        if mode == 'train':
+            # For file-based windows, use actual min/max timestamps
+            window_start = group['timestamp'].min()
+            window_end = group['timestamp'].max()
+        else:
+            # For detection, snap to grid
+            first_timestamp = group['timestamp'].min()
+            window_start, window_end = get_window_start_end(first_timestamp, window_size_minutes)
         
         # Build result with mode-specific columns
         result_row = {
