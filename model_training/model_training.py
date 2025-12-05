@@ -38,7 +38,7 @@ Enabling GridSearchCV
 Notes
 - Python 3.6.8 and scikit-learn 0.24.2 required (see requirements.txt).
 - Data loader defaults to `./Training_data/normal` and `./Training_data/attack` for CSVs.
-- RandomForest default: n_estimators=200, class_weight='balanced_subsample', max_features='sqrt', n_jobs=-1.
+- RandomForest default: n_estimators=200, class_weight='balanced_subsample', max_features='sqrt', n_jobs=3.
 """
 
 import os
