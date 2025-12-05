@@ -289,10 +289,10 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
             # Reasonable defaults compatible with sklearn 0.24.2
             default_param_grid = {
                 'n_estimators': [i for i in range(300, 1000, 200)],
-                'max_depth': [10, 20, 30, 40, None],
+                'max_depth': [10, 15, 20, 25, 30, 35, 40, None],
                 'max_features': ['sqrt', 'log2', 0.2, 0.3, 0.5],
                 'min_samples_split': [5, 10, 20, 40, 60],
-                'min_samples_leaf': [1, 5, 10, 20, 30],
+                'min_samples_leaf': [5, 10, 15, 20, 30],
                 'class_weight': ['balanced', 'balanced_subsample'],
                 #'min_impurity_decrease': [0.0, 0.0001, 0.001, 0.01],
                 #'ccp_alpha': [0.0, 0.0001, 0.001, 0.01],
