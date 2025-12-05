@@ -134,20 +134,22 @@ class FeatureGenerator:
 
             if isinstance(rule_counts, dict):
                 for rule_id, count in rule_counts.items():
-                    rule_id_int = int(str(rule_id))
-                    
-                # Get family for the rule
-                family = self.rule_manager.get_rule_family(rule_id_int)
-                
-                # Logic: If family exists and is not Uncategorized, use family feature.
-                # Otherwise, check if it's a standalone rule feature.
-                
-                if family != "Uncategorized" and self._family_to_index and family in self._family_to_index:
-                    col_idx = self._family_to_index[family]
-                    X[idx, col_idx] += float(count)
-                elif self._standalone_rule_to_index and rule_id_int in self._standalone_rule_to_index:
-                    col_idx = self._standalone_rule_to_index[rule_id_int]
-                    X[idx, col_idx] += float(count)
+                    try:
+                        rule_id_int = int(str(rule_id))
+                        count_val = float(count)
+                    except Exception:
+                        continue
+
+                    family = self.rule_manager.get_rule_family(rule_id_int)
+
+                    # If the rule is part of a family, accumulate into the family feature
+                    if family != "Uncategorized" and self._family_to_index and family in self._family_to_index:
+                        col_idx = self._family_to_index[family]
+                        X[idx, col_idx] += count_val
+                    # Otherwise fall back to the standalone rule slot (for uncategorized rules)
+                    elif self._standalone_rule_to_index and rule_id_int in self._standalone_rule_to_index:
+                        col_idx = self._standalone_rule_to_index[rule_id_int]
+                        X[idx, col_idx] += count_val
                         
             elif 'rule_id' in df_agg.columns and 'count' in df_agg.columns:
                 # Handle direct rule_id/count format

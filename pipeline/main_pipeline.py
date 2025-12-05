@@ -740,20 +740,10 @@ class UnifiedPipeline:
                 feature_gen.initialize_rules()
                 X, _ = feature_gen.generate_feature_vectors(df_agg, mode='detect')
 
-                # Build feature name mapping for explainability/top-k logging
+                # Build family-aware feature names and optional rule-name enrichment
                 try:
-                    prod_rule_to_index = feature_gen.rule_manager.get_production_rule_to_index_map()
+                    feature_names = feature_gen.get_feature_names()
                     dim = feature_gen.get_feature_vector_dimension()
-                    # Use -1 sentinel to avoid Optional typing complexities
-                    index_to_rule: List[int] = [-1] * dim
-                    for rid, idx in prod_rule_to_index.items():
-                        j = int(idx)
-                        if 0 <= j < dim:
-                            index_to_rule[j] = int(rid)
-                    feature_names = [
-                        f"rule_{rid}" if rid >= 0 else f"feature_{k}"
-                        for k, rid in enumerate(index_to_rule)
-                    ]
                     # Optional rule name enrichment from config plus production mapping
                     fn_cfg = (self.config.get('detection', {}) or {}).get('feature_names', {}) or {}
                     rule_name_map: Dict[int, str] = {}
@@ -792,12 +782,23 @@ class UnifiedPipeline:
                                                     continue
                                 except Exception:
                                     continue
+                    # Build index metadata for quick lookup
+                    feature_index_meta: List[Dict[str, Any]] = []
+                    for j, fname in enumerate(feature_names):
+                        meta: Dict[str, Any] = {'feature_name': fname}
+                        if isinstance(fname, str) and fname.startswith('rule_'):
+                            try:
+                                meta['rule_id'] = int(fname.replace('rule_', ''))
+                            except Exception:
+                                meta['rule_id'] = None
+                        elif isinstance(fname, str) and fname.startswith('family_'):
+                            meta['family_name'] = fname.replace('family_', '')
+                        feature_index_meta.append(meta)
                 except Exception:
-                    index_to_rule = []
-                    n_features = X.shape[1] if hasattr(X, 'shape') else 0
-                    feature_names = [f"feature_{k}" for k in range(int(n_features))]
+                    feature_names = [f"feature_{k}" for k in range(int(X.shape[1]))]
                     include_rule_names = False
                     rule_name_map = {}
+                    feature_index_meta = []
         
                 # Make predictions
                 try:
@@ -901,14 +902,21 @@ class UnifiedPipeline:
                                         continue
                                     if val <= 0:
                                         continue
-                                    resolved_rule = j
-                                    if index_to_rule and j < len(index_to_rule):
-                                        rid_val = index_to_rule[j]
-                                        resolved_rule = int(rid_val) if isinstance(rid_val, int) and rid_val >= 0 else j
+                                    fname = feature_names[j] if j < len(feature_names) else f"feature_{j}"
+                                    meta = feature_index_meta[j] if feature_index_meta and j < len(feature_index_meta) else {}
+                                    rule_id_val = meta.get('rule_id')
+                                    family_name_val = meta.get('family_name')
                                     rule_name = None
-                                    if 'include_rule_names' in locals() and include_rule_names and isinstance(resolved_rule, int):
-                                        rule_name = rule_name_map.get(int(resolved_rule))
-                                    entry: Dict[str, Any] = {'rule_id': resolved_rule, 'value': val}
+                                    if 'include_rule_names' in locals() and include_rule_names and isinstance(rule_id_val, int):
+                                        rule_name = rule_name_map.get(int(rule_id_val))
+
+                                    entry: Dict[str, Any] = {
+                                        'feature': fname,
+                                        'rule_id': rule_id_val if rule_id_val is not None else fname,
+                                        'value': val
+                                    }
+                                    if family_name_val:
+                                        entry['family'] = family_name_val
                                     if rule_name is not None:
                                         entry['rule_name'] = rule_name
                                     top_rules.append(entry)
@@ -917,7 +925,7 @@ class UnifiedPipeline:
                                 if top_rules:
                                     payload_top_features = [
                                         {
-                                            'feature': f"rule_{rule_entry['rule_id']}" if isinstance(rule_entry.get('rule_id'), int) else rule_entry.get('rule_id'),
+                                            'feature': rule_entry.get('feature') or (f"rule_{rule_entry['rule_id']}" if isinstance(rule_entry.get('rule_id'), int) else rule_entry.get('rule_id')),
                                             'rule_id': rule_entry.get('rule_id'),
                                             'rule_name': rule_entry.get('rule_name'),
                                             'importance': rule_entry.get('value')
