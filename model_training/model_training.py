@@ -356,7 +356,7 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
 
             base_rf = RandomForestClassifier(
                 random_state=random_state,
-                n_jobs=-1,
+                n_jobs=3,
             )
             cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
@@ -364,7 +364,7 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 'estimator': base_rf,
                 'scoring': scoring,
                 'cv': cv,
-                'n_jobs': -1,
+                'n_jobs': 3,
                 'refit': refit_arg,
                 'verbose': verbose,
                 'return_train_score': return_train_score,
@@ -603,7 +603,7 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
                 class_weight='balanced_subsample',  # Handle class imbalance
                 max_features='sqrt',
                 random_state=42,
-                n_jobs=-1
+                n_jobs=3
             )
             rf_model.fit(X_train, y_train)
             logger.info("Model training completed successfully")
@@ -695,7 +695,7 @@ def train_threat_detector_from_csv(feature_data_path: str, model_save_path: str)
         class_weight='balanced_subsample',
         max_features='sqrt',
         random_state=42,
-        n_jobs=-1
+        n_jobs=3
     )
     rf_model.fit(X_train, y_train)
 
