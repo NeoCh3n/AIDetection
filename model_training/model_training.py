@@ -770,7 +770,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         logger.info("Extracting feature importance...")
         feature_importances = model.feature_importances_
 
-        # Configure rule name mapping via feature_name_options
+        # Configure rule/family labels for feature importances
         include_names = False
         csv_paths: list = []
         direct_map: Dict[int, str] = {}
@@ -783,7 +783,6 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             except Exception:
                 direct_map = {}
 
-        # Build rule_id -> rule_name map from provided sources
         rule_name_map: Dict[int, str] = {}
         if include_names:
             # Prefer direct map entries
@@ -805,24 +804,90 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
                 except Exception:
                     continue
 
-        feature_names_full: List[str] = []
-        for rid in rule_list:
-            label = (
-                rule_name_map.get(int(rid), f"Rule {rid}")
-                if include_names
-                else f"Rule {rid}"
+        using_rule_list = isinstance(rule_list, list) and len(rule_list) == len(feature_importances)
+        if not using_rule_list and isinstance(rule_list, list):
+            logger.warning(
+                "Rule list length (%s) does not match model feature dimension (%s); "
+                "falling back to family/standalone feature labels.",
+                len(rule_list),
+                len(feature_importances),
             )
-            feature_names_full.append(str(label))
 
-        # Create rule importance mapping and enrich with rule names
-        importance_df = pd.DataFrame({
-            'rule_id': rule_list,
-            'importance': feature_importances
-        })
-        if include_names:
-            importance_df['rule_name'] = [
-                rule_name_map.get(int(rid), f"Rule {rid}") for rid in importance_df['rule_id']
-            ]
+        # Build labels that align with the trained feature vector.
+        feature_labels: List[str] = []
+        feature_ids: List[int] = []
+        feature_rule_ids: List[List[int]] = []
+        family_to_rule_ids: Dict[str, List[int]] = {}
+        if using_rule_list:
+            for rid in rule_list:
+                feature_ids.append(int(rid))
+                label = (
+                    rule_name_map.get(int(rid), f"Rule {rid}")
+                    if include_names
+                    else f"Rule {rid}"
+                )
+                feature_labels.append(str(label))
+                feature_rule_ids.append([int(rid)])
+        else:
+            # Use FeatureGenerator's family/standalone ordering to align with the vector dimension
+            try:
+                fg = FeatureGenerator()
+                fg.initialize_rules()
+                feature_labels = fg.get_feature_names()
+                feature_ids = list(range(len(feature_labels)))
+                # Build family -> rule_ids mapping so we can still surface original rule_ids
+                try:
+                    fam_map = fg.rule_manager.create_family_mapping(force_refresh=False)
+                    rule_id_to_family = fam_map.get('rule_id_to_family', {})
+                    for rid, fam in rule_id_to_family.items():
+                        fam_str = str(fam)
+                        family_to_rule_ids.setdefault(fam_str, []).append(int(rid))
+                    for fam in family_to_rule_ids:
+                        family_to_rule_ids[fam].sort()
+                except Exception as e:
+                    logger.warning("Unable to build family -> rule_ids mapping: %s", e)
+                    family_to_rule_ids = {}
+                # Build rule_ids list aligned to feature labels
+                uncategorized_rules = getattr(fg, '_standalone_rule_to_index', {}) or {}
+                for label in feature_labels:
+                    if label.startswith("family_"):
+                        fam_name = label.replace("family_", "", 1)
+                        feature_rule_ids.append(family_to_rule_ids.get(fam_name, []))
+                    elif label.startswith("rule_"):
+                        try:
+                            rid_val = int(label.split("_", 1)[1])
+                            feature_rule_ids.append([rid_val])
+                        except Exception:
+                            feature_rule_ids.append([])
+                    else:
+                        feature_rule_ids.append([])
+            except Exception as e:
+                logger.warning("Failed to derive feature labels from FeatureGenerator: %s", e)
+                feature_labels = []
+                feature_ids = list(range(len(feature_importances)))
+                feature_rule_ids = [[] for _ in range(len(feature_importances))]
+
+        # Ensure labels length matches importances to avoid construction errors
+        if len(feature_labels) != len(feature_importances):
+            feature_labels = [f"feature_{idx}" for idx in range(len(feature_importances))]
+            feature_ids = list(range(len(feature_importances)))
+            feature_rule_ids = [[] for _ in range(len(feature_importances))]
+
+        feature_names_full = list(feature_labels)
+
+        # Create importance mapping with either rule_ids or generic feature_ids
+        importance_payload: Dict[str, Any] = {
+            'importance': feature_importances,
+            'feature_label': feature_labels,
+            'feature_id': feature_ids,
+            'rule_ids': feature_rule_ids,
+        }
+        if using_rule_list:
+            importance_payload['rule_id'] = feature_ids
+            if include_names:
+                importance_payload['rule_name'] = feature_labels
+
+        importance_df = pd.DataFrame(importance_payload)
 
         # Filter out zero-importance features
         # Drop entries with missing or non-positive importance values
@@ -852,10 +917,19 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
         top_10_features = importance_df.head(10)
         logger.info("Top 10 most important features (non-zero, BOC prioritized):")
         for _, row in top_10_features.iterrows():
-            if include_names and 'rule_name' in row:
-                logger.info(f"  {row['rule_id']} | {row['rule_name']}: {row['importance']:.4f}")
-            else:
-                logger.info(f"  Rule {row['rule_id']}: {row['importance']:.4f}")
+            label_for_log = (
+                row['rule_name'] if include_names and 'rule_name' in row and isinstance(row['rule_name'], str)
+                else row.get('feature_label', row.get('rule_id', 'feature'))
+            )
+            rule_ids_display = None
+            try:
+                ids_val = row.get('rule_ids', None)
+                if isinstance(ids_val, list) and ids_val:
+                    rule_ids_display = ",".join(str(int(x)) for x in ids_val[:5])
+            except Exception:
+                rule_ids_display = None
+            suffix = f" (rule_ids: {rule_ids_display})" if rule_ids_display else ""
+            logger.info(f"  {label_for_log}: {row['importance']:.4f}{suffix}")
         
         # Save evaluation reports
         model_dir = os.path.dirname(model_save_path)
@@ -884,7 +958,7 @@ def evaluate_and_report(model: RandomForestClassifier, X_test: pd.DataFrame, y_t
             'pr_auc_average_precision': pr_auc,
             'pr_curve_auc': prc_auc,
             'model_path': model_save_path,
-            'feature_count': len(rule_list),
+            'feature_count': len(feature_importances),
             'top_10_features': top_10_features.to_dict(orient='records'),
             # Backward compatibility key with Top-10 content
             'top_20_features': top_10_features.to_dict(orient='records'),
