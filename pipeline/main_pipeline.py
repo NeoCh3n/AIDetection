@@ -975,32 +975,6 @@ class UnifiedPipeline:
                                         if shap_results and 'feature_importance' in shap_results:
                                             # Extract top contributing features for this alert
                                             alert_top_features = shap_results['feature_importance'][:top_n]
-                                            # Enrich with rule_id and rule_name when available
-                                            for fi in alert_top_features:
-                                                fname = fi.get('feature', '')
-                                                rid_val = None
-                                                if isinstance(fname, str) and fname.startswith('rule_'):
-                                                    try:
-                                                        rid_val = int(fname.replace('rule_', ''))
-                                                    except Exception:
-                                                        rid_val = None
-                                                fi_en = dict(fi)
-                                                if rid_val is not None:
-                                                    fi_en['rule_id'] = rid_val
-                                                    if 'include_rule_names' in locals() and include_rule_names:
-                                                        name = rule_name_map.get(int(rid_val))
-                                                        if name is not None:
-                                                            fi_en['rule_name'] = name
-
-                                                # Ensure 'value' key exists for compatibility with ALERT_DETAIL format
-                                                if 'importance' in fi_en:
-                                                    fi_en['value'] = fi_en['importance']
-
-                                                enriched_shap.append(fi_en)
-
-                                            # Log SHAP-based feature importance
-                                            shap_top_rules = []
-                                            shap_top_values = []
                                             
                                             # Get raw rule counts for this window to map families back to specific rules
                                             current_window_rules = df_agg.iloc[idx].get('aggregated_rules_dict', {})
@@ -1010,6 +984,70 @@ class UnifiedPipeline:
                                                     current_window_rules = ast.literal_eval(current_window_rules)
                                                 except:
                                                     current_window_rules = {}
+
+                                            # Enrich with rule_id and rule_name when available
+                                            for fi in alert_top_features:
+                                                fname = fi.get('feature', '')
+                                                
+                                                # Logic to expand Family features into specific rules for the payload
+                                                expanded_items = []
+                                                if isinstance(fname, str) and fname.startswith('family_'):
+                                                    family_name = fname.replace('family_', '')
+                                                    found_children = []
+                                                    # Find rules in this window that belong to this family
+                                                    for r_id, r_count in current_window_rules.items():
+                                                        try:
+                                                            r_id_int = int(r_id)
+                                                            if feature_gen.rule_manager.get_rule_family(r_id_int) == family_name:
+                                                                r_name = rule_name_map.get(r_id_int, str(r_id_int))
+                                                                found_children.append({
+                                                                    'rule_id': r_id_int, 
+                                                                    'rule_name': r_name, 
+                                                                    'count': r_count
+                                                                })
+                                                        except:
+                                                            continue
+                                                    # Sort by count descending and take top 2
+                                                    found_children.sort(key=lambda x: x['count'], reverse=True)
+                                                    for child in found_children[:2]:
+                                                        # Use family's importance for the child
+                                                        item = dict(fi)
+                                                        item['rule_id'] = child['rule_id']
+                                                        item['rule_name'] = child['rule_name']
+                                                        item['family'] = family_name
+                                                        item['value'] = item.get('importance', 0)
+                                                        expanded_items.append(item)
+                                                
+                                                # If not a family or no children found, treat as single item
+                                                if not expanded_items:
+                                                    rid_val = None
+                                                    if isinstance(fname, str) and fname.startswith('rule_'):
+                                                        try:
+                                                            rid_val = int(fname.replace('rule_', ''))
+                                                        except Exception:
+                                                            rid_val = None
+                                                    
+                                                    fi_en = dict(fi)
+                                                    if rid_val is not None:
+                                                        fi_en['rule_id'] = rid_val
+                                                        if 'include_rule_names' in locals() and include_rule_names:
+                                                            name = rule_name_map.get(int(rid_val))
+                                                            if name is not None:
+                                                                fi_en['rule_name'] = name
+                                                    
+                                                    # Ensure 'value' key exists
+                                                    if 'importance' in fi_en:
+                                                        fi_en['value'] = fi_en['importance']
+                                                        
+                                                    expanded_items.append(fi_en)
+
+                                                enriched_shap.extend(expanded_items)
+
+                                            # Log SHAP-based feature importance
+                                            shap_top_rules = []
+                                            shap_top_values = []
+                                            
+
 
                                             # Expand Family features into specific rules
                                             expanded_features = []
