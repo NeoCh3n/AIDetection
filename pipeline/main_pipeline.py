@@ -1213,13 +1213,25 @@ class UnifiedPipeline:
                                 # Log alert details - SWAPPED CONTENT: Now logs SHAP results (if available), otherwise fallback to counts
                                 # Must be logged AFTER SHAP calculation to include SHAP results
                                 try:
+                                    # Format floating numbers to 3 decimal places specific for payload validation
+                                    raw_top_rules = enriched_shap[:payload_rule_limit] if shap_success and enriched_shap else top_rules_for_payload
+                                    formatted_top_rules = []
+                                    for rule in raw_top_rules:
+                                        r_copy = dict(rule)
+                                        if 'value' in r_copy:
+                                            try:
+                                                r_copy['value'] = round(float(r_copy['value']), 3)
+                                            except (ValueError, TypeError):
+                                                pass
+                                        formatted_top_rules.append(r_copy)
+
                                     payload_data = {
                                         'hostname': result['hostname'],
                                         'source_ip': result['source_ip'],
                                         'window_id': result['window_id'],
-                                        'confidence': result['probability'],
+                                        'confidence': round(float(result['probability']), 3),
                                         # Use SHAP results if successful, otherwise fallback to count-based rules
-                                        'top_rules_by_count': enriched_shap[:payload_rule_limit] if shap_success and enriched_shap else top_rules_for_payload,
+                                        'top_rules_by_count': formatted_top_rules,
                                     }
 
                                     logging_utils.run_log(
