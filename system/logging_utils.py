@@ -198,6 +198,10 @@ def _normalize_top_rules_payload(payload: Any) -> Any:
             rule_name_val = entry.get('rule_name')
             if rule_name_val is not None:
                 normalized_entry[f'rule_name-{idx}'] = rule_name_val
+            
+            family_val = entry.get('family')
+            if family_val is not None:
+                normalized_entry[f'family-{idx}'] = family_val
         else:
             normalized_entry = {f'value-{idx}': entry}
         transformed_rules.append(normalized_entry)
