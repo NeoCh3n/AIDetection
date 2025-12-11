@@ -141,7 +141,7 @@ class AQLDataInserter:
     
     def parse_aql_timestamp(self, timestamp_str: str) -> Optional[datetime]:
         """Parse QRadar AQL timestamp string to datetime."""
-        timebuffer = timedelta(seconds=10)
+        timebuffer = timedelta(seconds=45)
         try:
             # Handle QRadar AQL timestamp format: "Jul 29, 2025, 9:50:55 AM"
             return datetime.strptime(timestamp_str, "%b %d, %Y, %I:%M:%S %p") + timebuffer
