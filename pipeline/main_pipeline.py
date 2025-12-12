@@ -1017,6 +1017,21 @@ class UnifiedPipeline:
                                                         item['family'] = family_name
                                                         item['value'] = item.get('importance', 0)
                                                         expanded_items.append(item)
+                                                    if not found_children:
+                                                        try:
+                                                            fallback_ids = feature_gen.rule_manager.get_rules_for_family(family_name, limit=1)
+                                                        except Exception:
+                                                            fallback_ids = []
+                                                        if fallback_ids:
+                                                            fallback_rule_id = fallback_ids[0]
+                                                            fallback_rule_name = rule_name_map.get(fallback_rule_id, str(fallback_rule_id))
+                                                            item = dict(fi)
+                                                            item['rule_id'] = fallback_rule_id
+                                                            item['rule_name'] = fallback_rule_name
+                                                            item['family'] = family_name
+                                                            if 'value' not in item:
+                                                                item['value'] = item.get('importance', 0)
+                                                            expanded_items.append(item)
                                                 
                                                 # If not a family or no children found, treat as single item
                                                 if not expanded_items:
@@ -1085,11 +1100,25 @@ class UnifiedPipeline:
                                                     # If no specific rules found for this family in this window (rare/edge case),
                                                     # keep the family name so we don't lose the signal
                                                     if not found_constituent:
-                                                        expanded_features.append({
-                                                            'display_name': family_name,
-                                                            'importance': importance,
-                                                            'rule_id': None
-                                                        })
+                                                        try:
+                                                            fallback_ids = feature_gen.rule_manager.get_rules_for_family(family_name, limit=1)
+                                                        except Exception:
+                                                            fallback_ids = []
+
+                                                        if fallback_ids:
+                                                            fallback_rule_id = fallback_ids[0]
+                                                            fallback_rule_name = rule_name_map.get(fallback_rule_id, str(fallback_rule_id))
+                                                            expanded_features.append({
+                                                                'display_name': f"{fallback_rule_name} (ID:{fallback_rule_id})",
+                                                                'importance': importance,
+                                                                'rule_id': fallback_rule_id
+                                                            })
+                                                        else:
+                                                            expanded_features.append({
+                                                                'display_name': family_name,
+                                                                'importance': importance,
+                                                                'rule_id': None
+                                                            })
 
                                                 # Handle legacy "rule_" features (if any)
                                                 elif feature_name.startswith('rule_'):

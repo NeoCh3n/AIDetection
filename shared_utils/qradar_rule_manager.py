@@ -715,6 +715,35 @@ class QRadarRuleManager:
             self.create_family_mapping()
         return self._rule_id_to_family.get(rule_id, "Uncategorized")
 
+    def get_rules_for_family(self, family_name: str, limit: Optional[int] = None) -> List[int]:
+        """
+        Get a sorted list of rule IDs that belong to the specified family.
+
+        Args:
+            family_name: Family name (e.g., "BOC_300xx").
+            limit: Optional cap on how many rule IDs to return.
+
+        Returns:
+            List of rule IDs belonging to the family (possibly empty).
+        """
+        if not family_name:
+            return []
+
+        if not self._rule_id_to_family:
+            self.create_family_mapping()
+
+        matches = [rid for rid, fam in self._rule_id_to_family.items() if fam == family_name]
+        matches.sort()
+
+        if limit is not None:
+            try:
+                limit_val = max(int(limit), 0)
+            except (TypeError, ValueError):
+                limit_val = None
+            if limit_val:
+                return matches[:limit_val]
+        return matches
+
 
 # Convenience functions for backward compatibility
 def get_rule_list(
