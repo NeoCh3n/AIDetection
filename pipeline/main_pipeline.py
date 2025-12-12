@@ -1247,6 +1247,9 @@ class UnifiedPipeline:
                                     formatted_top_rules = []
                                     for rule in raw_top_rules:
                                         r_copy = dict(rule)
+                                        family_val = r_copy.pop('family', None)
+                                        if family_val and r_copy.get('rule_name'):
+                                            r_copy['rule_name'] = f"{r_copy['rule_name']}({family_val} family)"
                                         if 'value' in r_copy:
                                             try:
                                                 r_copy['value'] = round(float(r_copy['value']), 3)
