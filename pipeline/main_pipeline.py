@@ -1007,9 +1007,9 @@ class UnifiedPipeline:
                                                                 })
                                                         except:
                                                             continue
-                                                    # Sort by count descending and take top 2
+                                                    # Sort by count descending and take top 1
                                                     found_children.sort(key=lambda x: x['count'], reverse=True)
-                                                    for child in found_children[:2]:
+                                                    for child in found_children[:1]:
                                                         # Use family's importance for the child
                                                         item = dict(fi)
                                                         item['rule_id'] = child['rule_id']
