@@ -684,26 +684,41 @@ class UnifiedPipeline:
             Dictionary production rule IDs to human-readable names.
         """
         rule_name_list: Dict[int, str] = {}
-        rule_name_list_path = str(self.config.get('detection', {}).get('feature_names', {}).get('csv_paths', ''))
+        raw_paths = self.config.get('detection', {}).get('feature_names', {}).get('csv_paths', '')
+        paths = []
+        if isinstance(raw_paths, (list, tuple)):
+            paths = [p for p in raw_paths if isinstance(p, str)]
+        elif raw_paths:
+            paths = [str(raw_paths)]
 
         try:
-            if not os.path.exists(rule_name_list_path):
-                self.logger.debug(f"Production rule mapping file not found: {rule_name_list_path}")
+            if not paths:
+                self.logger.debug("No production rule mapping paths configured")
                 return rule_name_list
 
-            with open(rule_name_list_path, 'r', encoding='utf-8') as fh:
-                reader = csv.DictReader(fh)
-                for row in reader:
-                    if not row:
-                        continue
-                    try:
-                        rule_id = int(str(row.get('id')))
-                        rule_name = str(row.get('rule_name')).strip()
-                    except (TypeError, ValueError):
-                        continue
-                    if not rule_name or not rule_id:
-                        continue
-                    rule_name_list[rule_id] = rule_name
+            for rule_name_list_path in paths:
+                if not os.path.exists(rule_name_list_path):
+                    self.logger.debug(f"Production rule mapping file not found: {rule_name_list_path}")
+                    continue
+
+                with open(rule_name_list_path, 'r', encoding='utf-8') as fh:
+                    reader = csv.DictReader(fh)
+                    for row in reader:
+                        if not row:
+                            continue
+                        try:
+                            rule_id = int(str(row.get('id')))
+                            # Support either 'name' or 'rule_name' column headers
+                            rule_name = row.get('rule_name') or row.get('name')
+                            if rule_name is None:
+                                continue
+                            rule_name = str(rule_name).strip()
+                        except (TypeError, ValueError):
+                            continue
+                        if not rule_name or not rule_id:
+                            continue
+                        # Preserve first seen name if duplicates exist across files
+                        rule_name_list.setdefault(rule_id, rule_name)
 
         except Exception as exc:
             self.logger.warning(f"Failed to load production rule names: {exc}")
@@ -792,6 +807,9 @@ class UnifiedPipeline:
 
                     if production_name_list:
                         rule_name_list.update(production_name_list)
+                        # Also expose these names to the general lookup map used later for payload formatting
+                        for rid_val, name_val in production_name_list.items():
+                            rule_name_map.setdefault(rid_val, name_val)
 
                     if fn_cfg:
                         # Start with direct name map if provided (may contain overrides)
@@ -1284,12 +1302,58 @@ class UnifiedPipeline:
                                 try:
                                     # Format floating numbers to 3 decimal places specific for payload validation
                                     raw_top_rules = enriched_shap[:payload_rule_limit] if shap_success and enriched_shap else top_rules_for_payload
+                                    def _resolve_rule_name_for_payload(rule_entry: Dict[str, Any]) -> Optional[str]:
+                                        """Resolve a human-readable rule name for logging."""
+                                        rule_id_val = rule_entry.get('rule_id')
+                                        rule_name_val = rule_entry.get('rule_name')
+                                        parsed_id = None
+                                        if rule_id_val is not None:
+                                            try:
+                                                parsed_id = int(rule_id_val)
+                                            except Exception:
+                                                parsed_id = None
+
+                                        if rule_name_val is not None:
+                                            name_str = str(rule_name_val)
+                                            # Keep existing descriptive names (avoid overriding with numeric)
+                                            if not name_str.isdigit():
+                                                return name_str
+
+                                        mapped_name: Optional[str] = None
+                                        if parsed_id is not None and 'rule_name_list' in locals():
+                                            try:
+                                                mapped_name = rule_name_list.get(parsed_id)
+                                            except Exception:
+                                                mapped_name = None
+                                        if mapped_name is None and parsed_id is not None and 'rule_name_map' in locals():
+                                            try:
+                                                mapped_name = rule_name_map.get(parsed_id)
+                                            except Exception:
+                                                mapped_name = None
+
+                                        if mapped_name:
+                                            return str(mapped_name)
+                                        if rule_name_val is not None:
+                                            return str(rule_name_val)
+                                        if parsed_id is not None:
+                                            return str(parsed_id)
+                                        return None
+
                                     formatted_top_rules = []
                                     for rule in raw_top_rules:
                                         r_copy = dict(rule)
                                         family_val = r_copy.pop('family', None)
-                                        if family_val and r_copy.get('rule_name'):
-                                            r_copy['rule_name'] = f"{r_copy['rule_name']}({family_val} family)"
+                                        resolved_rule_name = _resolve_rule_name_for_payload(r_copy)
+                                        if family_val:
+                                            # Append family name without the literal word "family"
+                                            if resolved_rule_name:
+                                                r_copy['rule_name'] = f"{resolved_rule_name}({family_val})"
+                                            elif r_copy.get('rule_name'):
+                                                r_copy['rule_name'] = f"{r_copy['rule_name']}({family_val})"
+                                            else:
+                                                r_copy['rule_name'] = str(family_val)
+                                        elif resolved_rule_name:
+                                            r_copy['rule_name'] = resolved_rule_name
                                         if 'value' in r_copy:
                                             try:
                                                 r_copy['value'] = round(float(r_copy['value']), 3)
