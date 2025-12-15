@@ -676,6 +676,40 @@ class UnifiedPipeline:
 
         return mapping
     
+    def load_production_rule_name_list(self) -> Dict[int, str]:
+        """
+        Load production rule list ID to rule name mapping from CSV file as a list.
+
+        Returns:
+            Dictionary production rule IDs to human-readable names.
+        """
+        rule_name_list: Dict[int, str] = {}
+        rule_name_list_path = str(self.config.get('detection', {}).get('feature_names', {}).get('csv_paths', ''))
+
+        try:
+            if not os.path.exists(rule_name_list_path):
+                self.logger.debug(f"Production rule mapping file not found: {rule_name_list_path}")
+                return rule_name_list
+
+            with open(rule_name_list_path, 'r', encoding='utf-8') as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    if not row:
+                        continue
+                    try:
+                        rule_id = int(str(row.get('id')))
+                        rule_name = str(row.get('rule_name')).strip()
+                    except (TypeError, ValueError):
+                        continue
+                    if not rule_name or not rule_id:
+                        continue
+                    rule_name_list[rule_id] = rule_name
+
+        except Exception as exc:
+            self.logger.warning(f"Failed to load production rule names: {exc}")
+
+        return rule_name_list
+
     def run_detection(self):
         """Detection mode: QRadar → MongoDB → Prediction"""
         self.logger.info("Starting detection pipeline...")
@@ -747,12 +781,17 @@ class UnifiedPipeline:
                     # Optional rule name enrichment from config plus production mapping
                     fn_cfg = (self.config.get('detection', {}) or {}).get('feature_names', {}) or {}
                     rule_name_map: Dict[int, str] = {}
+                    rule_name_list: Dict[int, str] = {}
                     production_name_map = self.load_production_rule_name_map()
+                    production_name_list = self.load_production_rule_name_list()
                     include_rule_names = bool(fn_cfg.get('include_rule_names', False)) or bool(production_name_map)
 
                     if production_name_map:
                         # Use production mapping as authoritative baseline
                         rule_name_map.update(production_name_map)
+
+                    if production_name_list:
+                        rule_name_list.update(production_name_list)
 
                     if fn_cfg:
                         # Start with direct name map if provided (may contain overrides)
@@ -798,6 +837,7 @@ class UnifiedPipeline:
                     feature_names = [f"feature_{k}" for k in range(int(X.shape[1]))]
                     include_rule_names = False
                     rule_name_map = {}
+                    rule_name_list = {}
                     feature_index_meta = []
         
                 # Make predictions
@@ -999,7 +1039,7 @@ class UnifiedPipeline:
                                                         try:
                                                             r_id_int = int(r_id)
                                                             if feature_gen.rule_manager.get_rule_family(r_id_int) == family_name:
-                                                                r_name = rule_name_map.get(r_id_int, str(r_id_int))
+                                                                r_name = rule_name_list.get(r_id_int, str(r_id_int))
                                                                 found_children.append({
                                                                     'rule_id': r_id_int, 
                                                                     'rule_name': r_name, 
