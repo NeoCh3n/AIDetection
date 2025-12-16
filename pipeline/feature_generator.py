@@ -74,14 +74,31 @@ class FeatureGenerator:
         include_rules = self.feature_mode in {'per_rule_only', 'hybrid_exclusive', 'family_first'}
 
         # Family features (only if enabled)
-        self._family_to_index = self.rule_manager.get_family_to_index_map() if include_families else {}
+        family_lookup: Dict[int, str] = {}
+        if include_families:
+            mapping = self.rule_manager.create_family_mapping(force_refresh=False)
+            self._family_to_index = mapping.get('family_to_index', {})
+            family_lookup = mapping.get('rule_id_to_family', {}) or {}
+        else:
+            self._family_to_index = {}
 
         # Per-rule features (cover every production rule so we can always emit rule_id)
         if include_rules:
             prod_rule_list = self.rule_manager.get_production_rule_list()
             start_idx = len(self._family_to_index)
+            # In family_first mode, exclude rules that already belong to a known family
+            # so dimensions = family count + per-rule without family.
+            filtered_rules: List[int] = []
+            for rule_id in sorted(prod_rule_list):
+                rid_int = int(rule_id)
+                if self.feature_mode == 'family_first':
+                    fam = family_lookup.get(rid_int)
+                    if fam and fam in self._family_to_index:
+                        continue
+                filtered_rules.append(rid_int)
+
             self._rule_feature_to_index = {
-                int(rule_id): start_idx + i for i, rule_id in enumerate(sorted(prod_rule_list))
+                rid: start_idx + i for i, rid in enumerate(filtered_rules)
             }
         else:
             self._rule_feature_to_index = {}
