@@ -38,6 +38,11 @@ class FeatureGenerator:
         """
         self.environment = environment
         self.config = config or get_config()
+        fe_cfg = self.config.get('feature_engineering', {}) if isinstance(self.config, dict) else {}
+        self.feature_mode = str(fe_cfg.get('feature_representation', 'per_rule_only')).lower()
+        if self.feature_mode not in {'per_rule_only', 'family_only', 'hybrid_exclusive'}:
+            # hybrid_exclusive = prefer per-rule, otherwise family (no double counting)
+            self.feature_mode = 'per_rule_only'
         self.rule_manager = QRadarRuleManager(
             mode=self.config.get('rule_manager', {}).get('mode', 'file'),
             config=self.config.get('rule_manager', {}),
@@ -64,15 +69,21 @@ class FeatureGenerator:
 
     def initialize_rules(self) -> None:
         """Initialize feature mappings: families + per-rule features."""
-        # Family features
-        self._family_to_index = self.rule_manager.get_family_to_index_map()
+        include_families = self.feature_mode in {'family_only', 'hybrid_exclusive'}
+        include_rules = self.feature_mode in {'per_rule_only', 'hybrid_exclusive'}
+
+        # Family features (only if enabled)
+        self._family_to_index = self.rule_manager.get_family_to_index_map() if include_families else {}
 
         # Per-rule features (cover every production rule so we can always emit rule_id)
-        prod_rule_list = self.rule_manager.get_production_rule_list()
-        start_idx = len(self._family_to_index)
-        self._rule_feature_to_index = {
-            int(rule_id): start_idx + i for i, rule_id in enumerate(sorted(prod_rule_list))
-        }
+        if include_rules:
+            prod_rule_list = self.rule_manager.get_production_rule_list()
+            start_idx = len(self._family_to_index)
+            self._rule_feature_to_index = {
+                int(rule_id): start_idx + i for i, rule_id in enumerate(sorted(prod_rule_list))
+            }
+        else:
+            self._rule_feature_to_index = {}
 
         self._vector_dimension = len(self._family_to_index) + len(self._rule_feature_to_index)
 
@@ -80,8 +91,9 @@ class FeatureGenerator:
         self._rule_to_index = dict(self._rule_feature_to_index)
 
         logger.info(
-            "Initialized feature generator with %d families and %d per-rule features "
+            "Initialized feature generator (%s) with %d families and %d per-rule features "
             "(total dimension %d)",
+            self.feature_mode,
             len(self._family_to_index),
             len(self._rule_feature_to_index),
             self._vector_dimension,
@@ -139,31 +151,61 @@ class FeatureGenerator:
                         continue
 
                     family = self.rule_manager.get_rule_family(rule_id_int)
-
-                    # Accumulate into family feature if applicable
-                    if family != "Uncategorized" and self._family_to_index and family in self._family_to_index:
-                        col_idx = self._family_to_index[family]
-                        X[idx, col_idx] += count_val
-
-                    # Always accumulate into per-rule feature when available
+                    family_idx = None
+                    rule_idx = None
+                    if self._family_to_index and family in self._family_to_index:
+                        family_idx = self._family_to_index[family]
                     if self._rule_feature_to_index and rule_id_int in self._rule_feature_to_index:
-                        col_idx_rule = self._rule_feature_to_index[rule_id_int]
-                        X[idx, col_idx_rule] += count_val
+                        rule_idx = self._rule_feature_to_index[rule_id_int]
+
+                    # Allocate counts without double counting based on feature_mode
+                    if self.feature_mode == 'family_only':
+                        if family_idx is not None:
+                            X[idx, family_idx] += count_val
+                        elif rule_idx is not None:
+                            X[idx, rule_idx] += count_val
+                    elif self.feature_mode == 'per_rule_only':
+                        if rule_idx is not None:
+                            X[idx, rule_idx] += count_val
+                        elif family_idx is not None:
+                            X[idx, family_idx] += count_val
+                    else:  # hybrid_exclusive: prefer per-rule, else family (no double count)
+                        if rule_idx is not None:
+                            X[idx, rule_idx] += count_val
+                        elif family_idx is not None:
+                            X[idx, family_idx] += count_val
                         
             elif 'rule_id' in df_agg.columns and 'count' in df_agg.columns:
                 # Handle direct rule_id/count format
-                rule_id = int(str(row['rule_id']))
-                count = float(str(row['count']))
-                
-                # Get family for the rule
+                try:
+                    rule_id = int(str(row['rule_id']))
+                    count = float(str(row['count']))
+                except Exception:
+                    continue
+
                 family = self.rule_manager.get_rule_family(rule_id)
-                
-                if family != "Uncategorized" and self._family_to_index and family in self._family_to_index:
-                    col_idx = self._family_to_index[family]
-                    X[idx, col_idx] += count
+                family_idx = None
+                rule_idx = None
+                if self._family_to_index and family in self._family_to_index:
+                    family_idx = self._family_to_index[family]
                 if self._rule_feature_to_index and rule_id in self._rule_feature_to_index:
-                    col_idx_rule = self._rule_feature_to_index[rule_id]
-                    X[idx, col_idx_rule] += count
+                    rule_idx = self._rule_feature_to_index[rule_id]
+
+                if self.feature_mode == 'family_only':
+                    if family_idx is not None:
+                        X[idx, family_idx] += count
+                    elif rule_idx is not None:
+                        X[idx, rule_idx] += count
+                elif self.feature_mode == 'per_rule_only':
+                    if rule_idx is not None:
+                        X[idx, rule_idx] += count
+                    elif family_idx is not None:
+                        X[idx, family_idx] += count
+                else:
+                    if rule_idx is not None:
+                        X[idx, rule_idx] += count
+                    elif family_idx is not None:
+                        X[idx, family_idx] += count
         
         # Handle labels for training mode
         y = None
@@ -189,13 +231,16 @@ class FeatureGenerator:
         if self._rule_feature_to_index is None:
             self.initialize_rules()
 
-        # Families first (sorted by index)
-        sorted_families = sorted(self._family_to_index.items(), key=lambda x: x[1])
-        names = [f"family_{name}" for name, _ in sorted_families]
+        names: List[str] = []
+        if self.feature_mode in {'family_only', 'hybrid_exclusive'}:
+            # Families first (sorted by index)
+            sorted_families = sorted(self._family_to_index.items(), key=lambda x: x[1])
+            names.extend([f"family_{name}" for name, _ in sorted_families])
 
-        # Then per-rule features (sorted by index)
-        sorted_rules = sorted(self._rule_feature_to_index.items(), key=lambda x: x[1])
-        names.extend([f"rule_{rid}" for rid, _ in sorted_rules])
+        if self.feature_mode in {'per_rule_only', 'hybrid_exclusive'}:
+            # Then per-rule features (sorted by index)
+            sorted_rules = sorted(self._rule_feature_to_index.items(), key=lambda x: x[1])
+            names.extend([f"rule_{rid}" for rid, _ in sorted_rules])
 
         return names
     
@@ -205,6 +250,7 @@ class FeatureGenerator:
             self.initialize_rules()
             
         return {
+            'feature_mode': self.feature_mode,
             'total_families': len(self._family_to_index),
             'total_rule_features': len(self._rule_feature_to_index or {}),
             'families': list(self._family_to_index.keys()),
