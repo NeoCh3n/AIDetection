@@ -90,7 +90,7 @@
     }
   },
   "feature_engineering": {
-    "feature_representation": "hybrid_exclusive"
+    "feature_representation": "family_first"
   },
   "rule_manager": {
     "mode": "file",

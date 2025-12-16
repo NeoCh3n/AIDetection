@@ -40,8 +40,9 @@ class FeatureGenerator:
         self.config = config or get_config()
         fe_cfg = self.config.get('feature_engineering', {}) if isinstance(self.config, dict) else {}
         self.feature_mode = str(fe_cfg.get('feature_representation', 'per_rule_only')).lower()
-        if self.feature_mode not in {'per_rule_only', 'family_only', 'hybrid_exclusive'}:
+        if self.feature_mode not in {'per_rule_only', 'family_only', 'hybrid_exclusive', 'family_first'}:
             # hybrid_exclusive = prefer per-rule, otherwise family (no double counting)
+            # family_first = prefer family, otherwise per-rule (no double counting)
             self.feature_mode = 'per_rule_only'
         self.rule_manager = QRadarRuleManager(
             mode=self.config.get('rule_manager', {}).get('mode', 'file'),
@@ -69,8 +70,8 @@ class FeatureGenerator:
 
     def initialize_rules(self) -> None:
         """Initialize feature mappings: families + per-rule features."""
-        include_families = self.feature_mode in {'family_only', 'hybrid_exclusive'}
-        include_rules = self.feature_mode in {'per_rule_only', 'hybrid_exclusive'}
+        include_families = self.feature_mode in {'family_only', 'hybrid_exclusive', 'family_first'}
+        include_rules = self.feature_mode in {'per_rule_only', 'hybrid_exclusive', 'family_first'}
 
         # Family features (only if enabled)
         self._family_to_index = self.rule_manager.get_family_to_index_map() if include_families else {}
@@ -169,6 +170,11 @@ class FeatureGenerator:
                             X[idx, rule_idx] += count_val
                         elif family_idx is not None:
                             X[idx, family_idx] += count_val
+                    elif self.feature_mode == 'family_first':
+                        if family_idx is not None:
+                            X[idx, family_idx] += count_val
+                        elif rule_idx is not None:
+                            X[idx, rule_idx] += count_val
                     else:  # hybrid_exclusive: prefer per-rule, else family (no double count)
                         if rule_idx is not None:
                             X[idx, rule_idx] += count_val
@@ -201,6 +207,11 @@ class FeatureGenerator:
                         X[idx, rule_idx] += count
                     elif family_idx is not None:
                         X[idx, family_idx] += count
+                elif self.feature_mode == 'family_first':
+                    if family_idx is not None:
+                        X[idx, family_idx] += count
+                    elif rule_idx is not None:
+                        X[idx, rule_idx] += count
                 else:
                     if rule_idx is not None:
                         X[idx, rule_idx] += count
@@ -232,12 +243,12 @@ class FeatureGenerator:
             self.initialize_rules()
 
         names: List[str] = []
-        if self.feature_mode in {'family_only', 'hybrid_exclusive'}:
+        if self.feature_mode in {'family_only', 'hybrid_exclusive', 'family_first'}:
             # Families first (sorted by index)
             sorted_families = sorted(self._family_to_index.items(), key=lambda x: x[1])
             names.extend([f"family_{name}" for name, _ in sorted_families])
 
-        if self.feature_mode in {'per_rule_only', 'hybrid_exclusive'}:
+        if self.feature_mode in {'per_rule_only', 'hybrid_exclusive', 'family_first'}:
             # Then per-rule features (sorted by index)
             sorted_rules = sorted(self._rule_feature_to_index.items(), key=lambda x: x[1])
             names.extend([f"rule_{rid}" for rid, _ in sorted_rules])
