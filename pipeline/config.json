@@ -89,6 +89,9 @@
       }
     }
   },
+  "feature_engineering": {
+    "feature_representation": "hybrid_exclusive"
+  },
   "rule_manager": {
     "mode": "file",
     "api_config": {
