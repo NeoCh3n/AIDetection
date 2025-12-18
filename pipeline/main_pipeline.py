@@ -1051,6 +1051,7 @@ class UnifiedPipeline:
                                                 expanded_items = []
                                                 if isinstance(fname, str) and fname.startswith('family_'):
                                                     family_name = fname.replace('family_', '')
+                                                    family_total_rule_count = 0
                                                     found_children = []
                                                     # Find rules in this window that belong to this family
                                                     for r_id, r_count in current_window_rules.items():
@@ -1058,6 +1059,7 @@ class UnifiedPipeline:
                                                             r_id_int = int(r_id)
                                                             if feature_gen.rule_manager.get_rule_family(r_id_int) == family_name:
                                                                 r_name = rule_name_list.get(r_id_int, str(r_id_int))
+                                                                family_total_rule_count += r_count
                                                                 found_children.append({
                                                                     'rule_id': r_id_int, 
                                                                     'rule_name': r_name, 
@@ -1065,15 +1067,16 @@ class UnifiedPipeline:
                                                                 })
                                                         except:
                                                             continue
-                                                    # Sort by count descending and take top 1
+                                                    # Sort by count descending and take top n
                                                     found_children.sort(key=lambda x: x['count'], reverse=True)
-                                                    for child in found_children[:1]:
+                                                    for child in found_children[:top_n-len(expanded_items)]:
                                                         # Use family's importance for the child
                                                         item = dict(fi)
                                                         item['rule_id'] = child['rule_id']
                                                         item['rule_name'] = child['rule_name']
                                                         item['family'] = family_name
-                                                        item['value'] = item.get('importance', 0)
+                                                        #rule importance scaled by occurrence proportion in window
+                                                        item['value'] = item.get('importance', 0)*(child['count']/family_total_rule_count) if family_total_rule_count > 0 else item.get('importance', 0)
                                                         expanded_items.append(item)
                                                     if not found_children:
                                                         try:
