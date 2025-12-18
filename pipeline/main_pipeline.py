@@ -27,7 +27,7 @@ import os
 import argparse
 import json
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import random
 import time
@@ -53,6 +53,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api_integration'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'mongodb'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared_utils'))
+
+#timezone setting
+HK_TZ = timezone(timedelta(hours=8))
 
 # Import existing pipeline modules (support both package and script execution)
 try:
@@ -184,6 +187,14 @@ class UnifiedPipeline:
         except Exception as e:
             self.logger.error(f"Training pipeline failed: {str(e)}")
             return False
+        
+    def _to_epoch_ms_hk(self, s: str) -> int:
+        try:
+            dt = datetime.strptime(s.strip(), "%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            dt = datetime.strptime(s.strip(), "%d/%m/%Y %I:%M:%S%p")
+        dt_hk = dt.replace(tzinfo=HK_TZ)
+        return int(dt_hk.timestamp() * 1000)
     
     def fetch_qradar_data(self, start_time, end_time):
         """Fetch data from QRadar for detection mode"""
@@ -194,7 +205,9 @@ class UnifiedPipeline:
             # Construct AQL query
             aql = qcfg['query_15min'].format(
                 start_time=start_time.strftime("%Y-%m-%d %H:%M:%S"),
-                end_time=end_time.strftime("%Y-%m-%d %H:%M:%S")
+                end_time=end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                device_start_time=self._to_epoch_ms_hk(str(start_time.strftime("%d/%m/%Y %H:%M:%S"))),
+                device_end_time=self._to_epoch_ms_hk(str(end_time.strftime("%d/%m/%Y %H:%M:%S"))),
             )
             # Build request header from config (avoid logging token)
             request_header = {
