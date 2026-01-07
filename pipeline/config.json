@@ -68,7 +68,7 @@
     },
     "retention_days": 7,
     "alert_threshold": 0.5,
-    "min_fetch_interval_seconds": 900,
+    "min_fetch_interval_seconds": 840,
     "lock_max_age_seconds": 2400,
     "window_size_minutes": 30,
     "max_detection_age_hours": 24,
