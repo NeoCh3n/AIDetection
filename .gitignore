@@ -10,3 +10,11 @@ Training_data/**/*.parquet
 AGENTS.md
 package.json
 package-lock.json
+
+# Local data folder
+John files/
+
+# Local image files
+IMG_8904.HEIC
+IMG_8905.HEIC
+IMG_8906.HEIC
