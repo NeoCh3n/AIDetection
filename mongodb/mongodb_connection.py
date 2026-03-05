@@ -388,10 +388,25 @@ class MongoDBConnectionManager:
         try:
             cutoff_date = datetime.now() - timedelta(days=retention_days)
             total_deleted = 0
+            host_retention = self.config.get('host_retention', {})
+            whitelist_hosts_raw = host_retention.get('whitelist_hosts', [])
+            whitelist_hosts = []
+            if isinstance(whitelist_hosts_raw, list):
+                for host in whitelist_hosts_raw:
+                    host_str = str(host).strip()
+                    if host_str:
+                        whitelist_hosts.append(host_str)
             
             # Clean events
             if self.events_collection:
                 events_query = {'timestamp': {'$lt': cutoff_date}}
+                if whitelist_hosts:
+                    events_query = {
+                        '$and': [
+                            events_query,
+                            {'hostname': {'$nin': whitelist_hosts}}
+                        ]
+                    }
                 events_count = self.events_collection.count_documents(events_query)
                 if events_count > 0:
                     events_result = self.events_collection.delete_many(events_query)
@@ -401,6 +416,17 @@ class MongoDBConnectionManager:
             # Clean windows
             if self.windows_collection:
                 windows_query = {'window_start': {'$lt': cutoff_date}}
+                if whitelist_hosts:
+                    protected_window_conditions = [
+                        {'host_triggers.' + host: {'$exists': True}}
+                        for host in whitelist_hosts
+                    ]
+                    windows_query = {
+                        '$and': [
+                            windows_query,
+                            {'$nor': protected_window_conditions}
+                        ]
+                    }
                 windows_count = self.windows_collection.count_documents(windows_query)
                 if windows_count > 0:
                     windows_result = self.windows_collection.delete_many(windows_query)

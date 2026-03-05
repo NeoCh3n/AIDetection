@@ -87,5 +87,10 @@
       "days": 7,
       "cleanup_collections": ["qradar_sliding_windows", "detection_results", "aql_events"]
     }
+  },
+  "host_retention": {
+    "whitelist_hosts": [],
+    "default_retention_days": 7,
+    "whitelist_retention_days": 3650
   }
 }

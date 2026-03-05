@@ -12,6 +12,7 @@ Python 3.6.8 Compatible
 import os
 import sys
 import json
+import csv
 import argparse
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, cast
@@ -328,6 +329,54 @@ class AQLQueryManager:
             except:
                 pass
 
+
+def export_query_results_to_csv(results: List[Dict[str, Any]], output_csv_path: str) -> int:
+    """
+    Export query results to CSV for downstream training workflows.
+
+    Args:
+        results: List of MongoDB documents
+        output_csv_path: Destination CSV path
+
+    Returns:
+        Number of rows written
+    """
+    if not isinstance(results, list):
+        raise ValueError("results must be a list")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_csv_path)), exist_ok=True)
+
+    # Build a stable superset of keys across all documents.
+    field_set = set()
+    for doc in results:
+        if isinstance(doc, dict):
+            field_set.update(doc.keys())
+    fieldnames = sorted(field_set)
+
+    with open(output_csv_path, 'w', newline='') as csv_file:
+        if not fieldnames:
+            # No rows/no fields; write an empty file.
+            return 0
+
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for doc in results:
+            if not isinstance(doc, dict):
+                continue
+            row = {}
+            for key in fieldnames:
+                value = doc.get(key)
+                if isinstance(value, datetime):
+                    row[key] = value.isoformat()
+                elif isinstance(value, (dict, list)):
+                    row[key] = json.dumps(value, ensure_ascii=False, default=str)
+                else:
+                    row[key] = value
+            writer.writerow(row)
+
+    return len(results)
+
 def query_database(collection_name: str = DETECTION_WINDOWS, 
                   query: Optional[Dict[str, Any]] = None,
                   limit: int = 100) -> List[Dict[str, Any]]:
@@ -380,6 +429,10 @@ def main():
                        help='Hours to look back (default: 24)')
     parser.add_argument('--limit', type=int, default=100,
                        help='Limit number of results (default: 100)')
+    parser.add_argument('--hostname', type=str,
+                       help='Optional hostname filter (windows/events)')
+    parser.add_argument('--output-csv', type=str,
+                       help='Optional CSV output path for query results')
     parser.add_argument('--config', type=str,
                        help='Path to mongodb_config.json')
     
@@ -403,19 +456,43 @@ def main():
         time_range = {'start': start_time, 'end': end_time}
         
         if args.collection == 'windows':
-            results = manager.query_detection_windows(time_range=time_range, limit=args.limit)
+            results = manager.query_detection_windows(
+                time_range=time_range,
+                hostname=args.hostname,
+                limit=args.limit
+            )
         elif args.collection == 'results':
             results = manager.query_detection_results(time_range=time_range)
         elif args.collection == 'events':
-            results = manager.query_aql_events(time_range=time_range, limit=args.limit)
+            results = manager.query_aql_events(
+                time_range=time_range,
+                hostname=args.hostname,
+                limit=args.limit
+            )
         elif args.collection == 'all':
             results = {
                 'summary': manager.get_detection_summary(args.hours_back),
                 'latest_window': manager.get_latest_window(),
-                'windows': manager.query_detection_windows(time_range=time_range, limit=args.limit),
+                'windows': manager.query_detection_windows(
+                    time_range=time_range,
+                    hostname=args.hostname,
+                    limit=args.limit
+                ),
                 'results': manager.query_detection_results(time_range=time_range),
-                'events': manager.query_aql_events(time_range=time_range, limit=args.limit)
+                'events': manager.query_aql_events(
+                    time_range=time_range,
+                    hostname=args.hostname,
+                    limit=args.limit
+                )
             }
+
+        if args.output_csv:
+            if isinstance(results, list):
+                rows_written = export_query_results_to_csv(results, args.output_csv)
+                print("   CSV exported: {}".format(args.output_csv))
+                print("   Rows written: {}".format(rows_written))
+            else:
+                print("   CSV export skipped: --collection all returns nested data")
         
         print(f"\n Query completed successfully")
         

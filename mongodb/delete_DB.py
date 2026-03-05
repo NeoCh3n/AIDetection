@@ -14,7 +14,7 @@ import sys
 import json
 import argparse
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # Add mongodb directory to path for imports
 sys.path.insert(0, os.path.dirname(__file__))
@@ -93,6 +93,58 @@ class DetectionDataCleanup:
         except Exception as e:
             logging_utils.run_log("ERROR", f"Connection error: {e}")
             return False
+
+    def _get_whitelist_hosts(self) -> List[str]:
+        """
+        Read host retention whitelist from config.
+
+        Expected shape:
+          "host_retention": { "whitelist_hosts": ["host-a", "host-b"] }
+        """
+        host_retention = self.config.get('host_retention', {})
+        raw_hosts = host_retention.get('whitelist_hosts', [])
+        if not isinstance(raw_hosts, list):
+            return []
+        hosts = []
+        for host in raw_hosts:
+            host_str = str(host).strip()
+            if host_str:
+                hosts.append(host_str)
+        return hosts
+
+    def _build_retention_query(self, collection_name: str, time_field: str,
+                               cutoff_date: datetime, whitelist_hosts: List[str]) -> Dict[str, Any]:
+        """
+        Build retention deletion query with optional host whitelist protection.
+        """
+        base_time_query = {time_field: {'$lt': cutoff_date}}
+        if not whitelist_hosts:
+            return base_time_query
+
+        # For event/result collections with hostname field, keep whitelisted hosts.
+        if collection_name in ['aql_events', 'detection_results']:
+            return {
+                '$and': [
+                    base_time_query,
+                    {'hostname': {'$nin': whitelist_hosts}}
+                ]
+            }
+
+        # For sliding windows, hostnames are keys under host_triggers.
+        # Keep windows that contain any whitelisted host key.
+        if collection_name == 'qradar_sliding_windows':
+            protected_window_conditions = [
+                {'host_triggers.' + host: {'$exists': True}}
+                for host in whitelist_hosts
+            ]
+            return {
+                '$and': [
+                    base_time_query,
+                    {'$nor': protected_window_conditions}
+                ]
+            }
+
+        return base_time_query
     
     def cleanup_detection_data(self, retention_days: int = 7) -> Dict[str, Any]:
         """
@@ -116,6 +168,7 @@ class DetectionDataCleanup:
         
         results = {}
         cutoff_date = datetime.now() - timedelta(days=retention_days)
+        whitelist_hosts = self._get_whitelist_hosts()
         
         try:
             available_collections = self.db.list_collection_names()
@@ -136,7 +189,12 @@ class DetectionDataCleanup:
                 else:
                     time_field = 'created_at'
                 
-                query = {time_field: {'$lt': cutoff_date}}
+                query = self._build_retention_query(
+                    collection_name=collection_name,
+                    time_field=time_field,
+                    cutoff_date=cutoff_date,
+                    whitelist_hosts=whitelist_hosts
+                )
                 
                 # Count documents to be deleted
                 old_docs = collection.count_documents(query)
@@ -286,6 +344,7 @@ class DetectionDataCleanup:
         if dry_run:
             # Calculate what would be deleted
             cutoff_date = datetime.now() - timedelta(days=retention_days)
+            whitelist_hosts = self._get_whitelist_hosts()
             
             collections = [
                 'qradar_sliding_windows',
@@ -313,7 +372,12 @@ class DetectionDataCleanup:
                 collection = self.db[collection_name]
                 
                 time_field = 'timestamp' if collection_name in ['aql_events', 'detection_results'] else 'window_start'
-                query = {time_field: {'$lt': cutoff_date}}
+                query = self._build_retention_query(
+                    collection_name=collection_name,
+                    time_field=time_field,
+                    cutoff_date=cutoff_date,
+                    whitelist_hosts=whitelist_hosts
+                )
                 
                 try:
                     count = collection.count_documents(query)
