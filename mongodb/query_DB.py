@@ -219,7 +219,7 @@ class AQLQueryManager:
             
             # Add hostname filter
             if hostname:
-                query['hostname'] = hostname
+                query['events.sysmon_hostname (custom)'] = hostname
             
             # Execute query
             cursor = collection.find(query).sort('timestamp', -1).limit(limit)
