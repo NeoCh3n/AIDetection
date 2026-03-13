@@ -17,7 +17,7 @@ such as config.get('key', default).
 # -------------------------
 # Syslog / logging defaults
 # -------------------------
-DATA_RETENTION_DAYS = int(os.getenv("DATA_RETENTION_DAYS", "7"))
+DATA_RETENTION_DAYS = int(os.getenv("DATA_RETENTION_DAYS", "60"))
 
 # Frequency for periodic scheduling (minutes). Used by some logs/tests.
 fetch_data_frequency_default = int(os.getenv("FETCH_FREQUENCY_MIN", "15"))
@@ -26,19 +26,19 @@ fetch_data_frequency_default = int(os.getenv("FETCH_FREQUENCY_MIN", "15"))
 log_dir_path_default = os.getenv("LOG_DIR", os.path.join("running_log/"))
 
 # Syslog target and headers
-log_destination_address_default = os.getenv("SYSLOG_ADDRESS", "192.168.153.123")
+log_destination_address_default = os.getenv("SYSLOG_ADDRESS", "10.33.56.123")
 log_destination_port_default = int(os.getenv("SYSLOG_PORT", "514"))
 
-SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AI4")
+SYSLOG_HEADER_BASE = os.getenv("SYSLOG_HEADER_BASE", "AIDA")
 SYSLOG_HEADER_ML = os.getenv("SYSLOG_HEADER_ML", f"{SYSLOG_HEADER_BASE}-RF")
-SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-LOG")
+SYSLOG_HEADER_LOG = os.getenv("SYSLOG_HEADER_LOG", f"{SYSLOG_HEADER_BASE}-RFLOG")
 
 
 # -------------------------
 # QRadar defaults (env-based)
 # -------------------------
-Qradar_address_default = os.getenv("QRADAR_ADDRESS", "192.168.153.123")
-Qradar_token_default = os.getenv("QRADAR_API_TOKEN", "REPLACE_WITH_TOKEN")
+Qradar_address_default = os.getenv("QRADAR_ADDRESS", "10.33.56.123")
+Qradar_token_default = os.getenv("QRADAR_API_TOKEN", "")
 request_header_default = {
     'SEC': Qradar_token_default,
     'Version': os.getenv('QRADAR_API_VERSION', '20.0'),
