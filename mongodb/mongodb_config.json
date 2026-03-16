@@ -2,20 +2,19 @@
   "mongodb": {
     "host": "localhost",
     "port": 27017,
-    "db_name": "qradar_detection",
+    "db_name": "qradar_detection_test",
     "connection_string": "mongodb://localhost:27017/"
   },
   "pipeline": {
     "mode": "detection_only",
     "query_frequency_minutes": 15,
-    "window_size": "15min",
+    "window_size": "30min",
     "timezone": "HKT",
     "retention_days": 7
   },
   "collections": {
     "detection_windows": "qradar_sliding_windows",
-    "detection_results": "detection_results",
-    "aql_events": "aql_events"
+    "detection_results": "detection_results"
   },
   "data_schema": {
     "detection_windows": {
@@ -42,17 +41,6 @@
       "model_version": "string",
       "total_events": "integer",
       "unique_rules": "integer"
-    },
-    "aql_events": {
-      "hostname": "string",
-      "rule_id": "string",
-      "timestamp": "datetime",
-      "count": "integer",
-      "window_id": "string",
-      "metadata": {
-        "source": "string",
-        "raw_event": "object"
-      }
     }
   },
   "rule_mapping": {
@@ -79,13 +67,12 @@
     "data_source": "AQL_JSON",
     "collections": {
       "windows": "qradar_sliding_windows",
-      "results": "detection_results",
-      "events": "aql_events"
+      "results": "detection_results"
     },
     "retention_policy": {
       "enabled": true,
       "days": 7,
-      "cleanup_collections": ["qradar_sliding_windows", "detection_results", "aql_events"]
+      "cleanup_collections": ["qradar_sliding_windows", "detection_results"]
     }
   },
   "host_retention": {
