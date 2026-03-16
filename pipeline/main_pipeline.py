@@ -149,6 +149,68 @@ class UnifiedPipeline:
                 "api_config": {}
             }
             }
+
+    @staticmethod
+    def _get_shap_rule_priority_bucket(rule_name: Optional[str] = None, feature_name: Optional[str] = None) -> int:
+        """
+        Return the display priority bucket for a SHAP-expanded rule.
+
+        Priority order:
+        0. Rule name starts with `BOC_` and also contains `Telemetry`
+        1. Rule name starts with `BOC_`
+        2. Rule name contains `Telemetry`
+        3. Everything else
+        """
+        rule_name_text = str(rule_name or '').strip().lower()
+        feature_name_text = str(feature_name or '').strip().lower()
+
+        is_boc = (
+            rule_name_text.startswith('boc_')
+            or feature_name_text.startswith('boc_')
+            or feature_name_text.startswith('family_boc_')
+        )
+        is_telemetry = (
+            'telemetry' in rule_name_text
+            or 'telemetry' in feature_name_text
+        )
+
+        if is_boc and is_telemetry:
+            return 0
+        if is_boc:
+            return 1
+        if is_telemetry:
+            return 2
+        return 3
+
+    def _finalize_shap_expanded_rules(
+        self,
+        expanded_features: List[Dict[str, Any]],
+        top_n: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply analyst-facing SHAP rule ordering after family expansion.
+
+        Keeps the existing family expansion results, then enforces the final
+        display policy:
+        - BOC_ + Telemetry
+        - BOC_
+        - Telemetry
+        - Other
+        Within each bucket, sort by instance-level SHAP importance descending.
+        """
+        filtered = [
+            item for item in expanded_features
+            if "BOC_OfficeHour" not in str(item.get('display_name', ''))
+        ]
+
+        filtered.sort(
+            key=lambda x: (
+                int(x.get('priority_bucket', 3)),
+                -float(x.get('importance', 0.0))
+            )
+        )
+
+        return filtered[:max(int(top_n), 0)]
     
     def run_training(self):
         """Training mode: CSV → Model (delegates to model_training exports)."""
@@ -1030,10 +1092,49 @@ class UnifiedPipeline:
                                             frequent_path_mining=fpm_opts
                                         )
 
-                                        if shap_results and 'feature_importance' in shap_results:
-                                            # Extract top contributing features for this alert
-                                            alert_top_features = shap_results['feature_importance'][:top_n]
-                                            
+                                        if shap_results:
+                                            # Rank features using this alert's own SHAP vector rather than
+                                            # the global average importance across all explained instances.
+                                            alert_top_features = []
+                                            raw_shap_values = shap_results.get('shap_values')
+
+                                            if raw_shap_values is not None:
+                                                try:
+                                                    instance_values = raw_shap_values
+                                                    if isinstance(instance_values, list):
+                                                        # Binary classifiers typically expose [class_0, class_1].
+                                                        if len(instance_values) == 2:
+                                                            instance_values = instance_values[1]
+                                                        elif len(instance_values) > 0:
+                                                            instance_values = instance_values[0]
+
+                                                    if hasattr(instance_values, 'values'):
+                                                        instance_values = instance_values.values
+
+                                                    instance_values = np.array(instance_values)
+                                                    if instance_values.ndim >= 2:
+                                                        instance_values = instance_values[0]
+
+                                                    sorted_idx = np.argsort(np.abs(instance_values))[::-1]
+                                                    for rank, feature_idx in enumerate(sorted_idx[:top_n], 1):
+                                                        if int(feature_idx) < len(feature_names):
+                                                            alert_top_features.append({
+                                                                'rank': rank,
+                                                                'feature': feature_names[int(feature_idx)],
+                                                                'importance': float(np.abs(instance_values[int(feature_idx)])),
+                                                                'shap_value': float(instance_values[int(feature_idx)])
+                                                            })
+                                                except Exception as exc:
+                                                    self.logger.warning(
+                                                        "Failed to compute instance-specific SHAP ranking; "
+                                                        "falling back to explainer feature importance: %s",
+                                                        exc
+                                                    )
+
+                                            if not alert_top_features and 'feature_importance' in shap_results:
+                                                alert_top_features = shap_results['feature_importance'][:top_n]
+
+                                        if alert_top_features:
                                             # Get raw rule counts for this window to map families back to specific rules
                                             current_window_rules = df_agg.iloc[idx].get('aggregated_rules_dict', {})
                                             if isinstance(current_window_rules, str):
@@ -1063,7 +1164,8 @@ class UnifiedPipeline:
                                                                 found_children.append({
                                                                     'rule_id': r_id_int, 
                                                                     'rule_name': r_name, 
-                                                                    'count': r_count
+                                                                    'count': r_count,
+                                                                    'priority_bucket': self._get_shap_rule_priority_bucket(rule_name=r_name)
                                                                 })
                                                         except:
                                                             continue
@@ -1075,6 +1177,13 @@ class UnifiedPipeline:
                                                         item['rule_id'] = child['rule_id']
                                                         item['rule_name'] = child['rule_name']
                                                         item['family'] = family_name
+                                                        item['priority_bucket'] = child.get(
+                                                            'priority_bucket',
+                                                            self._get_shap_rule_priority_bucket(
+                                                                rule_name=child.get('rule_name'),
+                                                                feature_name=fname
+                                                            )
+                                                        )
                                                         #rule importance scaled by occurrence proportion in window
                                                         item['value'] = item.get('importance', 0)*(child['count']/family_total_rule_count) if family_total_rule_count > 0 else item.get('importance', 0)
                                                         expanded_items.append(item)
@@ -1090,6 +1199,10 @@ class UnifiedPipeline:
                                                             item['rule_id'] = fallback_rule_id
                                                             item['rule_name'] = fallback_rule_name
                                                             item['family'] = family_name
+                                                            item['priority_bucket'] = self._get_shap_rule_priority_bucket(
+                                                                rule_name=fallback_rule_name,
+                                                                feature_name=fname
+                                                            )
                                                             if 'value' not in item:
                                                                 item['value'] = item.get('importance', 0)
                                                             expanded_items.append(item)
@@ -1110,6 +1223,10 @@ class UnifiedPipeline:
                                                             name = rule_name_map.get(int(rid_val))
                                                             if name is not None:
                                                                 fi_en['rule_name'] = name
+                                                    fi_en['priority_bucket'] = self._get_shap_rule_priority_bucket(
+                                                        rule_name=fi_en.get('rule_name'),
+                                                        feature_name=fname
+                                                    )
                                                     
                                                     # Ensure 'value' key exists
                                                     if 'importance' in fi_en:
@@ -1153,7 +1270,11 @@ class UnifiedPipeline:
                                                                 expanded_features.append({
                                                                     'display_name': f"{r_name} (ID:{r_id_int})",
                                                                     'importance': importance,
-                                                                    'rule_id': r_id_int
+                                                                    'rule_id': r_id_int,
+                                                                    'priority_bucket': self._get_shap_rule_priority_bucket(
+                                                                        rule_name=r_name,
+                                                                        feature_name=feature_name
+                                                                    )
                                                                 })
                                                         except:
                                                             continue
@@ -1172,13 +1293,20 @@ class UnifiedPipeline:
                                                             expanded_features.append({
                                                                 'display_name': f"{fallback_rule_name} (ID:{fallback_rule_id})",
                                                                 'importance': importance,
-                                                                'rule_id': fallback_rule_id
+                                                                'rule_id': fallback_rule_id,
+                                                                'priority_bucket': self._get_shap_rule_priority_bucket(
+                                                                    rule_name=fallback_rule_name,
+                                                                    feature_name=feature_name
+                                                                )
                                                             })
                                                         else:
                                                             expanded_features.append({
                                                                 'display_name': family_name,
                                                                 'importance': importance,
-                                                                'rule_id': None
+                                                                'rule_id': None,
+                                                                'priority_bucket': self._get_shap_rule_priority_bucket(
+                                                                    feature_name=feature_name
+                                                                )
                                                             })
 
                                                 # Handle legacy "rule_" features (if any)
@@ -1194,32 +1322,36 @@ class UnifiedPipeline:
                                                         expanded_features.append({
                                                             'display_name': display_name,
                                                             'importance': importance,
-                                                            'rule_id': rule_id
+                                                            'rule_id': rule_id,
+                                                            'priority_bucket': self._get_shap_rule_priority_bucket(
+                                                                rule_name=r_name,
+                                                                feature_name=feature_name
+                                                            )
                                                         })
                                                     except ValueError:
                                                         expanded_features.append({
                                                             'display_name': feature_name,
                                                             'importance': importance,
-                                                            'rule_id': None
+                                                            'rule_id': None,
+                                                            'priority_bucket': self._get_shap_rule_priority_bucket(
+                                                                feature_name=feature_name
+                                                            )
                                                         })
                                                 else:
                                                     # Other features
                                                     expanded_features.append({
                                                         'display_name': feature_name,
                                                         'importance': importance,
-                                                        'rule_id': None
+                                                        'rule_id': None,
+                                                        'priority_bucket': self._get_shap_rule_priority_bucket(
+                                                            feature_name=feature_name
+                                                        )
                                                     })
 
-                                            # Filter out specific unwanted rules from the output
-                                            expanded_features = [
-                                                item for item in expanded_features 
-                                                if "BOC_OfficeHour" not in item['display_name']
-                                            ]
-
-                                            # Sort expanded features by importance (descending) to ensure top rules are first
-                                            # Note: If a family had multiple rules, they will all have the same importance
-                                            # and appear together.
-                                            expanded_features.sort(key=lambda x: x['importance'], reverse=True)
+                                            expanded_features = self._finalize_shap_expanded_rules(
+                                                expanded_features=expanded_features,
+                                                top_n=top_n
+                                            )
                                             
                                             # Populate the lists for logging
                                             for item in expanded_features:

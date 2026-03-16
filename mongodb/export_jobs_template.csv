@@ -1,0 +1,2 @@
+hostname,start_time,end_time,output_dir,db_name,collection,source_schema,window_size_minutes
+DESKTOP-64-EDR,2025-07-29T00:00:00,2025-07-29T06:00:00,./Training_data/normal/DESKTOP-64-EDR,,,detection_windows,30

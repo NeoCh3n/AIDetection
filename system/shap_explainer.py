@@ -107,6 +107,7 @@ class Explainer:
                 self._feature_name_map = None
         # Lazy cache for BOC rule IDs discovered from rule CSVs
         self._boc_rule_ids: Optional[Set[int]] = None
+        self._telemetry_rule_ids: Optional[Set[int]] = None
     
     def explain(self,
                 *args,
@@ -225,8 +226,8 @@ class Explainer:
             # Calculate feature importance (full ranking)
             feature_importance_full = self._calculate_feature_importance(shap_values, feature_names)
 
-            # Prioritize BOC-related rules and keep only top 5 for output
-            feature_importance = self._prioritize_boc_and_top_k(
+            # Prioritize BOC rules first, Telemetry rules second, then others.
+            feature_importance = self._prioritize_special_rules_and_top_k(
                 feature_importance_full,
                 feature_names,
                 top_k=5
@@ -778,10 +779,10 @@ class Explainer:
             
             # Feature importance table
             feature_importance = self._calculate_feature_importance(shap_values, feature_names)
-            prioritized_features = self._prioritize_boc_and_top_k(feature_importance, feature_names, top_k=5)
+            prioritized_features = self._prioritize_special_rules_and_top_k(feature_importance, feature_names, top_k=5)
 
             if prioritized_features:
-                print(f"\nTop {len(prioritized_features)} features (BOC prioritized):")
+                print(f"\nTop {len(prioritized_features)} features (BOC, then Telemetry prioritized):")
                 print("-" * 70)
                 print(f"{'Rank':<4} {'Importance':<12} {'Feature (Rule Name)':<50}")
                 print("-" * 70)
@@ -1001,7 +1002,7 @@ class Explainer:
             return False
 
     # ------------------------
-    # BOC prioritization utils
+    # Special-rule prioritization utils
     # ------------------------
     def _extract_rule_id(self, feature_name: str) -> Optional[int]:
         """Extract integer rule_id from a feature name like 'rule_100392'."""
@@ -1089,12 +1090,15 @@ class Explainer:
             return self._rule_name_map
 
     def _load_boc_rule_ids(self) -> Set[int]:
-        """Return cached BOC rule IDs (names containing 'BOC') discovered from CSVs."""
+        """Return cached BOC rule IDs whose rule names start with 'BOC_'."""
         if self._boc_rule_ids is not None:
             return self._boc_rule_ids
         try:
             name_map = self._get_rule_name_map()
-            boc_ids = {rid for rid, nm in name_map.items() if 'boc_' in str(nm).lower()}
+            boc_ids = {
+                rid for rid, nm in name_map.items()
+                if str(nm).strip().lower().startswith('boc_')
+            }
             self._boc_rule_ids = boc_ids
             return self._boc_rule_ids
         except Exception:
@@ -1111,16 +1115,79 @@ class Explainer:
         except Exception:
             return False
 
-    def _prioritize_boc_and_top_k(
+    def _load_telemetry_rule_ids(self) -> Set[int]:
+        """Return cached Telemetry rule IDs discovered from CSV rule names."""
+        if self._telemetry_rule_ids is not None:
+            return self._telemetry_rule_ids
+        try:
+            name_map = self._get_rule_name_map()
+            telemetry_ids = {
+                rid for rid, nm in name_map.items()
+                if 'telemetry' in str(nm).lower()
+            }
+            self._telemetry_rule_ids = telemetry_ids
+            return self._telemetry_rule_ids
+        except Exception:
+            self._telemetry_rule_ids = set()
+            return self._telemetry_rule_ids
+
+    def _is_telemetry_rule(self, rule_id: Optional[int]) -> bool:
+        """Return True if rule_id is in the discovered Telemetry rule set."""
+        if rule_id is None:
+            return False
+        try:
+            telemetry_ids = self._load_telemetry_rule_ids()
+            return int(rule_id) in telemetry_ids
+        except Exception:
+            return False
+
+    def _get_rule_priority_bucket(
+        self,
+        feature_name: str,
+        rule_id: Optional[int] = None,
+        rule_name: Optional[str] = None
+    ) -> int:
+        """
+        Return priority bucket for a feature.
+
+        Priority order:
+        0: BOC_ rules that also include Telemetry
+        1: BOC_ rules/features
+        2: Telemetry-related rules/features
+        3: Other rules/features
+        """
+        feature_text = str(feature_name or '').strip().lower()
+        rule_name_text = str(rule_name or '').strip().lower()
+        is_boc = (
+            self._is_boc_rule(rule_id)
+            or feature_text.startswith('boc_')
+            or rule_name_text.startswith('boc_')
+            or feature_text.startswith('family_boc_')
+        )
+        is_telemetry = (
+            self._is_telemetry_rule(rule_id)
+            or 'telemetry' in feature_text
+            or 'telemetry' in rule_name_text
+        )
+
+        if is_boc and is_telemetry:
+            return 0
+        if is_boc:
+            return 1
+        if is_telemetry:
+            return 2
+        return 3
+
+    def _prioritize_special_rules_and_top_k(
         self,
         feature_importance: List[Dict[str, Any]],
         feature_names: List[str],
         top_k: int = 5
     ) -> List[Dict[str, Any]]:
-        """Reorder importance list to put BOC-related rules first and limit to top_k.
+        """Reorder importance list to put BOC first, Telemetry second, then others.
 
-        - Determines BOC-related rules via Qradar_rule CSV names containing 'BOC'.
-        - Keeps original relative order within BOC group and within others.
+        - Determines BOC/Telemetry by discovered rule names and feature/rule text.
+        - Keeps original relative order within each priority group.
         - Returns only the first top_k items from the reordered list.
         """
         if not feature_importance:
@@ -1134,24 +1201,33 @@ class Explainer:
         if not filtered:
             return []
 
-        # Stable partition based on BOC membership
+        # Stable partition based on priority bucket
         boc_items: List[Dict[str, Any]] = []
+        telemetry_items: List[Dict[str, Any]] = []
         other_items: List[Dict[str, Any]] = []
 
         for item in filtered:
             feat_name = str(item.get('feature', ''))
             rid = self._extract_rule_id(feat_name)
-            if self._is_boc_rule(rid):
+            rule_name = item.get('rule_name')
+            bucket = self._get_rule_priority_bucket(
+                feature_name=feat_name,
+                rule_id=rid,
+                rule_name=str(rule_name) if rule_name is not None else None
+            )
+            if bucket == 0:
                 boc_items.append(item)
+            elif bucket == 1:
+                telemetry_items.append(item)
             else:
                 other_items.append(item)
 
-        # If no BOC items at all, just take top_k from original
-        if not boc_items:
+        # If no prioritized items at all, just take top_k from original
+        if not boc_items and not telemetry_items:
             return feature_importance[:max(0, int(top_k))]
 
-        # Combine BOC-first then others, limit to top_k
-        combined = boc_items + other_items
+        # Combine BOC-first, Telemetry-second, then others; limit to top_k
+        combined = boc_items + telemetry_items + other_items
         k = max(0, int(top_k))
         limited = combined[:k]
 

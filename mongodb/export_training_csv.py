@@ -73,6 +73,16 @@ CSV_COLUMNS = [
     'Log Source Time (Minimum)',
     'Count',
 ]
+JOB_CSV_COLUMNS = [
+    'hostname',
+    'start_time',
+    'end_time',
+    'output_dir',
+    'db_name',
+    'collection',
+    'source_schema',
+    'window_size_minutes',
+]
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -317,6 +327,157 @@ def ensure_dir(path: str) -> None:
         os.makedirs(path)
 
 
+def parse_jobs_csv(csv_path: str) -> List[Dict[str, Any]]:
+    """Load batch export jobs from a CSV file."""
+    jobs = []
+    with open(csv_path, 'r', encoding='utf-8-sig') as handle:
+        reader = csv.DictReader(handle)
+        for line_number, row in enumerate(reader, start=2):
+            if not row:
+                continue
+
+            hostname = str(row.get('hostname', '')).strip()
+            start_time_raw = str(row.get('start_time', '')).strip()
+            end_time_raw = str(row.get('end_time', '')).strip()
+            output_dir = str(row.get('output_dir', '')).strip()
+
+            if not hostname and not start_time_raw and not end_time_raw and not output_dir:
+                continue
+
+            if not hostname:
+                raise ValueError('jobs CSV line {} missing hostname'.format(line_number))
+            if not start_time_raw or not end_time_raw:
+                raise ValueError('jobs CSV line {} requires start_time and end_time'.format(line_number))
+            if not output_dir:
+                raise ValueError('jobs CSV line {} missing output_dir'.format(line_number))
+
+            job = {
+                'hostname': hostname,
+                'start_time': parse_cli_datetime(start_time_raw),
+                'end_time': parse_cli_datetime(end_time_raw),
+                'output_dir': output_dir,
+                'db_name': str(row.get('db_name', '')).strip() or None,
+                'collection': str(row.get('collection', '')).strip() or None,
+                'source_schema': str(row.get('source_schema', '')).strip() or None,
+                'window_size_minutes': None,
+            }
+
+            window_size_raw = str(row.get('window_size_minutes', '')).strip()
+            if window_size_raw:
+                try:
+                    job['window_size_minutes'] = int(window_size_raw)
+                except ValueError:
+                    raise ValueError(
+                        'jobs CSV line {} has invalid window_size_minutes: {}'.format(
+                            line_number, window_size_raw
+                        )
+                    )
+
+            if job['end_time'] <= job['start_time']:
+                raise ValueError('jobs CSV line {} end_time must be later than start_time'.format(line_number))
+
+            jobs.append(job)
+
+    if not jobs:
+        raise ValueError('No valid jobs found in {}'.format(csv_path))
+    return jobs
+
+
+def export_hostname_range(
+    collection: Any,
+    hostname: str,
+    start_time: datetime,
+    end_time: datetime,
+    output_dir: str,
+    source_schema: str,
+    window_size_minutes: int,
+    hostname_query_field: str,
+    payload_path: Optional[str],
+    hostname_field: str,
+    rule_field: str,
+    timestamp_field: str,
+    count_field: str,
+    limit: int
+) -> Tuple[int, int, int]:
+    """Export one hostname/time-range job and return counts."""
+    if source_schema == 'detection_windows':
+        query = build_detection_windows_query(hostname, start_time, end_time)
+    else:
+        query = build_query(hostname, hostname_query_field)
+
+    cursor = collection.find(query)
+    if limit and limit > 0:
+        cursor = cursor.limit(limit)
+
+    window_rows = defaultdict(list)
+    raw_docs = 0
+    matched_rows = 0
+
+    for document in cursor:
+        raw_docs += 1
+        if source_schema == 'detection_windows':
+            extracted_rows = extract_window_rows(
+                document=document,
+                hostname=hostname,
+                start_time=start_time,
+                end_time=end_time
+            )
+            for event_time, row in extracted_rows:
+                bucket_start, _ = get_window_start_end(event_time, window_size_minutes)
+                window_rows[bucket_start].append(row)
+                matched_rows += 1
+        else:
+            for payload in iter_event_payloads(document, payload_path):
+                extracted = extract_training_row(
+                    payload=payload,
+                    hostname_field=hostname_field,
+                    rule_field=rule_field,
+                    timestamp_field=timestamp_field,
+                    count_field=count_field
+                )
+                if extracted is None:
+                    continue
+
+                payload_hostname, rule_id, event_time, count = extracted
+                if payload_hostname != hostname:
+                    continue
+                if event_time < start_time or event_time >= end_time:
+                    continue
+
+                window_start, _ = get_window_start_end(event_time, window_size_minutes)
+                window_rows[window_start].append({
+                    'sysmon_hostname (custom)': payload_hostname,
+                    'Custom Rule': rule_id,
+                    'Log Source Time (Minimum)': format_qradar_timestamp(event_time),
+                    'Count': count,
+                })
+                matched_rows += 1
+
+    ensure_dir(output_dir)
+
+    files_written = 0
+    for window_start in sorted(window_rows.keys()):
+        rows = window_rows[window_start]
+        if not rows:
+            continue
+
+        filename = '{hostname}_{window}.csv'.format(
+            hostname=hostname,
+            window=window_start.strftime('%Y-%m-%d_%H-%M-%S')
+        )
+        output_path = os.path.join(output_dir, filename)
+
+        with open(output_path, 'w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+        files_written += 1
+
+    return raw_docs, matched_rows, files_written
+
+
 def main() -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -334,6 +495,8 @@ def main() -> int:
                         help='Export all hostnames from host_retention.whitelist_hosts in config')
     parser.add_argument('--output-dir', required=True,
                         help='Directory to write one CSV per 30-minute window')
+    parser.add_argument('--jobs-csv', default=None,
+                        help='Batch export definition CSV with hostname/start_time/end_time/output_dir columns')
     parser.add_argument('--hours-back', type=int, default=None,
                         help='Look back N hours from now')
     parser.add_argument('--start-time', default=None,
@@ -360,145 +523,112 @@ def main() -> int:
                         help='Optional Mongo cursor limit; 0 means no limit')
     args = parser.parse_args()
 
-    if args.hours_back is None and (not args.start_time or not args.end_time):
+    if args.jobs_csv and args.use_whitelist:
+        parser.error('Do not combine --jobs-csv with --use-whitelist')
+    if args.jobs_csv and args.hostname:
+        parser.error('Do not combine --jobs-csv with --hostname')
+
+    if not args.jobs_csv and args.hours_back is None and (not args.start_time or not args.end_time):
         parser.error('Provide either --hours-back or both --start-time and --end-time')
 
-    if args.hours_back is not None and (args.start_time or args.end_time):
+    if not args.jobs_csv and args.hours_back is not None and (args.start_time or args.end_time):
         parser.error('Use either --hours-back or --start-time/--end-time, not both')
 
-    if args.use_whitelist and args.hostname:
+    if not args.jobs_csv and args.use_whitelist and args.hostname:
         parser.error('Do not pass --hostname together with --use-whitelist')
-    if not args.use_whitelist and not args.hostname:
+    if not args.jobs_csv and not args.use_whitelist and not args.hostname:
         parser.error('Provide --hostname, or use --use-whitelist')
-
-    if args.hours_back is not None:
-        end_time = datetime.now(HKT)
-        start_time = end_time - timedelta(hours=args.hours_back)
-    else:
-        start_time = parse_cli_datetime(args.start_time)
-        end_time = parse_cli_datetime(args.end_time)
-
-    if end_time <= start_time:
-        parser.error('--end-time must be later than --start-time')
 
     config = load_config(args.config)
     connection_string = config['mongodb']['connection_string']
     detection_db_name = config['mongodb'].get('db_name', 'qradar_detection')
     detection_collection = config.get('collections', {}).get('detection_windows', 'qradar_sliding_windows')
-    db_name = args.db_name or detection_db_name
-    collection_name = args.collection or detection_collection
-    hostnames = [args.hostname]
-    if args.use_whitelist:
-        hostnames = get_whitelist_hosts(config)
-        if not hostnames:
-            parser.error('No hostnames found in host_retention.whitelist_hosts')
-
-    print('Exporting MongoDB data to Training_data-compatible CSV files...')
-    print('  DB: {}'.format(db_name))
-    print('  Collection: {}'.format(collection_name))
-    print('  Hostnames: {}'.format(', '.join(hostnames)))
-    print('  Time range: {} -> {}'.format(start_time.isoformat(), end_time.isoformat()))
 
     client = MongoClient(connection_string)
-    db = client[db_name]
-    collection = db[collection_name]
-
-    sample_doc = collection.find_one()
-    source_schema = args.source_schema
-    if source_schema == 'auto':
-        source_schema = detect_source_schema(collection_name, sample_doc)
-    print('  Source schema: {}'.format(source_schema))
-
     total_raw_docs = 0
     total_matched_rows = 0
     total_files_written = 0
 
     try:
-        for hostname in hostnames:
-            if source_schema == 'detection_windows':
-                query = build_detection_windows_query(hostname, start_time, end_time)
+        jobs = []
+        if args.jobs_csv:
+            jobs = parse_jobs_csv(args.jobs_csv)
+        else:
+            if args.hours_back is not None:
+                end_time = datetime.now(HKT)
+                start_time = end_time - timedelta(hours=args.hours_back)
             else:
-                query = build_query(hostname, args.hostname_query_field)
-            cursor = collection.find(query)
-            if args.limit and args.limit > 0:
-                cursor = cursor.limit(args.limit)
+                start_time = parse_cli_datetime(args.start_time)
+                end_time = parse_cli_datetime(args.end_time)
 
-            window_rows = defaultdict(list)
-            raw_docs = 0
-            matched_rows = 0
+            if end_time <= start_time:
+                parser.error('--end-time must be later than --start-time')
 
-            for document in cursor:
-                raw_docs += 1
-                if source_schema == 'detection_windows':
-                    extracted_rows = extract_window_rows(
-                        document=document,
-                        hostname=hostname,
-                        start_time=start_time,
-                        end_time=end_time
-                    )
-                    for event_time, row in extracted_rows:
-                        bucket_start, _ = get_window_start_end(event_time, args.window_size_minutes)
-                        window_rows[bucket_start].append(row)
-                        matched_rows += 1
-                else:
-                    for payload in iter_event_payloads(document, args.payload_path or None):
-                        extracted = extract_training_row(
-                            payload=payload,
-                            hostname_field=args.hostname_field,
-                            rule_field=args.rule_field,
-                            timestamp_field=args.timestamp_field,
-                            count_field=args.count_field
-                        )
-                        if extracted is None:
-                            continue
-
-                        payload_hostname, rule_id, event_time, count = extracted
-                        if payload_hostname != hostname:
-                            continue
-                        if event_time < start_time or event_time >= end_time:
-                            continue
-
-                        window_start, _ = get_window_start_end(event_time, args.window_size_minutes)
-                        window_rows[window_start].append({
-                            'sysmon_hostname (custom)': payload_hostname,
-                            'Custom Rule': rule_id,
-                            'Log Source Time (Minimum)': format_qradar_timestamp(event_time),
-                            'Count': count,
-                        })
-                        matched_rows += 1
-
-            host_output_dir = args.output_dir
+            hostnames = [args.hostname]
             if args.use_whitelist:
-                host_output_dir = os.path.join(args.output_dir, hostname)
+                hostnames = get_whitelist_hosts(config)
+                if not hostnames:
+                    parser.error('No hostnames found in host_retention.whitelist_hosts')
 
-            ensure_dir(host_output_dir)
+            for hostname in hostnames:
+                host_output_dir = args.output_dir
+                if args.use_whitelist:
+                    host_output_dir = os.path.join(args.output_dir, hostname)
+                jobs.append({
+                    'hostname': hostname,
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'output_dir': host_output_dir,
+                    'db_name': args.db_name,
+                    'collection': args.collection,
+                    'source_schema': args.source_schema,
+                    'window_size_minutes': args.window_size_minutes,
+                })
 
-            files_written = 0
-            for window_start in sorted(window_rows.keys()):
-                rows = window_rows[window_start]
-                if not rows:
-                    continue
+        print('Exporting MongoDB data to Training_data-compatible CSV files...')
+        print('  Jobs: {}'.format(len(jobs)))
 
-                filename = '{hostname}_{window}.csv'.format(
-                    hostname=hostname,
-                    window=window_start.strftime('%Y-%m-%d_%H-%M-%S')
-                )
-                output_path = os.path.join(host_output_dir, filename)
+        for job in jobs:
+            db_name = job.get('db_name') or detection_db_name
+            collection_name = job.get('collection') or detection_collection
+            db = client[db_name]
+            collection = db[collection_name]
+            sample_doc = collection.find_one()
 
-                with open(output_path, 'w', newline='') as handle:
-                    writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
-                    writer.writeheader()
-                    for row in rows:
-                        writer.writerow(row)
+            source_schema = job.get('source_schema') or 'auto'
+            if source_schema == 'auto':
+                source_schema = detect_source_schema(collection_name, sample_doc)
 
-                files_written += 1
+            print('  Job hostname: {}'.format(job['hostname']))
+            print('    DB: {}'.format(db_name))
+            print('    Collection: {}'.format(collection_name))
+            print('    Time range: {} -> {}'.format(job['start_time'].isoformat(), job['end_time'].isoformat()))
+            print('    Source schema: {}'.format(source_schema))
+            print('    Output dir: {}'.format(os.path.abspath(job['output_dir'])))
+
+            raw_docs, matched_rows, files_written = export_hostname_range(
+                collection=collection,
+                hostname=job['hostname'],
+                start_time=job['start_time'],
+                end_time=job['end_time'],
+                output_dir=job['output_dir'],
+                source_schema=source_schema,
+                window_size_minutes=job.get('window_size_minutes') or args.window_size_minutes,
+                hostname_query_field=args.hostname_query_field,
+                payload_path=args.payload_path or None,
+                hostname_field=args.hostname_field,
+                rule_field=args.rule_field,
+                timestamp_field=args.timestamp_field,
+                count_field=args.count_field,
+                limit=args.limit,
+            )
 
             total_raw_docs += raw_docs
             total_matched_rows += matched_rows
             total_files_written += files_written
 
-            print('  Host {}: scanned {} docs, exported {} rows into {} files'.format(
-                hostname, raw_docs, matched_rows, files_written
+            print('    Result: scanned {} docs, exported {} rows into {} files'.format(
+                raw_docs, matched_rows, files_written
             ))
     finally:
         client.close()
@@ -506,7 +636,10 @@ def main() -> int:
     print('  Raw documents scanned: {}'.format(total_raw_docs))
     print('  Exported rows: {}'.format(total_matched_rows))
     print('  CSV files written: {}'.format(total_files_written))
-    print('  Output directory: {}'.format(os.path.abspath(args.output_dir)))
+    if args.jobs_csv:
+        print('  Jobs CSV: {}'.format(os.path.abspath(args.jobs_csv)))
+    else:
+        print('  Output directory: {}'.format(os.path.abspath(args.output_dir)))
 
     return 0
 
