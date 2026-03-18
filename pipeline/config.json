@@ -52,30 +52,30 @@
   },
   "detection": {
     "qradar_config": {
-      "host": "10.33.56.123",
-      "token": "297c530e-7019-4ec4-a9c7-6e0de9707fab",
+      "host": "192.168.153.123",
+      "token": "677f60e2-3d58-4275-a1f0-c13d1975fdbe",
       "version": "20.0",
       "verify_ssl": false,
-      "query_15min": "SELECT \"sourceIP\" AS 'Source IP', \"sysmon_hostname\" AS 'sysmon_hostname (custom)', \"creEventList\" AS 'Custom Rule', DATEFORMAT(MIN(\"deviceTime\"), 'MMM dd, yyyy, h:mm:ss a') AS 'Log Source Time (Minimum)', COUNT(*) AS 'Count' FROM events WHERE ((\"Sysmon_hostname\" != NULL) AND (\"Windows Log Type\"='Microsoft-Windows-Sysmon/Operational') AND (\"qidEventId\" in ('40391','50578','55306','55310','55312','63899')) AND (logSourceId in ('17807','64758','64761','64773','17749','18195','18300','18363','24859','24878','24898','36354','38825','55309','17674','17677','17678','17679','17682','17685','63920','17629','17632','17635','17641','17642','17646','17648','17652','17654','17659','17661','17664','17665','17671','17673','18013','18018','18027','18048','17695','17709','17710','17721','17744','17644','17763','17787','17791','17797','17838','17875','17899','17925','17931','17936','17939','17983','17990','17996','18091','18099','18117','18145','18152','18164','18168','18178','18194','18198','18216','18232','18233','18241','18273','18287','18307','18328','18335','18342','18371','18379','18394','18431','18440','18701','18833','18844','19032','19100','19105','19155','19428','19447','19527','19614','19627','19632','19636','20219','20438','18424','23746','24866','25180','36992','37121','25306','25438','18441','25667','25768','37123','29480','29888','32788','32873','32883','35087','35370','36571','36572','36574','36587','36590','37124','37144','37996','38129','38197','38554','38849','40394','52376','60005','60007','40486','40525','40648','35923','36567','36570','40784','36352','41043','41047','17655','41396','42308','43041','50475','50477','50604','50788','63653','63987','17663','49274','50473','17667','18300','18303','18401','18418','20442','25130','50931','30523','50932','50968','52141','25352','52238','60808','62577','62580','40105','41387','41388','41391','42054','42149','42153','42160','42162','42170','42285','44927','30677','30678','31030','31056','31694','31696','36639','36641','38868','38870','39003','46529','50653','59880','61285','62297','64088'))) AND \"deviceType\"='12') GROUP BY \"sysmon_hostname\", \"sourceIP\", \"creEventList\" ORDER BY \"Count\" DESC START '{start_time}' STOP '{end_time}'",
-      "timeout": 300,
-      "max_wait_seconds": 750
+      "query_15min": "SELECT \"sourceIP\" AS 'Source IP', \"sysmon_hostname\" AS 'sysmon_hostname (custom)', \"creEventList\" AS 'Custom Rule', DATEFORMAT(MIN(\"deviceTime\"), 'MMM dd, yyyy, h:mm:ss a') AS 'Log Source Time (Minimum)', COUNT(*) AS 'Count' FROM events WHERE (\"Sysmon_hostname\" != NULL)GROUP BY \"sysmon_hostname\", \"sourceIP\", \"creEventList\" ORDER BY \"Count\" DESC START '{start_time}' STOP '{end_time}'",
+      "timeout": 300
     },
     "mongodb_config": {
       "connection_string": "mongodb://localhost:27017/",
-      "database": "qradar_detection_test",
-      "collection": "qradar_sliding_windows",
+      "database": "qradar_ml",
+      "collection": "detection_data",
       "batch_size": 1000
     },
-    "retention_days": 60,
-    "alert_threshold": 0.75,
-    "min_fetch_interval_seconds": 350,
-    "lock_max_age_seconds": 2400,
-    "window_size_minutes": 15,
+    "retention_days": 7,
+    "alert_threshold": 0,
+    "min_fetch_interval_seconds": 0,
+    "lock_max_age_seconds": 1800,
+    "window_size_minutes": 30,
     "max_detection_age_hours": 24,
     "feature_names": {
       "include_rule_names": true,
       "csv_paths": [
-        "./Qradar_rule/listG.csv"
+        "./Qradar_rule/qradar_customrules.csv",
+        "./Qradar_rule/qradar_BBrules.csv"
       ]
     },
     "shap": {
@@ -95,8 +95,8 @@
   "rule_manager": {
     "mode": "file",
     "api_config": {
-      "host": "10.33.56.123",
-      "token": "297c530e-7019-4ec4-a9c7-6e0de9707fab",
+      "host": "192.168.153.123",
+      "token": "677f60e2-3d58-4275-a1f0-c13d1975fdbe",
       "version": "20.0",
       "verify_ssl": false
     },

@@ -198,13 +198,23 @@ def build_detection_windows_query(hostname: str, start_time: datetime, end_time:
         start_time = start_time.replace(tzinfo=None)
     if end_time.tzinfo is not None:
         end_time = end_time.replace(tzinfo=None)
-    return {
-        'host_triggers.' + hostname: {'$exists': True},
-        'window_start': {
-            '$gte': start_time,
-            '$lt': end_time
+    
+    if '.' in hostname:
+        query = {
+            'window_start': {
+                '$gte': start_time,
+                '$lt': end_time
+            }
         }
-    }
+    else:
+        query = {
+            'host_triggers.' + hostname: {'$exists': True},
+            'window_start': {
+                '$gte': start_time,
+                '$lt': end_time
+            }
+        }
+    return query
 
 
 def get_whitelist_hosts(config: Dict[str, Any]) -> List[str]:

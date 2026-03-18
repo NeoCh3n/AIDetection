@@ -133,8 +133,7 @@ def get_config() -> Dict[str, Any]:
         merged['paths']['model_dir'] = paths_cfg.get('model_output', merged['paths']['model_dir']).replace('./', '') if paths_cfg.get('model_output') else merged['paths']['model_dir']
         merged['paths']['log_dir'] = paths_cfg.get('logs', merged['paths']['log_dir']).replace('./', '') if paths_cfg.get('logs') else merged['paths']['log_dir']
         merged['paths']['training_data_dir'] = paths_cfg.get('training_data', merged['paths']['training_data_dir']).replace('./', '') if paths_cfg.get('training_data') else merged['paths']['training_data_dir']
-
-    # feature_engineering overrides (e.g., feature_representation)
+        # feature_engineering overrides (e.g., feature_representation)
     fe_cfg = file_cfg.get('feature_engineering', {}) if isinstance(file_cfg, dict) else {}
     if isinstance(fe_cfg, dict):
         merged['feature_engineering'].update(fe_cfg)

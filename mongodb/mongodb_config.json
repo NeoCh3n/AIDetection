@@ -76,7 +76,7 @@
     }
   },
   "host_retention": {
-    "whitelist_hosts": [],
+    "whitelist_hosts": ["DESKTOP-64-EDR"],
     "default_retention_days": 7,
     "whitelist_retention_days": 3650
   }
