@@ -194,6 +194,10 @@ def build_query(hostname: Optional[str], hostname_query_field: Optional[str]) ->
 
 def build_detection_windows_query(hostname: str, start_time: datetime, end_time: datetime) -> Dict[str, Any]:
     """Build the MongoDB query for detection_windows documents."""
+    if start_time.tzinfo is not None:
+        start_time = start_time.replace(tzinfo=None)
+    if end_time.tzinfo is not None:
+        end_time = end_time.replace(tzinfo=None)
     return {
         'host_triggers.' + hostname: {'$exists': True},
         'window_start': {
