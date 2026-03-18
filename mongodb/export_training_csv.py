@@ -43,6 +43,22 @@ Example usage:
         --end-time "2025-07-30T00:00:00" \
         --output-dir "./Training_data/attack/DESKTOP-64-EDR"
 
+    Batch jobs via CSV:
+        python mongodb/export_training_csv.py \
+            --config mongodb/mongodb_config.json \
+            --output-dir "./unused-when-using-jobs-csv" \
+            --jobs-csv mongodb/export_jobs_template.csv
+
+    jobs CSV format (times use YYYY-MM-DDTHH:MM:SS):
+        hostname,start_time,end_time,output_dir,db_name,collection,source_schema,window_size_minutes
+        DESKTOP-64-EDR,2025-07-29T00:00:00,2025-07-29T06:00:00,./Training_data/normal/DESKTOP-64-EDR,,,detection_windows,30
+
+    jobs CSV notes:
+    - db_name and collection can be left empty to use mongodb_config.json defaults
+    - source_schema can be detection_windows, raw, or left empty for auto-detect
+    - window_size_minutes controls the output window size used for CSV bucketing
+    - detection_windows exports are re-aggregated inside each target window by hostname + rule_id
+
 Python 3.6.8 Compatible
 """
 
@@ -327,6 +343,54 @@ def ensure_dir(path: str) -> None:
         os.makedirs(path)
 
 
+def aggregate_window_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Aggregate rows inside one output window by hostname + rule_id.
+
+    This is required when source MongoDB windows are smaller than the export
+    window size, for example two 15-minute detection_windows exported into one
+    30-minute CSV.
+    """
+    grouped = {}
+
+    for row in rows:
+        hostname = str(row.get('sysmon_hostname (custom)', '')).strip()
+        rule_id = str(row.get('Custom Rule', '')).strip()
+        if not hostname or not rule_id:
+            continue
+
+        count = normalize_count(row.get('Count'))
+        if count is None:
+            continue
+
+        timestamp_text = str(row.get('Log Source Time (Minimum)', '')).strip()
+        current_key = (hostname, rule_id)
+
+        if current_key not in grouped:
+            grouped[current_key] = {
+                'sysmon_hostname (custom)': hostname,
+                'Custom Rule': rule_id,
+                'Log Source Time (Minimum)': timestamp_text,
+                'Count': count,
+            }
+            continue
+
+        grouped[current_key]['Count'] += count
+
+        existing_ts = grouped[current_key].get('Log Source Time (Minimum)', '')
+        if timestamp_text and (not existing_ts or timestamp_text < existing_ts):
+            grouped[current_key]['Log Source Time (Minimum)'] = timestamp_text
+
+    aggregated_rows = list(grouped.values())
+    aggregated_rows.sort(
+        key=lambda row: (
+            str(row.get('sysmon_hostname (custom)', '')),
+            str(row.get('Custom Rule', ''))
+        )
+    )
+    return aggregated_rows
+
+
 def parse_jobs_csv(csv_path: str) -> List[Dict[str, Any]]:
     """Load batch export jobs from a CSV file."""
     jobs = []
@@ -457,7 +521,7 @@ def export_hostname_range(
 
     files_written = 0
     for window_start in sorted(window_rows.keys()):
-        rows = window_rows[window_start]
+        rows = aggregate_window_rows(window_rows[window_start])
         if not rows:
             continue
 
