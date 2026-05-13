@@ -617,6 +617,22 @@ def train_threat_detector(training_config: Dict, model_save_path: str = "./model
         joblib.dump(rf_model, model_save_path)
         logger.info("Model saved successfully")
 
+        # Save SHAP background data: random sample of benign training samples.
+        try:
+            background_path = os.path.join(model_dir, f"{base_name}_shap_background.npy")
+            max_bg_samples = int(training_config.get('shap_background_max_samples', 200))
+            X_train_arr = np.array(X_train)
+            y_train_arr = np.array(y_train)
+            benign_mask = y_train_arr == 0
+            pool = X_train_arr[benign_mask] if benign_mask.sum() >= 10 else X_train_arr
+            n_save = min(max_bg_samples, len(pool))
+            rng = np.random.RandomState(42)
+            background = pool[rng.choice(len(pool), size=n_save, replace=False)]
+            np.save(background_path, background)
+            logger.info(f"SHAP background saved: {background_path} ({background.shape[0]} benign samples)")
+        except Exception as e:
+            logger.warning(f"Failed to save SHAP background data: {e}")
+
         if tsne_enabled:
             try:
                 sample_X = np.asarray(X_train)

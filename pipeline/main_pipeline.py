@@ -1070,11 +1070,27 @@ class UnifiedPipeline:
                                         # Create single instance data for explanation
                                         instance_data = row_vec.reshape(1, -1)
 
-                                        # Apply SHAP explainer to this specific alert instance
-                                        # Use a subset of X as background data for efficiency
-                                        background_sample_size = min(100, X.shape[0])
-                                        background_indices = np.random.choice(X.shape[0], size=background_sample_size, replace=False)
-                                        background_data = X[background_indices]
+                                        # Load SHAP background from training benign samples; fall back to current batch
+                                        _shap_cfg = (self.config.get('detection', {}) or {}).get('shap', {}) or {}
+                                        _bg_sample_size = int(_shap_cfg.get('background_sample_size', 100))
+                                        background_data = None
+                                        try:
+                                            _model_path = self.config['training']['model_path']
+                                            _bg_dir = os.path.dirname(_model_path) or "."
+                                            _bg_base = os.path.splitext(os.path.basename(_model_path))[0]
+                                            _bg_path = os.path.join(_bg_dir, f"{_bg_base}_shap_background.npy")
+                                            if os.path.isfile(_bg_path):
+                                                _bg_full = np.load(_bg_path)
+                                                n_use = min(_bg_sample_size, len(_bg_full))
+                                                idx = np.random.choice(len(_bg_full), size=n_use, replace=False)
+                                                background_data = _bg_full[idx]
+                                                self.logger.info(f"SHAP background loaded: {background_data.shape} (from {len(_bg_full)} saved samples)")
+                                        except Exception as _bg_e:
+                                            self.logger.warning(f"Could not load SHAP background file: {_bg_e}")
+                                        if background_data is None:
+                                            _bg_size = min(_bg_sample_size, X.shape[0])
+                                            background_data = X[np.random.choice(X.shape[0], size=_bg_size, replace=False)]
+                                            self.logger.warning("SHAP background: using current detection batch (retrain to persist background)")
 
                                         # SHAP frequent path mining options from config (optional)
                                         shap_cfg = (self.config.get('detection', {}) or {}).get('shap', {}) or {}
