@@ -1,155 +1,219 @@
-# AIDetection – Unified Threat Detection Pipeline
+# AIDetection
 
-Supervised threat detection using QRadar rule trigger frequencies. The project trains a Random Forest classifier on labeled attack simulations and reuses the exact same processing path for detection to eliminate training–serving skew.
+**Supervised threat detection from QRadar rule telemetry.**
 
-## Project Goal
+AIDetection is an end-to-end machine learning pipeline for turning QRadar rule trigger frequencies into host-level threat detections. The project is built as an AI Engineering system, not a notebook experiment: it covers ingestion, schema normalization, feature engineering, model training, hyperparameter tuning, detection-time inference, SHAP explanations, and operational logging.
 
-- Build a high-recall detector that separates simulated attack windows from normal behavior.
-- Share the exact ingestion, aggregation, and feature engineering code between training and detection.
-- Produce interpretable outputs (feature importances, SHAP explanations) that security analysts can act on.
+> **Data boundary:** the real QRadar/Picus datasets and evaluation results were handled inside an internal regulated environment and cannot be exported. This public repository uses test/sanitized data and representative artifacts to show the engineering workflow without exposing internal security telemetry.
+
+## Why This Project Matters
+
+Security ML fails when offline training and live detection drift apart. This project is designed around one core principle:
+
+> Use the same data processing and feature engineering path for training and detection.
+
+That means CSV-based training data and MongoDB-backed detection windows are normalized early, then passed through the same aggregation and feature generation modules before model training or inference.
+
+## Project Snapshot
+
+| Area | Design |
+| --- | --- |
+| Problem | Binary detection of simulated attack behavior from QRadar rule activity |
+| Data source | Internal QRadar/Picus telemetry in the original environment; sanitized/test data in this repo |
+| Feature scale | About 700 rule-level features plus 2 feature families in the real environment |
+| Feature families | Each family groups dozens to 100+ related QRadar rules into broader behavioral signals |
+| Model | Random Forest classifier for sparse tabular security telemetry |
+| Optimization | Stratified split, class weighting, hyperparameter search, threshold tuning, false-positive review |
+| Explainability | Feature importance plus SHAP top-rule explanations for malicious predictions |
+| Operations | QRadar AQL jobs, MongoDB persistence, daily logs, detection thresholding, analyst-facing outputs |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Sources
+        A["Training CSVs<br/>normal + simulated attack"]
+        B["QRadar AQL Results"]
+        C["MongoDB Detection Windows"]
+    end
+
+    subgraph SharedPipeline["Shared Processing Pipeline"]
+        D["data_loader.py<br/>schema normalization"]
+        E["feature_aggregator.py<br/>time-window aggregation"]
+        F["feature_generator.py<br/>rule + family vectors"]
+    end
+
+    subgraph Training["Training Mode"]
+        G["Random Forest<br/>class-weighted training"]
+        H["Evaluation + tuning<br/>PR/ROC, calibration, feature importance"]
+    end
+
+    subgraph Detection["Detection Mode"]
+        I["Predictor<br/>label + confidence"]
+        J["SHAP Explainer<br/>top contributing rules"]
+        K["Logging / alert payload<br/>analyst review"]
+    end
+
+    A --> D
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    F --> I
+    I --> J
+    J --> K
+```
+
+## Optimization Workflow
+
+The public repository does not publish internal performance numbers. Instead, it documents the workflow used to optimize the detector.
+
+| Stage | What Was Optimized |
+| --- | --- |
+| Data normalization | Unified CSV and MongoDB inputs into `hostname`, `rule_id`, `timestamp`, `count`, and `source_label` |
+| Timestamp handling | Centralized QRadar timestamp parsing and window assignment |
+| Rule mapping | UAT-to-production rule mapping so training data aligns with production rule IDs |
+| Aggregation | Converted rule triggers into host-level time windows with sparse rule dictionaries |
+| Count shaping | Applied `log1p` count transformation before vectorization to reduce skew from high-volume rules |
+| Feature design | Combined about 700 rule-level features with 2 feature-family buckets for both granular and behavioral signals |
+| Model selection | Used Random Forest for tabular performance, interpretability, and fast iteration |
+| Imbalance handling | Used stratified splitting and class weighting because attack windows are rare |
+| Hyperparameter tuning | Tuned tree count, max depth, feature sampling, split constraints, leaf size, and class weights |
+| Threshold tuning | Treated alert threshold as a security operations decision, balancing missed detections and analyst workload |
+| Error analysis | Reviewed false positives, feature importance, PR/ROC artifacts, calibration, lift/gains charts, and SHAP explanations |
+
+## Repository Layout
+
+```text
+AIDetection/
+├── pipeline/
+│   ├── data_loader.py          # CSV/MongoDB ingestion and schema normalization
+│   ├── feature_aggregator.py   # Time-window aggregation and count shaping
+│   ├── feature_generator.py    # Rule/family vector generation
+│   ├── main_pipeline.py        # Unified train/detect orchestrator
+│   └── config.json             # Local pipeline configuration
+├── model_training/
+│   ├── model_training.py       # Random Forest training, tuning, evaluation artifacts
+│   ├── model_evaluation.py     # Standalone model evaluation helpers
+│   └── tsne_visualizer.py      # Diagnostic visualization utilities
+├── system/
+│   ├── shap_explainer.py       # SHAP explanation workflow
+│   └── logging_utils.py        # Daily logs and detection logging helpers
+├── mongodb/                    # MongoDB connection, insertion, cleanup utilities
+├── api_integration/            # QRadar search create/status/result/delete jobs
+├── shared_utils/               # Rule manager and time utilities
+├── Training_data/              # Public test/sanitized CSV examples
+├── model/                      # Representative generated artifacts
+├── tests/                      # Pipeline and module tests
+├── Makefile                    # venv-enforced install/test commands
+└── requirements.txt            # Python 3.6.8-compatible dependencies
+```
+
+## Core Modules
+
+### `pipeline/data_loader.py`
+
+Loads training and detection data into one standardized schema.
+
+- `mode='train'`: reads normal and attack CSVs from `Training_data/`
+- `mode='detect'`: queries MongoDB via `mongodb/mongodb_connection.py`
+- parses QRadar timestamps through `shared_utils/time_utils.py`
+- coerces rule IDs and counts into numeric types
+- applies basic missing-value policy
+
+### `pipeline/feature_aggregator.py`
+
+Turns raw rule triggers into model-ready time windows.
+
+- groups by window, hostname, source label, and source IP
+- creates `aggregated_rules` dictionaries
+- mirrors `aggregated_rules_dict` for compatibility
+- computes total events, unique rule counts, and window boundaries
+- applies `log1p` count shaping for modeling
+
+### `pipeline/feature_generator.py`
+
+Converts sparse rule dictionaries into dense feature vectors.
+
+- pulls rule ordering from `shared_utils/qradar_rule_manager.py`
+- supports rule-level and family-level feature representations
+- keeps feature layout stable between training and detection
+- returns `X` and `y` for training, `X` only for detection
+
+### `model_training/model_training.py`
+
+Trains and tunes the Random Forest detector.
+
+- uses stratified train/test split
+- supports class-weighted Random Forest training
+- supports configurable `GridSearchCV` / `RandomizedSearchCV`
+- writes evaluation artifacts, diagnostic charts, and feature-importance outputs
+
+### `model_predictor.py` and `system/shap_explainer.py`
+
+Serve detection-time predictions and explanations.
+
+- loads the persisted model artifact
+- returns prediction labels and positive-class probabilities
+- generates SHAP explanations for suspicious windows
+- prepares top contributing rules for analyst review
 
 ## Quick Start
 
-1. Activate the local venv (mandatory): `source venv/bin/activate`
-2. Install dependencies (Makefile enforces venv usage): `make install`
-3. Run the unified orchestrator from the repo root:
-   - Training: `python -m pipeline.main_pipeline train --config pipeline/config.json`
-   - Detection: `python -m pipeline.main_pipeline detect --config pipeline/config.json`
-4. Optional flags:
-   - `--config PATH` to supply an alternate JSON config.
-   - `--verbose` for debug-level logging.
+Use the project-local virtual environment. The Makefile is intentionally wired to `venv`.
 
-All code targets Python 3.6.8; pinned packages are listed in `requirements.txt`.
-
-## Unified Pipeline Overview
-
-```
-data_loader.py → feature_aggregator.py → feature_generator.py →
-  ├─ train: model_training.train_threat_detector → evaluate_and_report
-  └─ detect: model_predictor.Predictor → shap_explainer.Explainer → logging_utils
+```bash
+make install
+source venv/bin/activate
 ```
 
-- `pipeline/main_pipeline.py` (`UnifiedPipeline`) is the single entry point.
-- Modules are shared verbatim between training and detection to eliminate skew.
-- Aggregation output uses the `aggregated_rules` column and mirrors it to `aggregated_rules_dict` for backward compatibility.
+Run training:
 
-## Module Highlights
-
-- `pipeline/data_loader.py` – unified ingestion:
-  - `mode='train'`: reads CSVs from `Training_data/{normal,attack}` per paths in config.
-  - `mode='detect'`: queries MongoDB through `mongodb/mongodb_connection.py` for the last N minutes.
-  - Standardizes rows to `['hostname','rule_id','timestamp','count','source_label']` using `shared_utils/time_utils.parse_qradar_timestamp`.
-  - Coerces types (`rule_id`/`count` ints, `hostname` str) and applies basic NA handling.
-
-- `pipeline/feature_aggregator.py` – 30-minute window aggregation:
-  - Applies `np.log1p(count)` before grouping; stores raw integer totals in `aggregated_rules`.
-  - Adds helper metrics (total events, unique rules, window boundaries, optional `is_attack` in train mode).
-  - Provides both `aggregated_rules` and `aggregated_rules_dict` keys for downstream consumers.
-
-- `pipeline/feature_generator.py` – dense feature vectors:
-  - Uses `shared_utils/qradar_rule_manager.py` to obtain the ordered rule universe defined by the latest mapping.
-  - Generates consistent feature matrices (X) and labels (y, only in train mode).
-
-- `model_training/model_training.py` – training + evaluation helpers:
-  - `train_threat_detector(...)` loads data via the pipeline, stratified splits, trains `RandomForestClassifier`.
-  - `evaluate_and_report(...)` (in the same module) outputs confusion matrix, classification report, ROC AUC, feature importances.
-
-- `model_predictor.py` – inference wrapper for detection mode (`Predictor` class).
-- `system/shap_explainer.py` – SHAP explanations for malicious predictions.
-- `system/logging_utils.py` – central logging (daily rotating files in `running_log/` + stdout).
-
-## Training Workflow
-
-1. Place CSVs:
-   - Normal activity in `Training_data/normal/`
-   - Simulated attack windows in `Training_data/attack/`
-2. Update `pipeline/config.json` if custom paths or parameters are needed.
-3. Run `python -m pipeline.main_pipeline train --config pipeline/config.json`
-4. Outputs (default paths):
-   - Model artifact: `model/threat_detector.joblib`
-   - Reports: `model/threat_detector_evaluation_report.json`, `model/threat_detector_top_20_features.csv`
-5. Random Forest defaults (configurable):
-   - `n_estimators=200`, `class_weight='balanced_subsample'`, `max_features='sqrt'`, `random_state=42`, `n_jobs=-1`
-6. Stratified train/test split ensures attack prevalence is preserved across splits.
-
-## Detection Workflow
-
-1. Upstream QRadar jobs (see “MongoDB & QRadar Ingestion Jobs”) insert rule counts into MongoDB.
-2. Run `python -m pipeline.main_pipeline detect --config pipeline/config.json`
-3. Pipeline generates features, loads the trained model, and returns predictions and probabilities.
-4. Alerts trigger when the probability exceeds `detection.alert_threshold` from the config.
-5. Malicious predictions receive SHAP explanations (Top-N contributing rule IDs) and are logged via `system/logging_utils`.
-
-## Model Evaluation Deliverables
-
-- Confusion matrix (TP/FP/FN/TN).
-- Classification report (precision, recall, F1 – recall for label `1` is the primary KPI).
-- ROC AUC and Average Precision (configurable).
-- Top 20 most important QRadar rules (feature importances) exported to CSV.
-
-## MongoDB & QRadar Ingestion Jobs
-
-- `mongodb/mongodb_connection.py` – central manager reused across ingestion jobs and the pipeline.
-- `mongodb/insert_DB.py` (`AQLDataInserter`) – loads AQL JSON results into MongoDB for detection tests.
-- `api_integration/create_searches_Qradar.py`, `status_searches_Qradar.py`, `result_searches_Qradar.py`, `delete_searches_Qradar.py` – schedule and manage QRadar searches.
-- `mongodb/delete_DB.py` – retention cleanup (daily or on demand).
-- `mongodb/setup_mongodb_offline.py` – bootstrap collections/indexes for local development.
-- Configurations:
-  - Pipeline: `pipeline/config.json`
-  - MongoDB/AQL inserter: `mongodb/mongodb_config.json`
-
-## Project Layout (selected)
-
-```
-AIDetection/
-├── pipeline/                 # Unified pipeline modules and config
-├── model_training/           # Training + evaluation helpers
-├── model_predictor.py        # Detection-time predictor wrapper
-├── system/                   # Logging + SHAP explainers
-├── mongodb/                  # MongoDB utilities for detection ingestion
-├── api_integration/          # QRadar search orchestration scripts
-├── shared_utils/             # Time utilities and rule manager
-├── Training_data/            # Normal/attack CSV inputs
-├── model/                    # Generated model artifacts and reports
-├── tests/                    # Pytest suite covering pipeline components
-├── Makefile                  # `make install` / `make test` (enforces venv)
-└── requirements.txt          # Pinned Python dependencies
+```bash
+python -m pipeline.main_pipeline train --config pipeline/config.json
 ```
 
-Additional directories of interest:
-- `Qradar_rule/` – rule definitions used by `QRadarRuleManager` in file mode.
-- `Multi_model/` – experimental OOP pipeline prototypes (not part of the unified flow).
-- `test_output/` – generated plots/reports from exploratory runs.
-- `running_log/` – daily log files written by `logging_utils`.
+Run detection:
 
-## Testing & QA
+```bash
+python -m pipeline.main_pipeline detect --config pipeline/config.json
+```
 
-- Run the complete suite: `make test`
-- Frequently targeted tests:
-  - `tests/test_data_loader_detailed.py`
-  - `tests/test_feature_aggregator.py`
-  - `tests/test_pipeline_simple.py`
-  - `tests/test_model_evaluation.py`
-- Tests expect the local venv to be active and dependencies installed via `make install`.
+Run the focused test suite:
 
-## Data Schema Reference
+```bash
+make test
+```
 
-- Loader output: `hostname (str)`, `rule_id (int)`, `timestamp (datetime)`, `count (int)`, `source_label (str)`
-- Aggregated windows: `window_id`, `hostname`, `aggregated_rules` (dict of `{rule_id: total_count}`), mirrored `aggregated_rules_dict`, `total_events`, `unique_rules`, `window_start`, `window_end`, optional `is_attack`
+## Configuration Notes
 
-## Security Notes
+- Python target: `3.6.8`
+- Core model: `sklearn.ensemble.RandomForestClassifier`
+- Feature mode is configurable through `pipeline/config.json`
+- Detection threshold is configurable and should be tuned with analyst workload in mind
+- QRadar tokens, internal hosts, and live credentials should never be committed to a public repository
 
-- Training uses internally generated attack simulations; treat all data as internal-only.
-- Follow enterprise data handling policies when moving CSVs or MongoDB dumps.
-- Unified preprocessing and shared code paths prevent training–serving drift.
+## What This Demonstrates
 
-## Troubleshooting
+For AI Engineer interviews, this project is useful because it supports technical discussion beyond a single model call:
 
-- Python or dependency mismatch: recreate the venv and rerun `make install`.
-- MongoDB connectivity: verify `mongodb://localhost:27017/` (or configured URI) is reachable.
-- Timestamp parsing errors: confirm QRadar timestamps match `parse_qradar_timestamp` expectations.
-- Model loading issues: ensure the joblib model was produced with the pinned scikit-learn version.
+- how to define a supervised detection objective from security telemetry
+- how to prevent training-serving skew
+- how to engineer sparse tabular features from event data
+- how to handle rare positive classes
+- how to tune model hyperparameters and alert thresholds separately
+- how to make predictions explainable to analysts
+- how to package an ML detector into an operational pipeline
 
----
+## Limitations
 
-Built with Python 3.6.8, MongoDB, and scikit-learn (Random Forest).
+- Public data is sanitized/test-only and does not represent the full internal environment.
+- Internal performance metrics are intentionally not published.
+- The checked-in artifacts are workflow evidence, not production benchmarks.
+- Production use would require controlled validation, analyst review, credential management, and environment-specific deployment hardening.
+
+## Security Notice
+
+This repository is for defensive security analytics. The original project used simulated attack data from a trusted BAS workflow to build detection logic for internal monitoring. Treat all real QRadar exports, MongoDB dumps, and model artifacts derived from internal telemetry as sensitive.
